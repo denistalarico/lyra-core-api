@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   BadRequestException,
   Body,
@@ -56,6 +57,7 @@ export class LeadFlowAgentsController {
     private readonly operationsActionService: LeadFlowOperationsActionService,
   ) {}
 
+  @ClientAreaExposed('leadflow_agents')
   @Get()
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
   list(
@@ -143,6 +145,7 @@ export class LeadFlowAgentsController {
     return this.operationsActionService.cancel(ctx, actionId, dto);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Get('presets')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
   listPresets(
@@ -167,6 +170,7 @@ export class LeadFlowAgentsController {
     return this.agentService.getContextRuntimeConfig(ctx);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post('provision')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
   provision(
@@ -176,6 +180,7 @@ export class LeadFlowAgentsController {
     return this.agentService.provision(ctx, dto);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Get(':id')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
   getById(
@@ -185,6 +190,7 @@ export class LeadFlowAgentsController {
     return this.agentService.getById(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Patch(':id')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
   patch(
@@ -195,6 +201,7 @@ export class LeadFlowAgentsController {
     return this.agentService.patch(ctx, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post(':id/activate')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.activate)
   activate(
@@ -204,6 +211,7 @@ export class LeadFlowAgentsController {
     return this.agentService.activate(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post(':id/pause')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.pause)
   pause(
@@ -213,6 +221,7 @@ export class LeadFlowAgentsController {
     return this.agentService.pause(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post(':id/publish')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.publish)
   publish(
@@ -222,6 +231,7 @@ export class LeadFlowAgentsController {
     return this.agentService.publish(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post(':id/archive')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.pause)
   archive(
@@ -231,6 +241,7 @@ export class LeadFlowAgentsController {
     return this.agentService.archive(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post(':id/unarchive')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.pause)
   unarchive(

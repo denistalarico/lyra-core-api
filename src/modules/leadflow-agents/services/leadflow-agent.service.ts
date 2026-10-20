@@ -11,6 +11,7 @@ import { In, IsNull, Not, Repository } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
+import { CLIENT_AREA_ACTOR_ROLE } from '../../client-area/client-area.types';
 import { InboxConversationEntity } from '../../inbox/entities/inbox-conversation.entity';
 import { InboxChannelEntity } from '../../inbox/entities/inbox-channel.entity';
 import {
@@ -1178,6 +1179,16 @@ export class LeadFlowAgentService {
     ctx: RequestContext,
     permissionKey: string,
   ): Promise<boolean> {
+    // Only the Manager-bound exposed patch calls channel management. Its company and nested
+    // channel ids were proved by the bridge; developer powers never cross this surface.
+    if (ctx.role === CLIENT_AREA_ACTOR_ROLE)
+      return (
+        permissionKey === LEADFLOW_AGENTS_PERMISSIONS.channelManage &&
+        ctx.managedContext?.productKey === 'leadflow' &&
+        ctx.managedContext.operatingMode === 'client' &&
+        !!ctx.managedContext.clientId &&
+        !!ctx.managedContext.companyContextId
+      );
     if (!ctx.userId || !ctx.role) {
       return false;
     }

@@ -15,6 +15,11 @@ import {
 } from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
 import { ContactEntity } from '../contacts/entities/contact.entity';
+import { LeadFlowContactCompanyEntity } from '../contacts/entities/leadflow-contact-company.entity';
+import {
+  assertLeadFlowContactCompany,
+  leadFlowContactCompany,
+} from '../contacts/leadflow-contact-company-scope';
 import { ContactListEntity } from '../contacts/entities/contact-list.entity';
 import { ContactListMemberEntity } from '../contacts/entities/contact-list-member.entity';
 import { CreateContactListDto } from '../contacts/dto/create-contact-list.dto';
@@ -57,6 +62,7 @@ import { CreateContactSegmentDto } from '../contacts/dto/create-contact-segment.
 import { PatchContactSegmentDto } from '../contacts/dto/patch-contact-segment.dto';
 import { UpdateContactCompanyLinkDto } from '../contacts/dto/contact-company-link.dto';
 import { ClientAreaMembershipService } from '../client-area/services/client-area-membership.service';
+import { CLIENT_AREA_ACTOR_ROLE } from '../client-area/client-area.types';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -452,6 +458,12 @@ export class AgencyContactsService {
   ) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
+    await assertLeadFlowContactCompany(
+      manager ?? this.dataSource.manager,
+      ctx,
+      contactId,
+    );
+
     const contact = await (
       manager?.getRepository(ContactEntity) ?? this.contactsRepo
     ).findOne({
@@ -576,7 +588,15 @@ export class AgencyContactsService {
       createdByUserId: ctx.userId ?? null,
     });
 
-    return this.listsRepo.save(leadFlowList);
+    try {
+      return await this.listsRepo.save(leadFlowList);
+    } catch (error) {
+      const raced = await this.listsRepo.findOne({
+        where: { tenantId: ctx.tenantId, workspaceId, name: 'LeadFlow' },
+      });
+      if (raced) return raced;
+      throw error;
+    }
   }
 
   // Per-client sublist under the "LeadFlow" system list, so each client's
@@ -588,7 +608,13 @@ export class AgencyContactsService {
   ) {
     const workspaceId = this.requireWorkspaceId(ctx);
     const parent = await this.ensureLeadFlowSystemList(ctx);
-    const sourceContext = `client:${clientId}`;
+    if (ctx.role === CLIENT_AREA_ACTOR_ROLE) leadFlowContactCompany(ctx);
+    const company = ctx.managedContext?.companyContextId
+      ? leadFlowContactCompany(ctx)
+      : null;
+    const sourceContext = company
+      ? `company:${company.companyContextId}`
+      : `client:${clientId}`;
 
     const existing = await this.listsRepo.findOne({
       where: {
@@ -604,7 +630,10 @@ export class AgencyContactsService {
     }
 
     const baseName = (
-      clientName?.trim() || `Cliente ${clientId.slice(0, 8)}`
+      company
+        ? ctx.managedContext?.companyName?.trim() ||
+          `Empresa ${company.companyContextId.slice(0, 8)}`
+        : clientName?.trim() || `Cliente ${clientId.slice(0, 8)}`
     ).slice(0, 120);
 
     const buildList = (name: string) =>
@@ -612,7 +641,9 @@ export class AgencyContactsService {
         tenantId: ctx.tenantId,
         workspaceId,
         name,
-        description: 'Contatos do LeadFlow deste cliente.',
+        description: company
+          ? 'Contatos do LeadFlow desta empresa.'
+          : 'Contatos do LeadFlow deste cliente.',
         color: '#2563EB',
         parentListId: parent.id,
         visibility: 'workspace',
@@ -625,15 +656,45 @@ export class AgencyContactsService {
 
     try {
       return await this.listsRepo.save(buildList(baseName));
-    } catch {
+    } catch (error) {
+      // A concurrent creator may have committed the same company list.
+      const raced = await this.listsRepo.findOne({
+        where: {
+          tenantId: ctx.tenantId,
+          workspaceId,
+          parentListId: parent.id,
+          sourceContext,
+        },
+      });
+      if (raced) return raced;
+      if (
+        !(error instanceof QueryFailedError) ||
+        (error.driverError as { code?: string }).code !== '23505'
+      )
+        throw error;
       // The (workspace, name) uniqueness may collide with another list; fall
       // back to a name suffixed with the client id.
-      const suffixed = `${baseName} (${clientId.slice(0, 6)})`.slice(0, 120);
-      return this.listsRepo.save(buildList(suffixed));
+      const suffix = ` (${company?.companyContextId ?? clientId})`;
+      const suffixed = `${baseName.slice(0, 120 - suffix.length)}${suffix}`;
+      try {
+        return await this.listsRepo.save(buildList(suffixed));
+      } catch (fallbackError) {
+        const racedFallback = await this.listsRepo.findOne({
+          where: {
+            tenantId: ctx.tenantId,
+            workspaceId,
+            parentListId: parent.id,
+            sourceContext,
+          },
+        });
+        if (racedFallback) return racedFallback;
+        throw fallbackError;
+      }
     }
   }
 
   async getLeadFlowClientList(ctx: RequestContext) {
+    // Legacy Agency-only caller may still select a client-wide list. New company routes require the company before calling this method.
     const managedContext = ctx.managedContext;
 
     if (managedContext?.productKey === 'leadflow' && managedContext.clientId) {
@@ -677,23 +738,45 @@ export class AgencyContactsService {
   ) {
     const workspaceId = this.requireWorkspaceId(ctx);
 
-    const contact = await this.contactsRepo.save(
-      this.contactsRepo.create({
-        tenantId: ctx.tenantId,
-        workspaceId,
-        type: dto.type,
-        displayName: dto.displayName.trim(),
-        documentType: this.optionalString(dto.documentType),
-        documentNumber: this.optionalString(dto.documentNumber),
-        source: 'manual',
-        businessMode: 'agency_service',
-        lifecycleStage: 'lead',
-        lifecycleStages: ['lead'],
-        status: 'active',
-        ownerUserId: ctx.userId ?? null,
-        createdByUserId: ctx.userId ?? null,
-      }),
-    );
+    const company = ctx.managedContext?.companyContextId
+      ? leadFlowContactCompany(ctx)
+      : null;
+    if (ctx.role === CLIENT_AREA_ACTOR_ROLE && !company)
+      throw new NotFoundException('Contact not found.');
+    // Old Agency-only endpoint creates unclassified legacy contacts. The exposed company endpoint
+    // requires the company and never takes this branch; no client token enters the legacy route.
+    if (!company && ctx.managedContext?.productKey === 'leadflow')
+      ctx = { ...ctx, managedContext: undefined };
+    if (company && dto.clientId && dto.clientId !== company.agencyClientId)
+      throw new NotFoundException('Contact not found.');
+    if (company) dto = { ...dto, clientId: company.agencyClientId };
+
+    const candidate = this.contactsRepo.create({
+      tenantId: ctx.tenantId,
+      workspaceId,
+      type: dto.type,
+      displayName: dto.displayName.trim(),
+      documentType: this.optionalString(dto.documentType),
+      documentNumber: this.optionalString(dto.documentNumber),
+      source: 'manual',
+      businessMode: 'agency_service',
+      lifecycleStage: 'lead',
+      lifecycleStages: ['lead'],
+      status: 'active',
+      ownerUserId: ctx.userId ?? null,
+      createdByUserId: ctx.userId ?? null,
+    });
+    const contact = company
+      ? await this.dataSource.transaction(async (manager) => {
+          const saved = await manager
+            .getRepository(ContactEntity)
+            .save(candidate);
+          await manager
+            .getRepository(LeadFlowContactCompanyEntity)
+            .save({ ...company, contactId: saved.id, scopeKind: 'company' });
+          return saved;
+        })
+      : await this.contactsRepo.save(candidate);
 
     const methods: Array<Partial<ContactMethodEntity>> = [];
     if (dto.email?.trim()) {
@@ -1151,6 +1234,7 @@ export class AgencyContactsService {
   async deleteContact(ctx: RequestContext, contactId: string) {
     const workspaceId = this.requireWorkspaceId(ctx);
     return this.dataSource.transaction(async (manager) => {
+      await assertLeadFlowContactCompany(manager, ctx, contactId);
       const contacts = manager.getRepository(ContactEntity);
       const contact = await contacts.findOne({
         where: { id: contactId, tenantId: ctx.tenantId, workspaceId },
@@ -1175,6 +1259,7 @@ export class AgencyContactsService {
     const workspaceId = this.requireWorkspaceId(ctx);
     try {
       return await this.dataSource.transaction(async (manager) => {
+        await assertLeadFlowContactCompany(manager, ctx, contactId);
         const contacts = manager.getRepository(ContactEntity);
         const contact = await contacts.findOne({
           where: { id: contactId, tenantId: ctx.tenantId, workspaceId },
@@ -1254,6 +1339,7 @@ export class AgencyContactsService {
       'agency_contact_profiles',
       'agency_contact_bank_accounts',
       'contact_company_links',
+      'leadflow_contact_companies',
     ]);
     const columns = await manager.query<
       Array<{ table_name: string; columns: string[] }>
@@ -1373,6 +1459,20 @@ export class AgencyContactsService {
       .orderBy('contact.updatedAt', 'DESC')
       .take(limit)
       .skip(offset);
+
+    const company = leadFlowContactCompany(ctx);
+    if (company)
+      builder.andWhere(
+        `EXISTS(SELECT 1 FROM leadflow_contact_companies lcc
+      WHERE lcc.contact_id=contact.id AND lcc.tenant_id=:lfTenant AND lcc.workspace_id=:lfWorkspace
+      AND lcc.agency_client_id=:lfClient AND lcc.company_context_id=:lfCompany AND lcc.scope_kind='company')`,
+        {
+          lfTenant: company.tenantId,
+          lfWorkspace: company.workspaceId,
+          lfClient: company.agencyClientId,
+          lfCompany: company.companyContextId,
+        },
+      );
 
     if (query.q?.trim()) {
       builder.andWhere('contact.displayName ILIKE :q', {

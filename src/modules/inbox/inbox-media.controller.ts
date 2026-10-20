@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import { Controller, Get, Param, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { RequestContextData } from '../../common/context/request-context.decorator';
@@ -16,6 +17,7 @@ import { InboxMediaService } from './services/inbox-media.service';
 export class InboxMediaController {
   constructor(private readonly mediaService: InboxMediaService) {}
 
+  @ClientAreaExposed('leadflow_inbox')
   @Get(':mediaId/content')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',

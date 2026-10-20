@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   BadRequestException,
   Body,
@@ -82,6 +83,7 @@ export class CrmController {
    * The breakdown explains the number, so it needs the same visibility as the
    * record itself.
    */
+  @ClientAreaExposed('leadflow_crm')
   @Get('opportunities/:id/lead-score')
   @RequirePermission('leadflow.crm.records.view.client')
   getLeadScore(
@@ -114,12 +116,14 @@ export class CrmController {
     });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('tags')
   @RequirePermission('leadflow.crm.records.view.client')
   listTags(@RequestContextData() ctx: RequestContext) {
     return this.crmService.listTags(ctx);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Post('tags')
   @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
   createTag(
@@ -129,12 +133,14 @@ export class CrmController {
     return this.crmService.createTag(ctx, dto);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('tags/:id')
   @RequirePermission('leadflow.crm.records.view.client')
   getTag(@RequestContextData() ctx: RequestContext, @Param('id') id: string) {
     return this.crmService.getTag(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('tags/:id')
   @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
   patchTag(
@@ -155,12 +161,14 @@ export class CrmController {
     return this.crmService.deleteTag(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('pipelines')
   @RequirePermission('leadflow.crm.records.view.client')
   listPipelines(@RequestContextData() ctx: RequestContext) {
     return this.crmService.listPipelines(ctx);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Post('pipelines')
   @RequirePermission('leadflow.crm.pipeline.manage.admin')
   createPipeline(
@@ -170,6 +178,7 @@ export class CrmController {
     return this.crmService.createPipeline(ctx, dto);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('pipelines/:id')
   @RequirePermission('leadflow.crm.records.view.client')
   getPipeline(
@@ -179,6 +188,7 @@ export class CrmController {
     return this.crmService.getPipeline(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('pipelines/:id')
   @RequirePermission('leadflow.crm.pipeline.manage.admin')
   patchPipeline(
@@ -206,6 +216,7 @@ export class CrmController {
    * response says whether it actually resolved, so the UI can distinguish "this
    * mode has no qualification fields" from "we could not find the mode".
    */
+  @ClientAreaExposed('leadflow_crm')
   @Get('opportunity-fields')
   @RequirePermission('leadflow.crm.records.view.client')
   listOpportunityFields(
@@ -220,6 +231,7 @@ export class CrmController {
    * a code Analytics can count rather than free text. The mode's own reasons
    * come first, then the shared ones; an unknown mode still gets the shared set.
    */
+  @ClientAreaExposed('leadflow_crm')
   @Get('loss-reasons')
   @RequirePermission('leadflow.crm.records.view.client')
   listLossReasons(@Query('businessMode') businessMode?: string) {
@@ -313,6 +325,7 @@ export class CrmController {
     return this.transitionPolicies.deleteDraft(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('stages')
   @RequirePermission('leadflow.crm.records.view.client')
   listStages(
@@ -322,6 +335,7 @@ export class CrmController {
     return this.crmService.listStages(ctx, pipelineId);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Post('stages')
   @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
   createStage(
@@ -331,6 +345,7 @@ export class CrmController {
     return this.crmService.createStage(ctx, dto);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('stages/reorder')
   @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
   reorderStages(
@@ -340,12 +355,14 @@ export class CrmController {
     return this.crmService.reorderStages(ctx, dto);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('stages/:id')
   @RequirePermission('leadflow.crm.records.view.client')
   getStage(@RequestContextData() ctx: RequestContext, @Param('id') id: string) {
     return this.crmService.getStage(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('stages/:id')
   @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
   patchStage(
@@ -356,6 +373,7 @@ export class CrmController {
     return this.crmService.patchStage(ctx, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('stages/:id/fold')
   @RequirePermission('leadflow.crm.stage.manage.manager_or_admin')
   patchStageFold(
@@ -376,6 +394,7 @@ export class CrmController {
     return this.crmService.deleteStage(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('opportunities')
   @RequirePermission('leadflow.crm.records.view.client')
   listOpportunities(
@@ -407,6 +426,7 @@ export class CrmController {
     return this.crmService.listOpportunities(ctx, filters);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Post('opportunities')
   @RequirePermission('leadflow.crm.records.create.client')
   createOpportunity(
@@ -417,6 +437,7 @@ export class CrmController {
     return this.crmService.createOpportunity(ctx, dto, { idempotencyKey });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('opportunities/reorder')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -430,6 +451,7 @@ export class CrmController {
     return this.crmService.reorderOpportunities(ctx, dto, { idempotencyKey });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('opportunities/:id')
   @RequireAnyPermission(
     'leadflow.crm.records.view.assigned',
@@ -442,6 +464,7 @@ export class CrmController {
     return this.crmService.getOpportunity(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('opportunities/:id')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -456,6 +479,7 @@ export class CrmController {
     return this.crmService.patchOpportunity(ctx, id, dto, { idempotencyKey });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('opportunities/:id/stage')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -472,6 +496,7 @@ export class CrmController {
     });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Post('opportunities/:id/transfer')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -488,6 +513,7 @@ export class CrmController {
     });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Post('opportunities/:id/copy')
   @RequirePermission('leadflow.crm.records.create.client')
   copyOpportunity(
@@ -501,6 +527,7 @@ export class CrmController {
     });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Post('opportunities/:id/reconvert')
   @RequirePermission('leadflow.crm.records.create.client')
   reconvertOpportunity(
@@ -514,6 +541,7 @@ export class CrmController {
     });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('opportunities/:id/status')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -530,6 +558,7 @@ export class CrmController {
     });
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('opportunities/:id/card-color')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -574,6 +603,7 @@ export class CrmController {
     return this.crmService.setOpportunityAutonomyMode(ctx, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Patch('opportunities/:id/visibility')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -587,6 +617,7 @@ export class CrmController {
     return this.crmService.patchOpportunityVisibility(ctx, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('opportunities/:id/tags')
   @RequireAnyPermission(
     'leadflow.crm.records.view.assigned',
@@ -599,6 +630,7 @@ export class CrmController {
     return this.crmService.listOpportunityTags(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Post('opportunities/:id/tags')
   @RequireAnyPermission(
     'leadflow.crm.records.update.assigned',
@@ -626,6 +658,7 @@ export class CrmController {
     return this.crmService.removeOpportunityTag(ctx, id, tagId);
   }
 
+  @ClientAreaExposed('leadflow_crm')
   @Get('opportunities/:id/events')
   @RequireAnyPermission(
     'leadflow.crm.records.view.assigned',

@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   BadRequestException,
   Body,
@@ -61,6 +62,7 @@ export class InboxController {
     private readonly channelLifecycleService: InboxChannelLifecycleService,
   ) {}
 
+  @ClientAreaExposed('leadflow_inbox')
   @Get('channels')
   @RequirePermission('leadflow.channels.channel.view.client')
   listChannels(@RequestContextData() ctx: RequestContext) {
@@ -157,6 +159,7 @@ export class InboxController {
     );
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Get('conversations')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',
@@ -184,6 +187,7 @@ export class InboxController {
     return this.inboxService.listConversations(ctx, filters);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations')
   @RequirePermission('leadflow.inbox.conversation.reply.client')
   createConversation(
@@ -193,6 +197,7 @@ export class InboxController {
     return this.inboxService.createConversation(ctx, dto);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Get('conversations/:id')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',
@@ -206,6 +211,7 @@ export class InboxController {
     return this.inboxService.getConversation(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Patch('conversations/:id')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   patchConversation(
@@ -216,6 +222,7 @@ export class InboxController {
     return this.inboxService.patchConversation(ctx, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/mark-read')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',
@@ -228,6 +235,7 @@ export class InboxController {
     return this.inboxService.markConversationRead(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/mark-unread')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',
@@ -240,6 +248,7 @@ export class InboxController {
     return this.inboxService.markConversationUnread(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/archive')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.close.assigned',
@@ -252,6 +261,7 @@ export class InboxController {
     return this.inboxService.archiveConversation(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/unarchive')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.close.assigned',
@@ -264,6 +274,7 @@ export class InboxController {
     return this.inboxService.unarchiveConversation(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/pin')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleConversationPin(
@@ -273,6 +284,7 @@ export class InboxController {
     return this.inboxService.toggleConversationFlag(ctx, id, 'pinned');
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/favorite')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',
@@ -285,6 +297,7 @@ export class InboxController {
     return this.inboxService.toggleConversationFlag(ctx, id, 'favorite');
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/mute')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleConversationMute(
@@ -294,6 +307,7 @@ export class InboxController {
     return this.inboxService.toggleConversationFlag(ctx, id, 'muted');
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/block')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleConversationBlock(
@@ -303,6 +317,7 @@ export class InboxController {
     return this.inboxService.toggleConversationFlag(ctx, id, 'blocked');
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/assume')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   assumeConversation(
@@ -312,6 +327,7 @@ export class InboxController {
     return this.inboxService.assumeConversation(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/handoff')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   requestHandoff(
@@ -322,6 +338,7 @@ export class InboxController {
     return this.ownershipService.requestHandoff(ctx, id, body.reason);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/pause-ai')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   pauseAi(
@@ -332,6 +349,7 @@ export class InboxController {
     return this.ownershipService.transition(ctx, id, 'pause', body.reason);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/return-ai')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   returnAi(
@@ -342,6 +360,7 @@ export class InboxController {
     return this.ownershipService.transition(ctx, id, 'return_ai', body.reason);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/close')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.close.assigned',
@@ -508,6 +527,7 @@ export class InboxController {
     return this.inboxService.deleteConversation(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Get('conversations/:id/messages')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',
@@ -521,6 +541,7 @@ export class InboxController {
     return this.inboxService.listMessages(ctx, id);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/messages')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.reply.assigned',
@@ -534,6 +555,7 @@ export class InboxController {
     return this.inboxService.createMessage(ctx, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/messages/:messageId/reaction')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.reply.assigned',
@@ -548,6 +570,7 @@ export class InboxController {
     return this.inboxService.reactToMessage(ctx, id, messageId, body.emoji);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/messages/:messageId/pin')
   @RequirePermission('leadflow.inbox.conversation.assign.client')
   toggleMessagePin(
@@ -558,6 +581,7 @@ export class InboxController {
     return this.inboxService.toggleMessageFlag(ctx, id, messageId, 'pinned');
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('conversations/:id/messages/:messageId/favorite')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.view.assigned',

@@ -9,6 +9,7 @@ import type { RequestContext } from '../../common/context/request-context.interf
 import { CreateInboxChannelDto } from './dto/create-inbox-channel.dto';
 import { CreateInboxConversationDto } from './dto/create-inbox-conversation.dto';
 import { CreateInboxMessageDto } from './dto/create-inbox-message.dto';
+import { assertLeadFlowContactCompany } from '../contacts/leadflow-contact-company-scope';
 import { PatchInboxChannelDto } from './dto/patch-inbox-channel.dto';
 import { PatchInboxConversationDto } from './dto/patch-inbox-conversation.dto';
 import {
@@ -536,6 +537,13 @@ export class InboxService {
   ) {
     const now = new Date();
     const companyScope = resolveInboxCompanyScope(ctx);
+    if (dto.contactId)
+      await assertLeadFlowContactCompany(
+        this.conversationsRepository.manager,
+        ctx,
+        dto.contactId,
+        true,
+      );
 
     if (dto.channelId) {
       await this.findChannelForContext(ctx, dto.channelId);
@@ -617,6 +625,13 @@ export class InboxService {
     dto: PatchInboxConversationDto,
   ) {
     const conversation = await this.getConversation(ctx, id);
+    if (dto.contactId)
+      await assertLeadFlowContactCompany(
+        this.conversationsRepository.manager,
+        ctx,
+        dto.contactId,
+        true,
+      );
     if (dto.aiEnabled !== undefined) {
       throw new BadRequestException(
         'Use the explicit conversation ownership actions to change AI control.',

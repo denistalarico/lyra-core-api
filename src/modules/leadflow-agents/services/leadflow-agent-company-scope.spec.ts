@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
 import { LeadFlowAgentService } from './leadflow-agent.service';
+import { LEADFLOW_AGENTS_PERMISSIONS } from '../leadflow-agents.permissions';
 
 const ctx = {
   tenantId: '10000000-0000-4000-8000-000000000001',
@@ -26,9 +27,14 @@ function harness() {
     companyContextId: ctx.managedContext.companyContextId,
     businessModeKey: 'services',
   };
-  const agents = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null), save: jest.fn() };
+  const agents = {
+    find: jest.fn().mockResolvedValue([]),
+    findOne: jest.fn().mockResolvedValue(null),
+    save: jest.fn(),
+  };
   const settingsRepo = { findOne: jest.fn().mockResolvedValue(settings) };
   const channels = { find: jest.fn().mockResolvedValue([]) };
+  const permissionService = { can: jest.fn().mockResolvedValue(true) };
   const service = new LeadFlowAgentService(
     agents as never,
     {} as never,
@@ -39,15 +45,32 @@ function harness() {
     {} as never,
     { isCustomBusinessMode: jest.fn().mockReturnValue(false) } as never,
     {} as never,
-    { can: jest.fn().mockResolvedValue(true) } as never,
+    permissionService as never,
     {} as never,
     {} as never,
     channels as never,
   );
-  return { service, agents, settingsRepo, channels };
+  return { service, agents, settingsRepo, channels, permissionService };
 }
 
 describe('LeadFlowAgentService company scope closure', () => {
+  it('CA11 never asks Agency can() for a client actor and never grants developer powers', async () => {
+    const { service, permissionService } = harness();
+    const permissions = service as unknown as {
+      can: (context: typeof ctx, key: string) => Promise<boolean>;
+    };
+    const clientContext = {
+      ...ctx,
+      role: 'client_area_actor',
+    } as unknown as typeof ctx;
+    await expect(
+      permissions.can(clientContext, LEADFLOW_AGENTS_PERMISSIONS.channelManage),
+    ).resolves.toBe(true);
+    await expect(
+      permissions.can(clientContext, LEADFLOW_AGENTS_PERMISSIONS.developerManage),
+    ).resolves.toBe(false);
+    expect(permissionService.can).not.toHaveBeenCalled();
+  });
   it('lists only the selected company and scopes all root reads and writes', async () => {
     const { service, agents, settingsRepo } = harness();
 

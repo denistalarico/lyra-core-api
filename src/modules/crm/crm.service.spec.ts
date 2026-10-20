@@ -264,13 +264,40 @@ describe('CrmService agency validation', () => {
     expect(opportunityTagsRepository.save).not.toHaveBeenCalled();
   });
 
-  it('allows one shared Contact on opportunities in Company A and Company B', async () => {
-    const { service, pipelinesRepository, stagesRepository, contactsRepository, opportunityCommands } = createService();
-    pipelinesRepository.findOne.mockImplementation(async ({ where }: { where: { id: string } }) => mockPipeline(where.id));
-    stagesRepository.findOne.mockImplementation(async ({ where }: { where: { id: string } }) => mockStage(where.id, where.id.endsWith('-a') ? 'pipeline-a' : 'pipeline-b'));
+  it('CA11 confines a canonical Contact to Company A and rejects Company B before writing', async () => {
+    const {
+      service,
+      pipelinesRepository,
+      stagesRepository,
+      contactsRepository,
+      opportunityCommands,
+    } = createService();
+    pipelinesRepository.findOne.mockImplementation(
+      async ({ where }: { where: { id: string } }) => mockPipeline(where.id),
+    );
+    stagesRepository.findOne.mockImplementation(
+      async ({ where }: { where: { id: string } }) =>
+        mockStage(
+          where.id,
+          where.id.endsWith('-a') ? 'pipeline-a' : 'pipeline-b',
+        ),
+    );
     contactsRepository.findOne.mockResolvedValue({ id: 'shared-contact' });
+    contactsRepository.manager = {
+      query: jest.fn((_sql: string, values: unknown[]) =>
+        Promise.resolve(
+          values[3] === '20000000-0000-4000-8000-000000000010'
+            ? [{ contact_id: 'shared-contact' }]
+            : [],
+        ),
+      ),
+    };
 
-    const createForCompany = (companyContextId: string, pipelineId: string, stageId: string) =>
+    const createForCompany = (
+      companyContextId: string,
+      pipelineId: string,
+      stageId: string,
+    ) =>
       service.createOpportunity(companyCtx(companyContextId), {
         pipelineId,
         stageId,
@@ -278,14 +305,28 @@ describe('CrmService agency validation', () => {
         title: 'Mesmo contato',
       });
 
-    await createForCompany('20000000-0000-4000-8000-000000000010', 'pipeline-a', 'stage-a');
-    await createForCompany('20000000-0000-4000-8000-000000000020', 'pipeline-b', 'stage-b');
+    await createForCompany(
+      '20000000-0000-4000-8000-000000000010',
+      'pipeline-a',
+      'stage-a',
+    );
+    await expect(
+      createForCompany(
+        '20000000-0000-4000-8000-000000000020',
+        'pipeline-b',
+        'stage-b',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
 
-    expect(opportunityCommands.createOpportunity).toHaveBeenCalledTimes(2);
-    expect(opportunityCommands.createOpportunity.mock.calls.map((call) => call[1])).toEqual(
+    expect(opportunityCommands.createOpportunity).toHaveBeenCalledTimes(1);
+    expect(
+      opportunityCommands.createOpportunity.mock.calls.map((call) => call[1]),
+    ).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ contactId: 'shared-contact', companyContextId: '20000000-0000-4000-8000-000000000010' }),
-        expect.objectContaining({ contactId: 'shared-contact', companyContextId: '20000000-0000-4000-8000-000000000020' }),
+        expect.objectContaining({
+          contactId: 'shared-contact',
+          companyContextId: '20000000-0000-4000-8000-000000000010',
+        }),
       ]),
     );
   });

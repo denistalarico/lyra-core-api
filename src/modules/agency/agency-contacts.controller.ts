@@ -22,7 +22,10 @@ import {
   PermissionsGuard,
   RequireAnyPermission,
   RequirePermission,
+  RequireProductEntitlement,
 } from '../permissions';
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
+import { leadFlowContactCompany } from '../contacts/leadflow-contact-company-scope';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { MAX_IMAGE_UPLOAD_BYTES } from '../../common/files/files.service';
@@ -197,6 +200,70 @@ export class AgencyContactsController {
     @Body() dto: CreateContactDto,
   ) {
     return this.agencyContactsService.createContact(ctx, dto);
+  }
+
+  /** Company-only resource routes share the Agency service; legacy shared-contact routes stay Agency-only. */
+  private requireLeadFlowCompany(ctx: RequestContext) {
+    if (!leadFlowContactCompany(ctx))
+      throw new BadRequestException('Company context is required.');
+  }
+
+  @Get('leadflow/company-contacts')
+  @ClientAreaExposed('leadflow_crm')
+  @RequireProductEntitlement('leadflow')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  listLeadFlowCompanyContacts(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: ListAgencyContactsQuery,
+  ) {
+    this.requireLeadFlowCompany(ctx);
+    return this.agencyContactsService.listContacts(ctx, query);
+  }
+
+  @Post('leadflow/company-contacts')
+  @ClientAreaExposed('leadflow_crm')
+  @RequireProductEntitlement('leadflow')
+  @RequirePermission('shared.contacts.create')
+  createLeadFlowCompanyContact(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CreateLeadFlowContactDto,
+  ) {
+    this.requireLeadFlowCompany(ctx);
+    return this.agencyContactsService.createLeadFlowContact(ctx, dto);
+  }
+
+  @Get('leadflow/company-contacts/:contactId')
+  @ClientAreaExposed('leadflow_crm')
+  @RequireProductEntitlement('leadflow')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  getLeadFlowCompanyContact(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+  ) {
+    this.requireLeadFlowCompany(ctx);
+    return this.agencyContactsService.getContactDetail(ctx, contactId);
+  }
+
+  @Patch('leadflow/company-contacts/:contactId')
+  @ClientAreaExposed('leadflow_crm')
+  @RequireProductEntitlement('leadflow')
+  @RequireAnyPermission(...CONTACT_UPDATE_PERMISSIONS)
+  patchLeadFlowCompanyContact(
+    @RequestContextData() ctx: RequestContext,
+    @Param('contactId') contactId: string,
+    @Body() dto: PatchContactDto,
+  ) {
+    this.requireLeadFlowCompany(ctx);
+    return this.agencyContactsService.patchContact(ctx, contactId, dto);
+  }
+
+  @Get('leadflow/company-list')
+  @ClientAreaExposed('leadflow_crm')
+  @RequireProductEntitlement('leadflow')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  getLeadFlowCompanyContactList(@RequestContextData() ctx: RequestContext) {
+    this.requireLeadFlowCompany(ctx);
+    return this.agencyContactsService.getLeadFlowClientList(ctx);
   }
 
   @Post('leadflow')

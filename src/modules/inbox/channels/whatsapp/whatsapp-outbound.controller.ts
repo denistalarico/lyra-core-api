@@ -1,7 +1,10 @@
+import { assertClientAreaMediaIntent } from '../../../leadflow-client-area/leadflow-client-media-intent';
+import { ClientAreaExposed } from '../../../client-area/client-area.decorators';
 import {
   Body,
   Controller,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -33,6 +36,7 @@ export class WhatsAppOutboundController {
     private readonly whatsappOutboundService: WhatsAppOutboundService,
   ) {}
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('send-text')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.reply.assigned',
@@ -61,6 +65,7 @@ export class WhatsAppOutboundController {
     };
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('send-media')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.reply.assigned',
@@ -71,7 +76,17 @@ export class WhatsAppOutboundController {
     @RequestContextData() ctx: RequestContext,
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: SendWhatsAppMediaDto,
+    @Query('conversationId') guardedConversationId?: string,
+    @Query('channelId') guardedChannelId?: string,
+    @Query('to') guardedTo?: string,
   ) {
+    assertClientAreaMediaIntent(
+      ctx,
+      dto,
+      guardedConversationId,
+      guardedChannelId,
+      guardedTo,
+    );
     const result = await this.whatsappOutboundService.sendMedia({
       ctx,
       channelId: dto.channelId,

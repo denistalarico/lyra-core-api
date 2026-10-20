@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
@@ -17,6 +18,7 @@ import { InboxSettingsService } from './inbox-settings.service';
 export class InboxSettingsController {
   constructor(private readonly inboxSettingsService: InboxSettingsService) {}
 
+  @ClientAreaExposed('leadflow_inbox')
   @Get()
   // Admins manage settings, but Inbox operators (managers/members) also need to
   // read active channels/tags/quick replies to run the Inbox itself.
@@ -30,6 +32,7 @@ export class InboxSettingsController {
     return this.inboxSettingsService.getSettings(ctx);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Patch()
   @RequirePermission('leadflow.settings.general.update.admin')
   patchSettings(

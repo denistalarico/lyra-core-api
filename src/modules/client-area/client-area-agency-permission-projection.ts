@@ -18,6 +18,83 @@ const grant = (
 ): ClientAreaAgencyGrant => ({ key, methods, scope });
 
 const writes = ['POST', 'PATCH', 'PUT', 'DELETE'];
+/** CA11 — module levels never expand through the Agency role/Owner path. */
+function projectLeadFlowPermissions(
+  module: ClientAreaModuleKey,
+  level: ClientAreaAccessLevel,
+): readonly ClientAreaAgencyGrant[] {
+  const own = level === 'operator' ? 'created_by_me' : 'client';
+  if (module === 'leadflow_inbox') {
+    const reads = [
+      grant('leadflow.channels.channel.view.client', read),
+      grant('leadflow.inbox.conversation.view.client', read),
+    ];
+    if (level === 'viewer') return reads;
+    return [
+      ...reads,
+      grant('leadflow.inbox.conversation.reply.client', ['POST'], own),
+      grant(
+        'leadflow.inbox.conversation.assign.client',
+        ['POST', 'PATCH'],
+        own,
+      ),
+      grant('leadflow.inbox.conversation.close.client', ['POST'], own),
+      grant('leadflow.inbox.conversation.view.client', ['POST'], own),
+      ...(level === 'manager'
+        ? [grant('leadflow.settings.general.update.admin', ['PATCH'])]
+        : []),
+    ];
+  }
+  if (module === 'leadflow_crm') {
+    const reads = [
+      grant('leadflow.crm.records.view.client', read),
+      grant('shared.contacts.view.client', read),
+    ];
+    if (level === 'viewer') return reads;
+    return [
+      ...reads,
+      grant('leadflow.crm.records.create.client', ['POST']),
+      grant('shared.contacts.create', ['POST']),
+      grant('leadflow.crm.records.update.client', ['PATCH', 'POST'], own),
+      grant('shared.contacts.update.client', ['PATCH'], own),
+      ...(level === 'manager'
+        ? [
+            grant('leadflow.crm.pipeline.manage.admin', ['POST', 'PATCH']),
+            grant('leadflow.crm.stage.manage.manager_or_admin', [
+              'POST',
+              'PATCH',
+            ]),
+          ]
+        : []),
+    ];
+  }
+  if (module === 'leadflow_appointments') {
+    const reads = [grant('leadflow.appointments.item.view.client', read)];
+    return level === 'viewer'
+      ? reads
+      : [
+          ...reads,
+          grant('leadflow.appointments.item.create.client', ['POST']),
+          grant(
+            'leadflow.appointments.item.update.client',
+            ['PATCH', 'POST'],
+            own,
+          ),
+        ];
+  }
+  if (module === 'leadflow_agents') {
+    const reads = [grant('leadflow.agents.agent.view.client', read)];
+    return level !== 'manager'
+      ? reads
+      : [
+          ...reads,
+          ...['configure', 'activate', 'deactivate', 'publish'].map((action) =>
+            grant(`leadflow.agents.agent.${action}.admin`, ['POST', 'PATCH']),
+          ),
+        ];
+  }
+  return [];
+}
 /** CA10 — §3.3 Planner (with publishing and media), Studio and Campaigns rows. Manager-only and
  * cost-bearing routes sharing a key with ordinary writes are narrowed by the Social scope adapter;
  * keys used only by media-spend routes carry `cost` here. Planner/Studio deletes stay unexposed. */
@@ -90,6 +167,8 @@ export function projectAgencyPermissions(
   level: ClientAreaAccessLevel | null,
 ): readonly ClientAreaAgencyGrant[] {
   if (!level) return [];
+  if (module.startsWith('leadflow_'))
+    return projectLeadFlowPermissions(module, level);
   if (module !== 'agency_projects')
     return projectSocialPermissions(module, level);
   const reads = [

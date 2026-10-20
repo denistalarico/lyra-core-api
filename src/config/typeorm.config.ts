@@ -54,6 +54,7 @@ import { PasswordResetEntity } from '../modules/auth/entities/password-reset.ent
 import { EmailTwoFactorCodeEntity } from '../modules/auth/entities/email-2fa-code.entity';
 
 import { ContactEntity } from '../modules/contacts/entities/contact.entity';
+import { LeadFlowContactCompanyEntity } from '../modules/contacts/entities/leadflow-contact-company.entity';
 import { ContactMethodEntity } from '../modules/contacts/entities/contact-method.entity';
 import { ContactAddressEntity } from '../modules/contacts/entities/contact-address.entity';
 import { ContactListEntity } from '../modules/contacts/entities/contact-list.entity';
@@ -434,6 +435,7 @@ import {
 } from '../modules/client-conversations/entities';
 
 export const agencyEntities = [
+  LeadFlowContactCompanyEntity,
   LeadFlowAnalyticsDashboardEntity,
   ClientAreaIdentityPreferencesEntity,
   ClientAreaMemberModuleAccessEntity,

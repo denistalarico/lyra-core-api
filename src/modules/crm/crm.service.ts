@@ -15,6 +15,7 @@ import {
 import { RequestContext } from '../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
 import { ContactEntity } from '../contacts/entities/contact.entity';
+import { assertLeadFlowContactCompany } from '../contacts/leadflow-contact-company-scope';
 import { CreateCrmOpportunityDto } from './dto/create-crm-opportunity.dto';
 import { CreateCrmPipelineDto } from './dto/create-crm-pipeline.dto';
 import { CreateCrmStageDto } from './dto/create-crm-stage.dto';
@@ -1536,6 +1537,13 @@ export class CrmService {
     if (!contact) {
       throw new NotFoundException('Contact not found.');
     }
+
+    await assertLeadFlowContactCompany(
+      this.contactsRepository.manager,
+      ctx,
+      contactId,
+      true,
+    );
 
     if (contact.status === 'archived') {
       throw new BadRequestException(

@@ -1,7 +1,10 @@
+import { assertClientAreaMediaIntent } from '../../../leadflow-client-area/leadflow-client-media-intent';
+import { ClientAreaExposed } from '../../../client-area/client-area.decorators';
 import {
   Body,
   Controller,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -26,6 +29,7 @@ import { FacebookMessengerOutboundService } from './services/facebook-messenger-
 export class FacebookMessengerOutboundController {
   constructor(private readonly outbound: FacebookMessengerOutboundService) {}
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('send-text')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.reply.assigned',
@@ -39,6 +43,7 @@ export class FacebookMessengerOutboundController {
     return this.response(result);
   }
 
+  @ClientAreaExposed('leadflow_inbox')
   @Post('send-media')
   @RequireAnyPermission(
     'leadflow.inbox.conversation.reply.assigned',
@@ -54,7 +59,17 @@ export class FacebookMessengerOutboundController {
     @RequestContextData() ctx: RequestContext,
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: SendFacebookMessengerMediaDto,
+    @Query('conversationId') guardedConversationId?: string,
+    @Query('channelId') guardedChannelId?: string,
+    @Query('to') guardedTo?: string,
   ) {
+    assertClientAreaMediaIntent(
+      ctx,
+      dto,
+      guardedConversationId,
+      guardedChannelId,
+      guardedTo,
+    );
     const result = await this.outbound.sendMedia({ ...dto, ctx, file });
     return this.response(result);
   }

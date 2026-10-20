@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -33,6 +34,7 @@ import { LeadFlowAgendaService } from './leadflow-agenda.service';
 export class LeadFlowAgendaController {
   constructor(private readonly agendaService: LeadFlowAgendaService) {}
 
+  @ClientAreaExposed('leadflow_appointments')
   @Get('items')
   @RequireAnyPermission(
     'leadflow.appointments.item.view.assigned',
@@ -42,6 +44,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.listItems(context);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Get('appointments')
   @RequireAnyPermission(
     'leadflow.appointments.item.view.assigned',
@@ -51,6 +54,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.listAppointments(context);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Get('appointments/:id')
   @RequireAnyPermission(
     'leadflow.appointments.item.view.assigned',
@@ -63,6 +67,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.getAppointment(context, id);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Post('appointments')
   @RequirePermission('leadflow.appointments.item.create.client')
   createAppointment(
@@ -72,6 +77,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.createAppointment(context, dto);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Patch('appointments/:id')
   @RequireAnyPermission(
     'leadflow.appointments.item.update.assigned',
@@ -85,6 +91,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.patchAppointment(context, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Patch('appointments/:id/lifecycle-status')
   @RequireAnyPermission(
     'leadflow.appointments.item.update.assigned',
@@ -108,6 +115,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.deleteAppointment(context, id);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Get('appointments/:id/participants')
   @RequireAnyPermission(
     'leadflow.appointments.item.view.assigned',
@@ -120,6 +128,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.listAppointmentParticipants(context, id);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Post('appointments/:id/participants')
   @RequireAnyPermission(
     'leadflow.appointments.item.update.assigned',
@@ -133,6 +142,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.addAppointmentParticipant(context, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Patch('appointments/:id/participants/:participantId/response')
   @RequireAnyPermission(
     'leadflow.appointments.item.update.assigned',
@@ -152,6 +162,7 @@ export class LeadFlowAgendaController {
     );
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Get('appointments/:id/reminders')
   @RequireAnyPermission(
     'leadflow.appointments.item.view.assigned',
@@ -164,6 +175,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.listAppointmentReminders(context, id);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Post('appointments/:id/reminders')
   @RequireAnyPermission(
     'leadflow.appointments.item.update.assigned',
@@ -177,6 +189,7 @@ export class LeadFlowAgendaController {
     return this.agendaService.addAppointmentReminder(context, id, dto);
   }
 
+  @ClientAreaExposed('leadflow_appointments')
   @Post('appointments/:id/reminders/:reminderId/cancel')
   @RequireAnyPermission(
     'leadflow.appointments.item.update.assigned',
