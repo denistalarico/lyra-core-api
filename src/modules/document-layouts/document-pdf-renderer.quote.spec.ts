@@ -73,7 +73,7 @@ function buildHtml(items: QuoteItemEntity[], customerName?: string | null) {
 }
 
 function findRow(html: string, text: string) {
-  const rows = html.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/g) ?? [];
+  const rows: string[] = html.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/g) ?? [];
   const row = rows.find((candidate) => candidate.includes(text));
   expect(row).toBeDefined();
   return row!;
