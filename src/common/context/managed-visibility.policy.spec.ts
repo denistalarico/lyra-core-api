@@ -31,25 +31,42 @@ function listControllerFiles(directory: string): string[] {
   return files;
 }
 
+const ENTITLEMENT = /@RequireProductEntitlement\(\s*'leadflow'\s*\)/g;
+const HTTP_ROUTE = /@(?:Get|Post|Put|Patch|Delete)\(\s*'([^']*)'\s*\)/;
+
 /**
- * Every controller that declares the LeadFlow entitlement, with the route
- * prefix it is mounted on. Read from source so a new controller joins this
- * matrix automatically instead of quietly escaping it.
+ * Every route that declares the LeadFlow entitlement. A class-level
+ * declaration governs the controller prefix; a method-level one governs that
+ * method's full path, so a mixed controller (agency directory + LeadFlow
+ * company routes) is classified route by route. Read from source so a new
+ * controller joins this matrix automatically instead of quietly escaping it.
  */
 function listLeadFlowControllerRoutes(): { file: string; route: string }[] {
-  return listControllerFiles(MODULES_ROOT)
-    .map((file) => {
-      const source = readFileSync(file, 'utf8');
+  return listControllerFiles(MODULES_ROOT).flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    const base = /@Controller\(\s*'([^']*)'\s*\)/.exec(source)?.[1];
+    const classStart = source.search(/^export class /m);
 
-      if (!/@RequireProductEntitlement\(\s*'leadflow'\s*\)/.test(source)) {
-        return null;
-      }
+    if (base === undefined) return [];
 
-      const route = /@Controller\(\s*'([^']*)'\s*\)/.exec(source)?.[1];
+    return [...source.matchAll(ENTITLEMENT)].flatMap((match) => {
+      const at = match.index;
 
-      return route === undefined ? null : { file, route };
-    })
-    .filter((entry): entry is { file: string; route: string } => entry !== null);
+      if (classStart === -1 || at < classStart) return [{ file, route: base }];
+
+      // The decorator stack of the method: from the blank line above it to
+      // the method signature below it.
+      const start = source.lastIndexOf('\n\n', at);
+      const signature = source.slice(at).search(/^\s+(?:async\s+)?\w+\(/m);
+      const stack = source.slice(
+        start,
+        signature === -1 ? undefined : at + signature,
+      );
+      const leaf = HTTP_ROUTE.exec(stack)?.[1] ?? '';
+
+      return [{ file, route: [base, leaf].filter(Boolean).join('/') }];
+    });
+  });
 }
 
 describe('managed visibility policy (LF-RF-F12-002)', () => {
@@ -141,9 +158,9 @@ describe('managed visibility policy (LF-RF-F12-002)', () => {
       expect(resolveVisibilityDomainForRoute('agency/projects/123')?.key).toBe(
         'agency.projects',
       );
-      expect(resolveVisibilityDomainForRoute('/agency/finance/bills')?.key).toBe(
-        'agency.finance',
-      );
+      expect(
+        resolveVisibilityDomainForRoute('/agency/finance/bills')?.key,
+      ).toBe('agency.finance');
     });
 
     it('does not match a prefix that is only a string prefix of a route', () => {
@@ -166,5 +183,14 @@ describe('managed visibility policy (LF-RF-F12-002)', () => {
     });
 
     expect(uncovered).toEqual([]);
+
+    // A mixed controller is classified per route: the CA11 company contacts
+    // are operational, the agency directory is not part of this matrix.
+    const contacts = routes
+      .filter(({ file }) => file.endsWith('agency-contacts.controller.ts'))
+      .map(({ route }) => [route, resolveVisibilityDomainForRoute(route)?.key]);
+    expect(contacts).toHaveLength(5);
+    for (const [route, key] of contacts)
+      expect({ route, key }).toEqual({ route, key: 'leadflow.contacts' });
   });
 });

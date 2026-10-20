@@ -133,6 +133,22 @@ const OPERATIONAL_DOMAINS: VisibilityDomainPolicy[] = [
       'not comparable across companies.',
   },
   {
+    key: 'leadflow.contacts',
+    productKey: 'leadflow',
+    allowedScopes: ACTIVE_ONLY,
+    // CA11: only the company endpoints carry the LeadFlow entitlement; the
+    // rest of `agency/contacts` is the agency directory, outside this matrix.
+    routePrefixes: [
+      'agency/contacts/leadflow/company-contacts',
+      'agency/contacts/leadflow/company-list',
+    ],
+    authority:
+      'contacts (canonical) + leadflow_contact_companies, one company per contact',
+    rationale:
+      'A LeadFlow lead belongs operationally to exactly one company; a ' +
+      'consolidated list would show one client’s leads to another.',
+  },
+  {
     key: 'leadflow.agents',
     productKey: 'leadflow',
     allowedScopes: ACTIVE_ONLY,
