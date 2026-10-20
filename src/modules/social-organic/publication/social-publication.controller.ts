@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -69,6 +70,7 @@ export class SocialPublicationController {
    * declaration order, so the parameterized route would otherwise swallow
    * `/capabilities` and answer with a uuid parse error.
    */
+  @ClientAreaExposed('social_planner')
   @Get('capabilities')
   @RequirePermission(VIEW_PERMISSION)
   capabilities() {
@@ -98,6 +100,7 @@ export class SocialPublicationController {
    * Declared before `@Get(':publicationId')` for the same route-ordering
    * reason as `capabilities`.
    */
+  @ClientAreaExposed('social_planner')
   @Get('targets')
   @RequirePermission(VIEW_PERMISSION)
   async targets(@RequestContextData() ctx: RequestContext) {
@@ -111,6 +114,7 @@ export class SocialPublicationController {
     };
   }
 
+  @ClientAreaExposed('social_planner')
   @Get()
   @RequirePermission(VIEW_PERMISSION)
   async list(
@@ -125,6 +129,7 @@ export class SocialPublicationController {
     return { items: items.map(toSocialPublicationView), total };
   }
 
+  @ClientAreaExposed('social_planner')
   @Get(':publicationId')
   @RequirePermission(VIEW_PERMISSION)
   async get(
@@ -139,6 +144,7 @@ export class SocialPublicationController {
     return toSocialPublicationView(publication);
   }
 
+  @ClientAreaExposed('social_planner')
   @Post()
   @RequirePermission(CREATE_PERMISSION)
   async create(
@@ -154,6 +160,7 @@ export class SocialPublicationController {
     return toSocialPublicationView(publication);
   }
 
+  @ClientAreaExposed('social_planner')
   @Post(':publicationId/publish-now')
   @RequirePermission(PUBLISH_NOW_PERMISSION)
   async publishNow(
@@ -182,6 +189,7 @@ export class SocialPublicationController {
    * Requiring the create permission would let someone schedule new posts but
    * not fix the time of the one they just scheduled.
    */
+  @ClientAreaExposed('social_planner')
   @Patch(':publicationId/schedule')
   @RequirePermission(PUBLISH_NOW_PERMISSION)
   async reschedule(
@@ -198,6 +206,7 @@ export class SocialPublicationController {
     return toSocialPublicationView(publication);
   }
 
+  @ClientAreaExposed('social_planner')
   @Post(':publicationId/cancel')
   @RequirePermission(CANCEL_PERMISSION)
   async cancel(
@@ -213,6 +222,7 @@ export class SocialPublicationController {
     return toSocialPublicationView(publication);
   }
 
+  @ClientAreaExposed('social_planner')
   @Post(':publicationId/retry')
   @RequirePermission(CREATE_PERMISSION)
   async retry(

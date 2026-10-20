@@ -60,6 +60,7 @@ import { SocialCampaignsModule } from './modules/social-campaigns';
 import { SocialCreativeStudioModule } from './modules/social-creative-studio/social-creative-studio.module';
 import { SocialAnalyticsDashboardsModule } from './modules/social-analytics-dashboards/social-analytics-dashboards.module';
 import { SocialApprovalsModule } from './modules/social-approvals/social-approvals.module';
+import { SocialClientAreaModule } from './modules/social-client-area/social-client-area.module';
 import { ClientAreaModule } from './modules/client-area/client-area.module';
 import { ClientConversationApprovalsModule } from './modules/client-conversations/client-conversation-approvals.module';
 import { ClientConversationsModule } from './modules/client-conversations/client-conversations.module';
@@ -131,6 +132,7 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     SocialCreativeStudioModule,
     SocialAnalyticsDashboardsModule,
     SocialApprovalsModule,
+    SocialClientAreaModule,
     ClientAreaModule,
     ClientConversationsModule,
     // AP3 — the Client Area approvals surface. Wired here rather than inside

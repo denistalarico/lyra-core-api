@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -64,6 +65,7 @@ export class DestinationCreativeController {
     private readonly destinationCreativeService: DestinationCreativeService,
   ) {}
 
+  @ClientAreaExposed('social_planner')
   @Get('content/:contentId/creatives')
   @RequirePermission(VIEW_PERMISSION)
   list(
@@ -82,6 +84,7 @@ export class DestinationCreativeController {
    * a new one. It mirrors `PUT /content/:contentId/destinations`, which
    * replaces that set for the same reason.
    */
+  @ClientAreaExposed('social_planner')
   @Put('destinations/:destinationId/creative')
   @RequirePermission(UPDATE_PERMISSION)
   replace(
@@ -97,6 +100,7 @@ export class DestinationCreativeController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Put('destinations/:destinationId/creatives')
   @RequirePermission(UPDATE_PERMISSION)
   replaceCollection(
@@ -112,6 +116,7 @@ export class DestinationCreativeController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Delete('destinations/:destinationId/creative')
   @RequirePermission(UPDATE_PERMISSION)
   @HttpCode(HttpStatus.NO_CONTENT)

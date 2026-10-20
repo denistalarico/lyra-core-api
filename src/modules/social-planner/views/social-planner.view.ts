@@ -15,6 +15,8 @@ export function toSocialPlanView(plan: SocialPlanEntity) {
     primaryObjective: plan.primaryObjective,
     strategyMode: plan.strategyMode,
     summary: plan.summary,
+    // CA10 — the author, so the Client Area offers Operator actions only on own rows (§3.3).
+    createdById: plan.createdById,
     createdAt: plan.createdAt,
     updatedAt: plan.updatedAt,
   };
@@ -73,6 +75,8 @@ export function toSocialContentItemView(
      * cannot see.
      */
     archivedAt: item.archivedAt,
+    // CA10 — the author, so the Client Area offers Operator actions only on own rows (§3.3).
+    createdById: item.createdById,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };

@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -111,12 +112,14 @@ export class SocialPlannerController {
     private readonly socialApprovalsService: SocialApprovalsService,
   ) {}
 
+  @ClientAreaExposed('social_planner')
   @Get('plans')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listPlans(@RequestContextData() ctx: RequestContext) {
     return this.socialPlannerService.listPlans(this.requireScope(ctx));
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('plans')
   @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
   createPlan(
@@ -130,6 +133,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Get('plans/:planId')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   getPlan(
@@ -139,6 +143,7 @@ export class SocialPlannerController {
     return this.socialPlannerService.getPlan(this.requireScope(ctx), planId);
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('plans/:planId')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   updatePlan(
@@ -154,6 +159,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('plans/:planId/archive')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   archivePlan(
@@ -193,6 +199,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Get('plans/:planId/content')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listContent(
@@ -211,6 +218,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('plans/:planId/content')
   @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
   createContent(
@@ -226,6 +234,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Get('content/:contentId')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   getContent(
@@ -238,6 +247,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('content/:contentId')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   updateContent(
@@ -253,6 +263,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Put('content/:contentId/destinations')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   replaceDestinations(
@@ -273,6 +284,7 @@ export class SocialPlannerController {
    * Duplicating creates content, so it answers to the CREATE permission — the
    * same reasoning that governs converting an idea.
    */
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/duplicate')
   @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
   duplicateContent(
@@ -294,6 +306,7 @@ export class SocialPlannerController {
    * content may tidy it away and bring it back. Charging them to the owner-only
    * delete key would make routine housekeeping need an owner.
    */
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/archive')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   archiveContent(
@@ -307,6 +320,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/restore')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   restoreContent(
@@ -380,6 +394,7 @@ export class SocialPlannerController {
    * legal but is dropped by enough proxies and clients that the selection would
    * silently arrive empty.
    */
+  @ClientAreaExposed('social_planner')
   @Post('content/batch/archive')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   archiveContentBatch(
@@ -393,6 +408,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('content/batch/restore')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   restoreContentBatch(
@@ -428,6 +444,7 @@ export class SocialPlannerController {
    * would be theatre. What keeps it safe is what the serializer leaves out and
    * neutralizes, not a stricter key.
    */
+  @ClientAreaExposed('social_planner')
   @Get('plans/:planId/content/export')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   async exportPlanContent(
@@ -451,6 +468,7 @@ export class SocialPlannerController {
     return csv;
   }
 
+  @ClientAreaExposed('social_planner')
   @Get('content/:contentId/revisions')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listRevisions(
@@ -463,6 +481,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/revisions')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   createRevision(
@@ -497,6 +516,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/revisions/:revisionId/restore')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   restoreRevision(
@@ -518,6 +538,7 @@ export class SocialPlannerController {
    * Availability does not depend on an existing content item. The plan-create
    * dialog calls this before offering a paid generation path.
    */
+  @ClientAreaExposed('social_planner')
   @Get('generation-availability')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   copyGenerationAvailability() {
@@ -534,6 +555,7 @@ export class SocialPlannerController {
    * Reading runs and proposals answers to the view permission, like every other
    * read in this controller.
    */
+  @ClientAreaExposed('social_planner')
   @Get('content/:contentId/copy-generation')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listCopyGeneration(
@@ -546,6 +568,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/copy-generation')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   requestCopyGeneration(
@@ -567,6 +590,7 @@ export class SocialPlannerController {
    * contract where generation and application were the same request could not
    * express that.
    */
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/copy-generation/accept')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   acceptCopyProposals(
@@ -582,6 +606,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/copy-generation/reject')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   rejectCopyProposals(
@@ -597,6 +622,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Get('copy-generation/:runId')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   getCopyGenerationRun(
@@ -609,6 +635,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('copy-generation/:runId/cancel')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   cancelCopyGenerationRun(
@@ -627,6 +654,7 @@ export class SocialPlannerController {
    * than a single status, so a request where four of twenty items were already
    * running reports exactly that.
    */
+  @ClientAreaExposed('social_planner')
   @Post('content/batch/copy-generation')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   requestCopyGenerationForSelection(
@@ -640,6 +668,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('plans/:planId/copy-generation')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   requestCopyGenerationForPlan(
@@ -665,6 +694,7 @@ export class SocialPlannerController {
    * date. Country and business mode default to what the Brand Kit and the
    * client's LeadFlow settings already declare.
    */
+  @ClientAreaExposed('social_planner')
   @Get('commemorative-dates')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listCommemorativeDates(
@@ -685,6 +715,7 @@ export class SocialPlannerController {
    * directly rather than a run id — one provider call the operator waits for,
    * not a queue. See `SocialPlanGenerationService` for why.
    */
+  @ClientAreaExposed('social_planner')
   @Post('plans/:planId/generate')
   @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
   generatePlan(
@@ -702,6 +733,7 @@ export class SocialPlannerController {
 
   // -------------------------------------------------------------- campaigns
 
+  @ClientAreaExposed('social_planner')
   @Get('campaign-templates')
   @RequirePermission(SOCIAL_CAMPAIGN_VIEW_PERMISSION)
   listCampaignTemplates(@RequestContextData() ctx: RequestContext) {
@@ -710,6 +742,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('campaign-templates')
   @RequirePermission(SOCIAL_CAMPAIGN_CREATE_PERMISSION)
   createCampaignTemplate(
@@ -723,6 +756,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('campaign-templates/:templateId')
   @RequirePermission(SOCIAL_CAMPAIGN_UPDATE_PERMISSION)
   updateCampaignTemplate(
@@ -738,12 +772,14 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Get('campaigns')
   @RequirePermission(SOCIAL_CAMPAIGN_VIEW_PERMISSION)
   listCampaigns(@RequestContextData() ctx: RequestContext) {
     return this.socialCampaignService.listCampaigns(this.requireScope(ctx));
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('campaigns')
   @RequirePermission(SOCIAL_CAMPAIGN_CREATE_PERMISSION)
   createCampaign(
@@ -757,6 +793,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('campaigns/:campaignId')
   @RequirePermission(SOCIAL_CAMPAIGN_UPDATE_PERMISSION)
   updateCampaign(
@@ -774,12 +811,14 @@ export class SocialPlannerController {
 
   // ---------------------------------------------------------------- pillars
 
+  @ClientAreaExposed('social_planner')
   @Get('pillars')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listPillars(@RequestContextData() ctx: RequestContext) {
     return this.socialCampaignService.listPillars(this.requireScope(ctx));
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('pillars')
   @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
   createPillar(
@@ -793,6 +832,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('pillars/:pillarId')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   updatePillar(
@@ -813,6 +853,7 @@ export class SocialPlannerController {
    * concern here: this path is `plans/:planId/pillar-coverage`, which is
    * strictly longer and cannot be shadowed by the single-segment route.
    */
+  @ClientAreaExposed('social_planner')
   @Get('plans/:planId/pillar-coverage')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   getPillarCoverage(
@@ -827,6 +868,7 @@ export class SocialPlannerController {
 
   // ---------------------------------------------------------------- backlog
 
+  @ClientAreaExposed('social_planner')
   @Get('ideas')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listIdeas(
@@ -839,6 +881,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('ideas')
   @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
   createIdea(
@@ -852,6 +895,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('ideas/:ideaId')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   updateIdea(
@@ -867,6 +911,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('ideas/:ideaId/discard')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   discardIdea(
@@ -884,6 +929,7 @@ export class SocialPlannerController {
    * Conversion creates planned content, so it requires the CREATE permission
    * rather than the update one that governs editing the idea itself.
    */
+  @ClientAreaExposed('social_planner')
   @Post('ideas/:ideaId/convert')
   @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
   convertIdea(
@@ -907,6 +953,7 @@ export class SocialPlannerController {
     return resolveCompanyAwareScope(ctx);
   }
 
+  @ClientAreaExposed('social_planner')
   @Get('settings')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   getSettings(@RequestContextData() ctx: RequestContext) {
@@ -915,6 +962,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('settings')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   updateSettings(
@@ -928,6 +976,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Get('cadence')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   getCadence(@RequestContextData() ctx: RequestContext) {
@@ -936,6 +985,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('cadence')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
   updateCadence(

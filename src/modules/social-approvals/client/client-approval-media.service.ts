@@ -18,6 +18,34 @@ import {
 
 const AGENCY_CONNECTION = 'agency';
 
+const EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
+};
+
+/** ASCII, header-safe and bounded: the name travels in Content-Disposition. */
+export function deliverableFileName(
+  assetName: string,
+  versionNumber: number,
+  mimeType: string,
+): string {
+  const base =
+    assetName
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80)
+      .toLowerCase() || 'entrega';
+  const extension = EXTENSIONS[mimeType.toLowerCase()];
+  return `${base}-v${versionNumber}${extension ? `.${extension}` : ''}`;
+}
+
 /**
  * AP3 — the Client Area media boundary (§26–§28).
  *
@@ -109,6 +137,53 @@ export class ClientApprovalMediaService {
       companyContextId: scope.companyContextId!,
       mediaAssetId,
     });
+  }
+
+  /**
+   * CA10 / R-23 — the deliverable: the original file of the *approved*
+   * version. Same chain as `resolve`, plus the approval must be approved
+   * (any other status, or a text revision, is the same 404). The file name is
+   * derived from the asset name and the version, never from storage.
+   */
+  async resolveDeliverable(
+    scope: CompanyAwareScope,
+    approvalId: string,
+  ): Promise<{ media: ResolvedMediaAsset; fileName: string }> {
+    const approval = await this.approvals.findVisible(scope, approvalId);
+    if (
+      approval.status !== 'approved' ||
+      approval.subjectType !== 'creative_version'
+    )
+      throw new NotFoundException('Mídia não encontrada.');
+    const asset = await this.assets.findOne({
+      where: {
+        id: approval.subjectId,
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId!,
+        companyContextId: scope.companyContextId!,
+      },
+    });
+    if (!asset) throw new NotFoundException('Mídia não encontrada.');
+    const version = await this.versions.findOne({
+      where: { id: approval.subjectRevisionId, creativeAssetId: asset.id },
+    });
+    if (!version) throw new NotFoundException('Mídia não encontrada.');
+    const media = await this.media.resolve({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId: scope.agencyClientId!,
+      companyContextId: scope.companyContextId!,
+      mediaAssetId: version.mediaAssetId,
+    });
+    return {
+      media,
+      fileName: deliverableFileName(
+        asset.name,
+        version.versionNumber,
+        media.mimeType,
+      ),
+    };
   }
 
   private mediaAssetIdFor(

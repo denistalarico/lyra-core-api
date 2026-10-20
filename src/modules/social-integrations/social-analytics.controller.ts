@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { RequestContextData } from '../../common/context/request-context.decorator';
@@ -73,6 +74,7 @@ export class SocialAnalyticsController {
    * Takes no query parameters at all. The scope is the authenticated context,
    * and there is nothing else to ask.
    */
+  @ClientAreaExposed('social_campaigns')
   @Get('connections')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -120,6 +122,7 @@ export class SocialAnalyticsController {
    * day of no delivery from a day never synced, and would draw the same line
    * through both.
    */
+  @ClientAreaExposed('social_campaigns')
   @Get('timeseries')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

@@ -203,4 +203,31 @@ export class ClientAreaApprovalsController {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     file.body.pipe(response);
   }
+
+  /**
+   * CA10 / R-23 — download of the deliverable: the original file of the
+   * approved version, as an attachment. Opaque like `media/:mediaRef`: the
+   * approval is the only handle; anything not approved is 404.
+   */
+  @Get(':approvalId/download')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  async download(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+    @Res() response: Response,
+  ) {
+    const { media, fileName } = await this.media.resolveDeliverable(
+      toCompanyAwareScope(context),
+      approvalId,
+    );
+    const file = await this.files.getPrivateAsset(media.storagePath);
+    response.setHeader('Content-Type', media.mimeType);
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${fileName}"`,
+    );
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    file.body.pipe(response);
+  }
 }

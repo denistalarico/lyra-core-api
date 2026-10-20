@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -58,6 +59,7 @@ const UPLOAD_OPTIONS = {
 export class CreativeProductionController {
   constructor(private readonly production: CreativeProductionService) {}
 
+  @ClientAreaExposed('social_creative_studio')
   @Get(':contentItemId')
   @RequirePermission(P.view)
   view(

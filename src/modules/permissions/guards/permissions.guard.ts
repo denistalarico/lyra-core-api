@@ -347,7 +347,10 @@ export class PermissionsGuard implements CanActivate {
           (grant.cost === 'ai' && !context.allowAiCostActions) ||
           (grant.cost === 'media' && !context.allowMediaSpendActions)
         )
-          throw new ForbiddenException('Cost actions are disabled.');
+          throw new ForbiddenException({
+            code: 'client_area_cost_action_disabled',
+            message: 'Cost actions are disabled.',
+          });
         try {
           await this.clientAreaScopes!.assertClientAreaScope(
             context,

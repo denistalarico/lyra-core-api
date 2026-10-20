@@ -17,13 +17,81 @@ const grant = (
   scope: ClientAreaAgencyGrant['scope'] = 'client',
 ): ClientAreaAgencyGrant => ({ key, methods, scope });
 
+const writes = ['POST', 'PATCH', 'PUT', 'DELETE'];
+/** CA10 — §3.3 Planner (with publishing and media), Studio and Campaigns rows. Manager-only and
+ * cost-bearing routes sharing a key with ordinary writes are narrowed by the Social scope adapter;
+ * keys used only by media-spend routes carry `cost` here. Planner/Studio deletes stay unexposed. */
+function projectSocialPermissions(
+  module: ClientAreaModuleKey,
+  level: ClientAreaAccessLevel,
+): readonly ClientAreaAgencyGrant[] {
+  const own = level === 'operator' ? 'created_by_me' : 'client';
+  if (module === 'social_planner') {
+    const reads = [
+      grant('social.planner.calendar.view.client', read),
+      grant('social.campaigns.campaign.view.client', read),
+      grant('social.publishing.publication.view.assigned', read),
+      grant('social.publishing.media.view.assigned', read),
+    ];
+    if (level === 'viewer') return reads;
+    const operator = [
+      ...reads,
+      grant('social.planner.calendar.create.manager', ['POST']),
+      grant('social.planner.calendar.update.manager', writes, own),
+      grant('social.publishing.media.upload.manager', ['POST']),
+    ];
+    if (level === 'operator') return operator;
+    return [
+      ...operator,
+      grant('social.campaigns.campaign.create.manager', ['POST']),
+      grant('social.campaigns.campaign.update.manager', ['PATCH']),
+      grant('social.publishing.publication.create.manager', ['POST']),
+      grant('social.publishing.publication.publish_now.manager', [
+        'POST',
+        'PATCH',
+      ]),
+      grant('social.publishing.publication.cancel.manager', ['POST']),
+    ];
+  }
+  if (module === 'social_creative_studio') {
+    const reads = [grant('social.creative.content.view.assigned', read)];
+    if (level === 'viewer') return reads;
+    return [
+      ...reads,
+      grant('social.creative.content.create_draft.assigned', ['POST']),
+      grant('social.creative.content.update.assigned', ['POST', 'PATCH'], own),
+    ];
+  }
+  if (module === 'social_campaigns') {
+    const reads = [
+      grant('social.ads.campaign.view.client', read),
+      grant('social.analytics.reports.view.operational', read),
+    ];
+    if (level !== 'manager') return reads;
+    const media = (key: string): ClientAreaAgencyGrant => ({
+      ...grant(key, ['POST']),
+      cost: 'media',
+    });
+    return [
+      ...reads,
+      grant('social.ads.campaign.manage.admin_or_explicit', ['POST', 'PATCH']),
+      media('social.ads.status.execute.admin_or_explicit'),
+      media('social.ads.budget.execute.admin_or_explicit'),
+      media('social.ads.schedule.execute.admin_or_explicit'),
+    ];
+  }
+  return [];
+}
+
 /** Explicit, method-bound grants: several existing Projects routes reuse a key for reads and writes.
  * CA10/CA11 append audited product projections here; no wildcard/Agency Owner expansion. */
 export function projectAgencyPermissions(
   module: ClientAreaModuleKey,
   level: ClientAreaAccessLevel | null,
 ): readonly ClientAreaAgencyGrant[] {
-  if (module !== 'agency_projects' || !level) return [];
+  if (!level) return [];
+  if (module !== 'agency_projects')
+    return projectSocialPermissions(module, level);
   const reads = [
     grant('agency.projects.project.view.assigned', read),
     grant('agency.tasks.task.update.assigned', read),

@@ -1,5 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
-import { ClientApprovalMediaService } from './client-approval-media.service';
+import {
+  ClientApprovalMediaService,
+  deliverableFileName,
+} from './client-approval-media.service';
 
 /**
  * AP3 §62 — the media security matrix.
@@ -193,5 +196,78 @@ describe('AP3 client media boundary', () => {
     await expect(
       service.resolve(scope, 'approval-a', 'content'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  describe('CA10 / R-23 deliverable download', () => {
+    const approved = { ...approvalA, status: 'approved' };
+
+    it('serves the original file of the approved version with a derived name', async () => {
+      const { service, media } = build({
+        approval: approved,
+        asset: { id: 'asset-a', name: 'Lançamento: Verão 2026!' },
+        version: {
+          id: 'version-a',
+          creativeAssetId: 'asset-a',
+          versionNumber: 3,
+          mediaAssetId: 'media-a',
+          thumbnailMediaAssetId: 'thumb-a',
+        },
+      });
+
+      const result = await service.resolveDeliverable(scope, 'approval-a');
+
+      expect(result.fileName).toBe('lancamento-verao-2026-v3.png');
+      expect(media.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({ mediaAssetId: 'media-a' }),
+      );
+    });
+
+    it('is 404 for every approval that is not approved, before any lookup', async () => {
+      for (const status of [
+        'awaiting_client',
+        'changes_requested',
+        'superseded',
+        'cancelled',
+      ]) {
+        const { service, assets, media } = build({
+          approval: { ...approvalA, status },
+        });
+        await expect(
+          service.resolveDeliverable(scope, 'approval-a'),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        expect(assets.findOne).not.toHaveBeenCalled();
+        expect(media.resolve).not.toHaveBeenCalled();
+      }
+    });
+
+    it('is 404 for an approved text revision, a foreign asset or a foreign version', async () => {
+      for (const overrides of [
+        {
+          approval: {
+            ...approved,
+            subjectType: 'planner_content_revision',
+          },
+        },
+        { approval: approved, asset: null },
+        { approval: approved, version: null },
+        { approval: approved, resolved: null },
+        { approval: null },
+      ]) {
+        const { service } = build(overrides);
+        await expect(
+          service.resolveDeliverable(scope, 'approval-a'),
+        ).rejects.toBeInstanceOf(NotFoundException);
+      }
+    });
+
+    it('keeps the attachment name ASCII and bounded', () => {
+      expect(deliverableFileName('', 1, 'video/mp4')).toBe('entrega-v1.mp4');
+      expect(deliverableFileName('"; rm -rf /', 2, 'application/x')).toBe(
+        'rm-rf-v2',
+      );
+      expect(
+        deliverableFileName('a'.repeat(300), 1, 'image/jpeg'),
+      ).toHaveLength(80 + '-v1.jpg'.length);
+    });
   });
 });

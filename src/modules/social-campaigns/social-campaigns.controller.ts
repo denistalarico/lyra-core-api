@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -120,6 +121,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Get('meta/actions/availability')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -128,6 +130,7 @@ export class SocialCampaignsController {
     return this.manualActions.availability();
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Get('meta/actions/policy')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -157,6 +160,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Get('meta/actions/history')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -172,6 +176,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Post('meta/actions/status/preflight')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -188,6 +193,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Post('meta/actions/status/:actionId/confirm')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -207,6 +213,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Post('meta/actions/budget/preflight')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -223,6 +230,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Post('meta/actions/budget/:actionId/confirm')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -242,6 +250,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Post('meta/actions/schedule/preflight')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -258,6 +267,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Post('meta/actions/schedule/:actionId/confirm')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -313,6 +323,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Get('meta/recommendations/availability')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -321,6 +332,7 @@ export class SocialCampaignsController {
     return this.recommendations.availability();
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Get('meta/recommendations')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -336,6 +348,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Post('meta/recommendations/generate')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -351,6 +364,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Get('meta/monitor')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -378,6 +392,7 @@ export class SocialCampaignsController {
   }
 
   /** Evaluates the local mirror now. It never calls or mutates Meta. */
+  @ClientAreaExposed('social_campaigns')
   @Post('meta/monitor/evaluate')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -389,6 +404,7 @@ export class SocialCampaignsController {
     return this.monitor.evaluate(this.requireScope(ctx), dto.connectionId);
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Patch('meta/alerts/:alertId/acknowledge')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -404,6 +420,7 @@ export class SocialCampaignsController {
     );
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Get('meta/hierarchy')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -424,6 +441,7 @@ export class SocialCampaignsController {
     });
   }
 
+  @ClientAreaExposed('social_campaigns')
   @Get('boost-templates')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

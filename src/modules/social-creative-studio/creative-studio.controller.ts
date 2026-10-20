@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -62,17 +63,22 @@ export class CreativeStudioController {
     private readonly brandContext: CreativeStudioBrandContextService,
     private readonly versionApprovals: CreativeVersionApprovalService,
   ) {}
-  @Get('brand-context') @RequirePermission(VIEW) brandContextForStudio(
-    @RequestContextData() ctx: RequestContext,
-  ) {
+  @ClientAreaExposed('social_creative_studio')
+  @Get('brand-context')
+  @RequirePermission(VIEW)
+  brandContextForStudio(@RequestContextData() ctx: RequestContext) {
     return this.brandContext.load(creativeStudioScope(ctx));
   }
-  @Get('assets') @RequirePermission(VIEW) list(
+  @ClientAreaExposed('social_creative_studio')
+  @Get('assets')
+  @RequirePermission(VIEW)
+  list(
     @RequestContextData() ctx: RequestContext,
     @Query() query: ListCreativeAssetsQueryDto,
   ) {
     return this.assets.list(creativeStudioScope(ctx), query);
   }
+  @ClientAreaExposed('social_creative_studio')
   @Post('assets')
   @RequirePermission(CREATE)
   @UseInterceptors(FileInterceptor('file', UPLOAD_OPTIONS))
@@ -86,7 +92,10 @@ export class CreativeStudioController {
       ...dto,
     });
   }
-  @Get('assets/:id/content') @RequirePermission(VIEW) async content(
+  @ClientAreaExposed('social_creative_studio')
+  @Get('assets/:id/content')
+  @RequirePermission(VIEW)
+  async content(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
     @Query('versionId') versionId: string | undefined,
@@ -94,7 +103,10 @@ export class CreativeStudioController {
   ) {
     await this.stream(ctx, id, false, versionId, response);
   }
-  @Get('assets/:id/thumbnail') @RequirePermission(VIEW) async thumbnail(
+  @ClientAreaExposed('social_creative_studio')
+  @Get('assets/:id/thumbnail')
+  @RequirePermission(VIEW)
+  async thumbnail(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
     @Query('versionId') versionId: string | undefined,
@@ -102,12 +114,16 @@ export class CreativeStudioController {
   ) {
     await this.stream(ctx, id, true, versionId, response);
   }
-  @Get('assets/:id/versions') @RequirePermission(VIEW) versions(
+  @ClientAreaExposed('social_creative_studio')
+  @Get('assets/:id/versions')
+  @RequirePermission(VIEW)
+  versions(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.assets.versionsFor(creativeStudioScope(ctx), id);
   }
+  @ClientAreaExposed('social_creative_studio')
   @Post('assets/:id/versions')
   @RequirePermission(UPDATE)
   @UseInterceptors(FileInterceptor('file', UPLOAD_OPTIONS))
@@ -138,25 +154,35 @@ export class CreativeStudioController {
   ) {
     return this.assets.archive(creativeStudioScope(ctx), id);
   }
-  @Get('assets/:id') @RequirePermission(VIEW) detail(
+  @ClientAreaExposed('social_creative_studio')
+  @Get('assets/:id')
+  @RequirePermission(VIEW)
+  detail(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.assets.detail(creativeStudioScope(ctx), id);
   }
-  @Patch('assets/:id') @RequirePermission(UPDATE) update(
+  @ClientAreaExposed('social_creative_studio')
+  @Patch('assets/:id')
+  @RequirePermission(UPDATE)
+  update(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCreativeAssetDto,
   ) {
     return this.assets.update(creativeStudioScope(ctx), id, dto);
   }
-  @Get('folders') @RequirePermission(VIEW) foldersList(
-    @RequestContextData() ctx: RequestContext,
-  ) {
+  @ClientAreaExposed('social_creative_studio')
+  @Get('folders')
+  @RequirePermission(VIEW)
+  foldersList(@RequestContextData() ctx: RequestContext) {
     return this.folders.list(creativeStudioScope(ctx));
   }
-  @Post('folders') @RequirePermission(CREATE) createFolder(
+  @ClientAreaExposed('social_creative_studio')
+  @Post('folders')
+  @RequirePermission(CREATE)
+  createFolder(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateCreativeFolderDto,
   ) {
@@ -166,7 +192,10 @@ export class CreativeStudioController {
       dto,
     );
   }
-  @Patch('folders/:id') @RequirePermission(UPDATE) updateFolder(
+  @ClientAreaExposed('social_creative_studio')
+  @Patch('folders/:id')
+  @RequirePermission(UPDATE)
+  updateFolder(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCreativeFolderDto,

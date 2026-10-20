@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -52,6 +53,7 @@ const UPDATE = 'social.creative.content.update.assigned';
 export class CreativeImageGenerationController {
   constructor(private readonly generation: CreativeImageGenerationService) {}
 
+  @ClientAreaExposed('social_creative_studio')
   @Post('images')
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission(CREATE)
@@ -72,6 +74,7 @@ export class CreativeImageGenerationController {
    * CS3.6.2 — a new generation with this one's intent (202, same contract
    * and `Idempotency-Key` rules as `POST images`). The origin is untouched.
    */
+  @ClientAreaExposed('social_creative_studio')
   @Post(':generationId/regenerate')
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission(CREATE)
@@ -91,6 +94,7 @@ export class CreativeImageGenerationController {
   }
 
   /** CS3.6.2 — a new generation varying this output (410 once it expired). */
+  @ClientAreaExposed('social_creative_studio')
   @Post('outputs/:outputId/vary')
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission(CREATE)
@@ -109,13 +113,17 @@ export class CreativeImageGenerationController {
     );
   }
 
-  @Get(':generationId') @RequirePermission(VIEW) getGeneration(
+  @ClientAreaExposed('social_creative_studio')
+  @Get(':generationId')
+  @RequirePermission(VIEW)
+  getGeneration(
     @RequestContextData() ctx: RequestContext,
     @Param('generationId', ParseUUIDPipe) generationId: string,
   ) {
     return this.generation.get(creativeStudioScope(ctx), generationId);
   }
 
+  @ClientAreaExposed('social_creative_studio')
   @Get('outputs/:outputId/content')
   @RequirePermission(VIEW)
   async outputContent(
@@ -133,7 +141,10 @@ export class CreativeImageGenerationController {
     file.body.pipe(response);
   }
 
-  @Post('outputs/:outputId/promote') @RequirePermission(CREATE) promote(
+  @ClientAreaExposed('social_creative_studio')
+  @Post('outputs/:outputId/promote')
+  @RequirePermission(CREATE)
+  promote(
     @RequestContextData() ctx: RequestContext,
     @Param('outputId', ParseUUIDPipe) outputId: string,
     @Body() dto: PromoteGeneratedOutputDto,
@@ -146,6 +157,7 @@ export class CreativeImageGenerationController {
     );
   }
 
+  @ClientAreaExposed('social_creative_studio')
   @Post('outputs/:outputId/promote-as-version')
   @RequirePermission(UPDATE)
   promoteAsVersion(
@@ -173,6 +185,7 @@ export class CreativeImageGenerationController {
 export class CreativeVersionVariationController {
   constructor(private readonly generation: CreativeImageGenerationService) {}
 
+  @ClientAreaExposed('social_creative_studio')
   @Post(':assetId/versions/:versionId/vary')
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission(CREATE)

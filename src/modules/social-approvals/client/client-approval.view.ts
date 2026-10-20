@@ -89,6 +89,12 @@ export type ClientApprovalListItem = {
    * offer, so the UI falls back to the plain "replaced" message.
    */
   replacementApprovalId?: string;
+  /**
+   * CA10 / R-23 — an approved creative is a deliverable: the client may
+   * download the original file of the approved version through the opaque
+   * `:approvalId/download` route. Text revisions have no file.
+   */
+  downloadable: boolean;
 };
 
 export type ClientApprovalActions = {
@@ -219,6 +225,8 @@ export function buildClientApprovalListItem(
     approvedAt: iso(approval.approvedAt),
     lastActivityAt: lastActivityAt(approval, comments),
     needsYou: status === 'awaiting_your_review',
+    downloadable:
+      status === 'approved' && approval.subjectType === 'creative_version',
     ...(status === 'replaced' && replacementApprovalId
       ? { replacementApprovalId }
       : {}),

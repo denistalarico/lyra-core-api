@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
@@ -18,6 +19,7 @@ import {
   MediaAssetEntity,
 } from '../../common/media-assets';
 import type { RequestContext } from '../../common/context/request-context.interface';
+import { CLIENT_AREA_ACTOR_ROLE } from '../client-area/client-area.types';
 import { PlatformPermissionService } from '../permissions';
 import {
   AgencyProject,
@@ -967,6 +969,20 @@ export class CreativeProductionService {
     scope: CreativeStudioScope,
     production: CreativeProductionEntity | null,
   ): Promise<CreativeProductionView['operationalWork']> {
+    // CA10 — the link to the agency's own Projects work is internal: the
+    // Client Area actor reads only that it exists ('restricted'), no ids.
+    if (ctx.role === CLIENT_AREA_ACTOR_ROLE)
+      return {
+        state: production?.taskId ? 'restricted' : 'none',
+        linkKind: null,
+        taskId: null,
+        subtaskId: null,
+        projectId: null,
+        linkedAt: null,
+        linkedById: null,
+        task: null,
+        subtask: null,
+      };
     const base = {
       linkKind: production?.taskLinkKind ?? null,
       taskId: production?.taskId ?? null,
@@ -1117,8 +1133,13 @@ export class CreativeProductionService {
       userId: ctx.userId ?? '',
       role: ctx.role ?? 'member',
     };
+    // CA10 / RK-3 — the Client Area actor never reaches the Agency permission
+    // stack (its sentinel role would normalize to Member): Production is
+    // read-only on that surface, so every action reports as unavailable.
     const can = (key: string): Promise<boolean> =>
-      ctx.userId ? this.permissions.can(context, key) : Promise.resolve(false);
+      ctx.userId && ctx.role !== CLIENT_AREA_ACTOR_ROLE
+        ? this.permissions.can(context, key)
+        : Promise.resolve(false);
     const [update, submit, plannerUpdate, taskCreate, taskUpdate] =
       await Promise.all(
         [
@@ -1370,6 +1391,8 @@ export class CreativeProductionService {
   }
 
   private async assertPermission(ctx: RequestContext, key: string) {
+    if (ctx.role === CLIENT_AREA_ACTOR_ROLE)
+      throw new ForbiddenException('Production is read-only here.');
     await this.permissions.assertCan(
       {
         tenantId: ctx.tenantId,

@@ -632,6 +632,8 @@ export class CreativeAssetService {
       contentItemId: asset.contentItemId,
       currentVersionId: asset.currentVersionId,
       version: version ? this.versionView(version) : null,
+      // CA10 — the author, so the Client Area offers Operator edits only on own assets (§3.3).
+      createdById: asset.createdById,
       createdAt: asset.createdAt.toISOString(),
       updatedAt: asset.updatedAt.toISOString(),
       archivedAt: asset.archivedAt?.toISOString() ?? null,

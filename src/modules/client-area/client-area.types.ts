@@ -7,6 +7,9 @@ import type { Request } from 'express';
  * remain for the independent agency-self context and old invitation input/history.
  */
 
+/** CA10 — sentinel `role` the Bridge puts on `request.user`; never an Agency role. */
+export const CLIENT_AREA_ACTOR_ROLE = 'client_area_actor' as const;
+
 export const CLIENT_AREA_ACCOUNT_ROLES = [
   'client_owner',
   'client_member',

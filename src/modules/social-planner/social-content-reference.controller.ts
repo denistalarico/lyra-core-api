@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -46,6 +47,7 @@ const UPDATE = 'social.planner.calendar.update.manager';
 export class SocialContentReferenceController {
   constructor(private readonly references: SocialContentReferenceService) {}
 
+  @ClientAreaExposed('social_planner')
   @Get('content/:contentId/references')
   @RequirePermission(VIEW)
   list(
@@ -55,6 +57,7 @@ export class SocialContentReferenceController {
     return this.references.list(resolveCompanyAwareScope(ctx), contentId);
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('content/:contentId/references')
   @RequirePermission(UPDATE)
   link(
@@ -70,6 +73,7 @@ export class SocialContentReferenceController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Put('content/:contentId/references/order')
   @RequirePermission(UPDATE)
   reorder(
@@ -84,6 +88,7 @@ export class SocialContentReferenceController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Patch('content/:contentId/references/:referenceId')
   @RequirePermission(UPDATE)
   update(
@@ -101,6 +106,7 @@ export class SocialContentReferenceController {
   }
 
   /** Removes the link only; the image stays in the media library. */
+  @ClientAreaExposed('social_planner')
   @Delete('content/:contentId/references/:referenceId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(UPDATE)

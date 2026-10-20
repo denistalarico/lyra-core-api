@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -47,6 +48,7 @@ const UPDATE = 'social.creative.content.update.assigned';
 export class CreativeVideoGenerationController {
   constructor(private readonly generation: CreativeVideoGenerationService) {}
 
+  @ClientAreaExposed('social_creative_studio')
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission(CREATE)
@@ -63,13 +65,17 @@ export class CreativeVideoGenerationController {
     );
   }
 
-  @Get(':generationId') @RequirePermission(VIEW) get(
+  @ClientAreaExposed('social_creative_studio')
+  @Get(':generationId')
+  @RequirePermission(VIEW)
+  get(
     @RequestContextData() ctx: RequestContext,
     @Param('generationId', ParseUUIDPipe) generationId: string,
   ) {
     return this.generation.get(creativeStudioScope(ctx), generationId);
   }
 
+  @ClientAreaExposed('social_creative_studio')
   @Get(':generationId/content')
   @RequirePermission(VIEW)
   async content(
@@ -84,6 +90,7 @@ export class CreativeVideoGenerationController {
     stream(response, asset.mimeType, file.body);
   }
 
+  @ClientAreaExposed('social_creative_studio')
   @Get(':generationId/poster')
   @RequirePermission(VIEW)
   async poster(
@@ -98,7 +105,10 @@ export class CreativeVideoGenerationController {
     stream(response, asset.mimeType, file.body);
   }
 
-  @Post(':generationId/promote') @RequirePermission(CREATE) promote(
+  @ClientAreaExposed('social_creative_studio')
+  @Post(':generationId/promote')
+  @RequirePermission(CREATE)
+  promote(
     @RequestContextData() ctx: RequestContext,
     @Param('generationId', ParseUUIDPipe) generationId: string,
     @Body() dto: PromoteGeneratedOutputDto,
@@ -111,6 +121,7 @@ export class CreativeVideoGenerationController {
     );
   }
 
+  @ClientAreaExposed('social_creative_studio')
   @Post(':generationId/promote-as-version')
   @RequirePermission(UPDATE)
   promoteAsVersion(
@@ -134,10 +145,14 @@ export class CreativeVideoGenerationController {
 export class CreativeVideoAvatarController {
   constructor(private readonly catalog: CreativeVideoAvatarCatalogService) {}
 
-  @Get() @RequirePermission(VIEW) list() {
+  @ClientAreaExposed('social_creative_studio')
+  @Get()
+  @RequirePermission(VIEW)
+  list() {
     return this.catalog.list();
   }
 
+  @ClientAreaExposed('social_creative_studio')
   @Get(':avatarId/preview')
   @RequirePermission(VIEW)
   async preview(

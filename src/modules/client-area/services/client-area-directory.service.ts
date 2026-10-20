@@ -27,6 +27,8 @@ export type ClientAreaContextProjection = {
   accountRole: NonNullable<ClientAreaContext['accountRole']>;
   uiPermissions: string[];
   consent: NonNullable<ClientAreaContext['consent']>;
+  /** CA10 — D-13 toggles of the company, so cost actions render disabled and explained (UX only). */
+  costActions: { ai: boolean; media: boolean };
   branding: Awaited<ReturnType<ClientAreaManagementService['branding']>>;
 };
 
@@ -194,6 +196,10 @@ export class ClientAreaDirectoryService {
         ]),
       ].sort(),
       consent: context.consent!,
+      costActions: {
+        ai: context.allowAiCostActions === true,
+        media: context.allowMediaSpendActions === true,
+      },
       branding: await this.management.branding(
         context.tenantId,
         context.workspaceId,

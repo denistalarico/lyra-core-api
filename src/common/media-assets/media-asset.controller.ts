@@ -22,6 +22,7 @@
 // naming a client is never read: that is how media gets written into another
 // client's scope.
 
+import { ClientAreaExposed } from '../../modules/client-area/client-area.decorators';
 import {
   Body,
   Controller,
@@ -74,6 +75,7 @@ const MEDIA_ASSET_UPLOAD_OPTIONS = {
 export class MediaAssetController {
   constructor(private readonly uploadService: MediaAssetUploadService) {}
 
+  @ClientAreaExposed('social_planner')
   @Get()
   @RequirePermission(VIEW_PERMISSION)
   async list(
@@ -88,6 +90,7 @@ export class MediaAssetController {
     return { items: items.map(toMediaAssetView), total };
   }
 
+  @ClientAreaExposed('social_planner')
   @Post()
   @RequirePermission(UPLOAD_PERMISSION)
   @UseInterceptors(FileInterceptor('file', MEDIA_ASSET_UPLOAD_OPTIONS))
@@ -123,6 +126,7 @@ export class MediaAssetController {
    * read. `nosniff` so a browser cannot be talked into interpreting media as
    * something executable.
    */
+  @ClientAreaExposed('social_planner')
   @Get(':mediaAssetId/content')
   @RequirePermission(VIEW_PERMISSION)
   async getContent(

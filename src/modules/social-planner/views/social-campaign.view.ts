@@ -86,6 +86,8 @@ export function toSocialContentIdeaView(idea: SocialContentIdeaEntity) {
     source: idea.source,
     convertedContentItemId: idea.convertedContentItemId,
     convertedAt: idea.convertedAt,
+    // CA10 — the author, so the Client Area offers Operator actions only on own rows (§3.3).
+    createdById: idea.createdById,
     createdAt: idea.createdAt,
     updatedAt: idea.updatedAt,
   };
