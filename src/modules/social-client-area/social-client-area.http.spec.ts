@@ -83,17 +83,6 @@ const serviceProxy = () => {
     },
   );
 };
-/**
- * D-CA10-BE-3 (pre-existing, Agency): these batch routes are declared after
- * `content/:contentId/<action>`, so Express hands `batch` to the per-item
- * handler. Through the Bridge that id is not a uuid (404); the routes stay
- * in the table so they resolve as soon as the Agency fixes the order.
- */
-const SHADOWED = new Set([
-  'POST /social/planner/content/batch/archive',
-  'POST /social/planner/content/batch/restore',
-  'POST /social/planner/content/batch/copy-generation',
-]);
 /** Every constructor dependency of the controllers, by its Nest token. */
 function controllerDependencies() {
   const tokens = new Set<unknown>();
@@ -360,10 +349,7 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
     for (const route of exposed) {
       const at = `${route.verb} ${route.path}`;
       const { status } = await call(verb(route), url(route), batchBody);
-      expect([at, [401, 403, 404].includes(status)]).toEqual([
-        at,
-        SHADOWED.has(at),
-      ]);
+      expect([at, [401, 403, 404].includes(status)]).toEqual([at, false]);
     }
   });
 
@@ -396,6 +382,25 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
     expect(
       (await call('get', `/social/planner/content/${foreign}`)).status,
     ).toBe(404);
+    // Batches (D-CA10-BE-3 fixed): one row of another company, or one foreign row for an Operator, denies it all.
+    for (const contentIds of [
+      [own, foreign],
+      [own, alien],
+    ])
+      expect(
+        (
+          await call('post', '/social/planner/content/batch/archive', {
+            contentIds,
+          })
+        ).status,
+      ).toBe(404);
+    expect(
+      (
+        await call('post', '/social/planner/content/batch/archive', {
+          contentIds: [own],
+        })
+      ).status,
+    ).toBe(201);
     // A list of ids in the body: one row of another company denies the call.
     expect(
       (

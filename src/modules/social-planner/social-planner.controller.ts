@@ -234,6 +234,88 @@ export class SocialPlannerController {
     );
   }
 
+  /*
+   * D-CA10-BE-3 — every `content/batch/...` route is declared before the
+   * `content/:contentId/...` ones: Express matches in declaration order, and
+   * `content/batch/archive` would otherwise reach `archiveContent` with
+   * `contentId = "batch"` (400 from ParseUUIDPipe).
+   */
+  // ----------------------------------------------------- batch actions (E6)
+
+  /**
+   * Batch endpoints take the ids in a body and always answer 200 with a
+   * per-item verdict, including when every item failed.
+   *
+   * A batch is not an all-or-nothing operation, so an HTTP status cannot
+   * describe it: 207-style reporting in the body is the only honest answer
+   * when nine items succeeded and three were refused. The alternative — one
+   * request per item — is what E6 explicitly rules out, because it gives the
+   * caller no control over what happened in between.
+   *
+   * `POST` for delete-many rather than `DELETE`: a request body on DELETE is
+   * legal but is dropped by enough proxies and clients that the selection would
+   * silently arrive empty.
+   */
+  @ClientAreaExposed('social_planner')
+  @Post('content/batch/archive')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  archiveContentBatch(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialContentBatchDto,
+  ) {
+    return this.socialContentLifecycleService.archiveMany(
+      this.requireScope(ctx),
+      dto.contentIds,
+      ctx.userId ?? null,
+    );
+  }
+
+  @ClientAreaExposed('social_planner')
+  @Post('content/batch/restore')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  restoreContentBatch(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialContentBatchDto,
+  ) {
+    return this.socialContentLifecycleService.restoreMany(
+      this.requireScope(ctx),
+      dto.contentIds,
+      ctx.userId ?? null,
+    );
+  }
+
+  @Post('content/batch/delete')
+  @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
+  @DangerousAction()
+  removeContentBatch(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialContentBatchDto,
+  ) {
+    return this.socialContentLifecycleService.removeMany(
+      this.requireScope(ctx),
+      dto.contentIds,
+      ctx.userId ?? null,
+    );
+  }
+
+  /**
+   * The selection fan-out of copy generation (the plan-wide one is
+   * `requestCopyGenerationForPlan`, documented below).
+   */
+  @ClientAreaExposed('social_planner')
+  @Post('content/batch/copy-generation')
+  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
+  requestCopyGenerationForSelection(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: RequestSocialCopyGenerationBatchDto,
+  ) {
+    return this.socialCopyGenerationService.requestForSelection(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
   @ClientAreaExposed('social_planner')
   @Get('content/:contentId')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
@@ -375,64 +457,6 @@ export class SocialPlannerController {
     await this.socialContentLifecycleService.discard(
       this.requireScope(ctx),
       contentId,
-    );
-  }
-
-  // ----------------------------------------------------- batch actions (E6)
-
-  /**
-   * Batch endpoints take the ids in a body and always answer 200 with a
-   * per-item verdict, including when every item failed.
-   *
-   * A batch is not an all-or-nothing operation, so an HTTP status cannot
-   * describe it: 207-style reporting in the body is the only honest answer
-   * when nine items succeeded and three were refused. The alternative — one
-   * request per item — is what E6 explicitly rules out, because it gives the
-   * caller no control over what happened in between.
-   *
-   * `POST` for delete-many rather than `DELETE`: a request body on DELETE is
-   * legal but is dropped by enough proxies and clients that the selection would
-   * silently arrive empty.
-   */
-  @ClientAreaExposed('social_planner')
-  @Post('content/batch/archive')
-  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
-  archiveContentBatch(
-    @RequestContextData() ctx: RequestContext,
-    @Body() dto: SocialContentBatchDto,
-  ) {
-    return this.socialContentLifecycleService.archiveMany(
-      this.requireScope(ctx),
-      dto.contentIds,
-      ctx.userId ?? null,
-    );
-  }
-
-  @ClientAreaExposed('social_planner')
-  @Post('content/batch/restore')
-  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
-  restoreContentBatch(
-    @RequestContextData() ctx: RequestContext,
-    @Body() dto: SocialContentBatchDto,
-  ) {
-    return this.socialContentLifecycleService.restoreMany(
-      this.requireScope(ctx),
-      dto.contentIds,
-      ctx.userId ?? null,
-    );
-  }
-
-  @Post('content/batch/delete')
-  @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
-  @DangerousAction()
-  removeContentBatch(
-    @RequestContextData() ctx: RequestContext,
-    @Body() dto: SocialContentBatchDto,
-  ) {
-    return this.socialContentLifecycleService.removeMany(
-      this.requireScope(ctx),
-      dto.contentIds,
-      ctx.userId ?? null,
     );
   }
 
@@ -654,20 +678,6 @@ export class SocialPlannerController {
    * than a single status, so a request where four of twenty items were already
    * running reports exactly that.
    */
-  @ClientAreaExposed('social_planner')
-  @Post('content/batch/copy-generation')
-  @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
-  requestCopyGenerationForSelection(
-    @RequestContextData() ctx: RequestContext,
-    @Body() dto: RequestSocialCopyGenerationBatchDto,
-  ) {
-    return this.socialCopyGenerationService.requestForSelection(
-      this.requireScope(ctx),
-      ctx.userId ?? null,
-      dto,
-    );
-  }
-
   @ClientAreaExposed('social_planner')
   @Post('plans/:planId/copy-generation')
   @RequirePermission(SOCIAL_PLANNER_UPDATE_PERMISSION)
