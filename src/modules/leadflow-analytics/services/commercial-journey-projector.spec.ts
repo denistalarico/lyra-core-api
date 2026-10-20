@@ -32,6 +32,7 @@ function opportunity(
     operationalStatus: null,
     businessContext: {},
     assignedUserId: null,
+    createdByUserId: null,
     expectedCloseDate: null,
     nextFollowUpAt: null,
     lastActivityAt: null,

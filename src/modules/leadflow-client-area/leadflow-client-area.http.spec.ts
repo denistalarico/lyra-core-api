@@ -40,6 +40,7 @@ import { AgencyClient } from '../clients/entities/agency-client.entity';
 import { InboxController } from '../inbox/inbox.controller';
 import { InboxSettingsController } from '../inbox/inbox-settings.controller';
 import { InboxMediaController } from '../inbox/inbox-media.controller';
+import { InboxChannelsController } from '../inbox/channels/inbox-channels.controller';
 import { WhatsAppOutboundController } from '../inbox/channels/whatsapp/whatsapp-outbound.controller';
 import { InstagramOutboundController } from '../inbox/channels/instagram/instagram-outbound.controller';
 import { FacebookMessengerOutboundController } from '../inbox/channels/facebook-messenger/facebook-messenger-outbound.controller';
@@ -65,10 +66,23 @@ const own = randomUUID(),
   otherCreator = randomUUID();
 const secret = 'ca11-client-secret-012345678901234567890',
   agencySecret = 'ca11-agency-secret-012345678901234567890';
+// The Agency serializer output the client must receive unchanged (CA11.1, D-02 revisada).
+const fixtureResult = () => ({
+  id: own,
+  name: 'Fixture',
+  title: 'Fixture',
+  score: 42,
+  metadata: { contactName: 'Maria', contactAvatarUrl: 'https://img' },
+  tenantId: tenant,
+  createdByUserId: user,
+  conversation: { id: own },
+  message: { id: own, externalMessageId: 'mocked' },
+});
 const controllers = [
   InboxController,
   InboxSettingsController,
   InboxMediaController,
+  InboxChannelsController,
   WhatsAppOutboundController,
   InstagramOutboundController,
   FacebookMessengerOutboundController,
@@ -96,16 +110,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
                     body: Readable.from(['fixture']),
                   },
                 });
-              return Promise.resolve({
-                id: own,
-                name: 'Fixture',
-                title: 'Fixture',
-                score: 42,
-                metadata: { token: 'secret' },
-                tenantId: tenant,
-                conversation: { id: own },
-                message: { id: own, externalMessageId: 'mocked' },
-              });
+              return Promise.resolve(fixtureResult());
             },
     },
   );
@@ -340,6 +345,8 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
         ...body,
       });
     }
+    if (route.path === '/inbox/channels/bindings/reconcile')
+      return req.send({ channelId: id, defaultAgentId: own, ...body });
     return route.method === 'GET' ? req : req.send(body);
   };
   it.each(
@@ -352,9 +359,10 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     const response = await call(route);
     expect(response.status).toBeGreaterThanOrEqual(200);
     expect(response.status).toBeLessThan(300);
-    if (route.kind !== 'media')
-      expect(JSON.stringify(response.body)).not.toMatch(
-        /tenantId|workspaceId|secret|accessTokenEncrypted/,
+    // Outbound controllers build their own envelope; every other route returns the service JSON.
+    if (!['media', 'outbound'].includes(route.kind) && calls.length > 0)
+      expect(response.body).toEqual(
+        JSON.parse(JSON.stringify(fixtureResult())),
       );
     if (route.path === '/crm/loss-reasons') {
       expect(calls).toHaveLength(0);
@@ -381,6 +389,36 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     ).map((route) => [`${route.method} ${route.path}`, route] as const),
   )('returns 404 for another company resource on %s', async (_name, route) => {
     await call(route, company, foreign).expect(404);
+    expect(calls).toHaveLength(0);
+  });
+  it('binds a channel only to an explicit agent of the same company, Manager only', async () => {
+    const reconcile = LEADFLOW_CLIENT_AREA_ROUTES.find(
+      (route) => route.path === '/inbox/channels/bindings/reconcile',
+    )!;
+    await call(reconcile, company, foreign).expect(404);
+    await call(reconcile, company, own, { defaultAgentId: foreign }).expect(
+      404,
+    );
+    await call(reconcile, company, own, { defaultAgentId: 'any' }).expect(404);
+    expect(calls).toHaveLength(0);
+    await call(reconcile, company, own, { defaultAgentId: null }).expect(201);
+    level = 'operator';
+    calls.length = 0;
+    await call(reconcile).expect(403);
+    expect(calls).toHaveLength(0);
+  });
+  it('accepts the Agency DTO shape instead of a parallel field list', async () => {
+    const patch = LEADFLOW_CLIENT_AREA_ROUTES.find(
+      (route) =>
+        route.path === '/crm/opportunities/:id' && route.method === 'PATCH',
+    )!;
+    await call(patch, company, own, { followMode: 'manual' }).expect(200);
+    const settings = LEADFLOW_CLIENT_AREA_ROUTES.find(
+      (route) => route.path === '/inbox/settings' && route.method === 'PATCH',
+    )!;
+    await call(settings, company, own, { quickReplies: [] }).expect(200);
+    calls.length = 0;
+    await call(settings, company, own, { leadRules: [] }).expect(404);
     expect(calls).toHaveLength(0);
   });
   it('denies viewer writes, operator items owned by others, and routes without exposure', async () => {

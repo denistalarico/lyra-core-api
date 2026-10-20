@@ -121,6 +121,10 @@ export class CrmOpportunityEntity {
   @Column({ name: 'assigned_user_id', type: 'uuid', nullable: true })
   assignedUserId!: string | null;
 
+  /** Immutable author (CA11.1): null for agent/automation creations and legacy rows without one. */
+  @Column({ name: 'created_by_user_id', type: 'uuid', nullable: true })
+  createdByUserId!: string | null;
+
   @Column({ name: 'expected_close_date', type: 'date', nullable: true })
   expectedCloseDate!: string | null;
 

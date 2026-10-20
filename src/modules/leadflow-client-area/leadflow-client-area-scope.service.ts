@@ -39,8 +39,8 @@ export const LEADFLOW_CLIENT_SCOPE_SQL: Partial<
     ) + " AND scope_kind='company'",
   opportunity:
     direct(
-      'crm_opportunities o',
-      `(SELECT e.actor_user_id FROM crm_opportunity_events e WHERE e.opportunity_id=o.id AND e.tenant_id=o.tenant_id AND e.workspace_id=o.workspace_id ORDER BY e.created_at,e.id LIMIT 1)`,
+      'crm_opportunities',
+      'created_by_user_id',
       ',pipeline_id AS parent',
     ) + " AND scope_kind='company' AND deleted_at IS NULL",
   contact: `SELECT c.id,l.agency_client_id AS client,l.company_context_id AS company,c.created_by_user_id AS creator FROM contacts c JOIN leadflow_contact_companies l ON l.contact_id=c.id AND l.tenant_id=c.tenant_id AND l.workspace_id=c.workspace_id WHERE c.tenant_id=$1 AND c.workspace_id=$2 AND l.agency_client_id=$3 AND l.company_context_id=$4 AND c.id=$5 AND l.scope_kind='company'`,
@@ -70,7 +70,25 @@ const relations: Record<string, LeadFlowClientKind> = {
   inboxConversationId: 'conversation',
   sourceConversationId: 'conversation',
   sourceOpportunityId: 'opportunity',
+  beforeOpportunityId: 'opportunity',
   conversationId: 'conversation',
+  companyContactId: 'contact',
+  defaultAgentId: 'agent',
+};
+// References whose target table the bridge cannot prove company-bound are never accepted.
+const unverifiable = ['sourceLeadId', 'senderAgentId'];
+/**
+ * Route policies (not field mirrors): the Agency DTO stays the write contract. A client note
+ * carries no identity/provider fields (the token is the author) and the Inbox settings row is
+ * agency configuration except its quick replies until CA14-B.
+ */
+const policyFields: Record<string, readonly string[]> = {
+  'POST /inbox/conversations/:id/messages': [
+    'content',
+    'messageType',
+    'direction',
+  ],
+  'PATCH /inbox/settings': ['quickReplies'],
 };
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -111,11 +129,23 @@ export class LeadFlowClientAreaScopeService implements OnModuleInit {
     const write = !['GET', 'HEAD'].includes(request.method ?? '');
     const level = context.memberAccess?.[module]?.level;
     if (write && level === 'viewer') return null;
+    const policy = policyFields[`${route.method} ${route.path}`];
     if (
       write &&
-      Object.keys(body).some((field) => !route.fields.includes(field))
+      policy &&
+      Object.keys(body).some((field) => !policy.includes(field))
     )
       return null;
+    if (unverifiable.some((field) => body[field] != null)) return null;
+    if (route.path === '/inbox/channels/bindings/reconcile') {
+      // Never the workspace-wide sweep: one company channel, one explicit agent or null.
+      if (
+        !isUuid(body.channelId) ||
+        !('defaultAgentId' in body) ||
+        (body.defaultAgentId !== null && !isUuid(body.defaultAgentId))
+      )
+        return null;
+    }
     if (body.videoMode === 'native') return null; // native Team Meetings are not a client appointment transport
     if (route.kind === 'message' && route.path.endsWith('/messages') && write) {
       if (body.direction !== undefined && body.direction !== 'internal')
@@ -344,23 +374,9 @@ export class LeadFlowClientAreaScopeService implements OnModuleInit {
         }
       }
     }
+    // Nested policies keep the Agency shape; only their references are proved here.
     if (body.handoffPolicy !== undefined) {
-      if (
-        !object(body.handoffPolicy) ||
-        Object.keys(body.handoffPolicy).some(
-          (k) =>
-            ![
-              'triggers',
-              'target',
-              'slaMinutes',
-              'transferOpportunityOnHandoff',
-              'targetPipelineId',
-              'targetStageId',
-              'targetUserIds',
-            ].includes(k),
-        )
-      )
-        return null;
+      if (!object(body.handoffPolicy)) return null;
       // PATCH retains omitted values. Validate the effective pair, including a retained stage.
       const policy = {
         ...(object(primary?.handoff) ? primary.handoff : {}),
@@ -380,34 +396,26 @@ export class LeadFlowClientAreaScopeService implements OnModuleInit {
         return null;
       if (body.handoffPolicy.targetUserIds !== undefined) {
         if (!Array.isArray(body.handoffPolicy.targetUserIds)) return null;
+        // Targets the agency already set are retained as-is; a new target must be a member.
+        const retained = new Set(
+          object(primary?.handoff) &&
+            Array.isArray(primary.handoff.targetUserIds)
+            ? (primary.handoff.targetUserIds as unknown[])
+            : [],
+        );
         for (const id of body.handoffPolicy.targetUserIds)
-          if (!(await member(id))) return null;
+          if (!retained.has(id) && !(await member(id))) return null;
       }
     }
     if (body.crmPolicy !== undefined) {
       // Existing agent configuration accepts JSON; keep its relational references company-bound.
+      if (!object(body.crmPolicy)) return null;
       if (
-        !object(body.crmPolicy) ||
-        Object.keys(body.crmPolicy).some(
-          (k) =>
-            ![
-              'pipelineRef',
-              'createLeads',
-              'updateStageOnQualified',
-              'qualificationFields',
-            ].includes(k),
-        )
-      )
-        return null;
-      if (body.crmPolicy.pipelineRef !== undefined) {
+        body.crmPolicy.pipelineRef !== undefined &&
+        body.crmPolicy.pipelineRef !== null
+      ) {
         if (!object(body.crmPolicy.pipelineRef)) return null;
         const ref = body.crmPolicy.pipelineRef;
-        if (
-          Object.keys(ref).some(
-            (key) => !['id', 'pipelineId', 'stageId', 'name'].includes(key),
-          )
-        )
-          return null;
         const pipelineId = ref.pipelineId ?? ref.id;
         const pipeline = pipelineId ? await load('pipeline', pipelineId) : null;
         const stage = ref.stageId ? await load('stage', ref.stageId) : null;
@@ -419,20 +427,11 @@ export class LeadFlowClientAreaScopeService implements OnModuleInit {
       }
     }
     if (body.channelPolicy !== undefined) {
+      if (!object(body.channelPolicy)) return null;
       if (
-        !object(body.channelPolicy) ||
-        Object.keys(body.channelPolicy).some(
-          (k) =>
-            ![
-              'allowedChannels',
-              'defaultChannel',
-              'activationPolicy',
-              'channelActivationPolicies',
-            ].includes(k),
-        )
-      )
-        return null;
-      if (body.channelPolicy.channelActivationPolicies !== undefined) {
+        body.channelPolicy.channelActivationPolicies !== undefined &&
+        body.channelPolicy.channelActivationPolicies !== null
+      ) {
         if (!object(body.channelPolicy.channelActivationPolicies)) return null;
         for (const id of Object.keys(
           body.channelPolicy.channelActivationPolicies,

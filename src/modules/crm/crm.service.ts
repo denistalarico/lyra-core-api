@@ -497,6 +497,7 @@ export class CrmService {
       operationalStatus: dto.operationalStatus ?? null,
       businessContext: dto.businessContext ?? {},
       assignedUserId: dto.assignedUserId ?? null,
+      createdByUserId: ctx.userId ?? null,
       expectedCloseDate: dto.expectedCloseDate ?? null,
       nextFollowUpAt: this.toDateOrNull(dto.nextFollowUpAt),
       lastActivityAt: null,

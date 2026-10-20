@@ -336,8 +336,12 @@ export class LeadFlowAgentService {
     }
     if (dto.promptConfig !== undefined) {
       // Non-developer callers cannot introduce raw overrides (guarded above),
-      // so the payload is safe to persist as-is here.
-      agent.promptConfig = dto.promptConfig;
+      // nor drop the ones a developer set by omitting them.
+      const retained = agent.promptConfig?.developerOverrides;
+      agent.promptConfig =
+        touchesRawPrompt || retained === undefined
+          ? dto.promptConfig
+          : { ...dto.promptConfig, developerOverrides: retained };
     }
     if (dto.handoffPolicy !== undefined) {
       agent.handoffPolicy = {

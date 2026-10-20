@@ -214,4 +214,98 @@ describe('CA11 closed scope adapter', () => {
       }),
     ).not.toBeNull();
   });
+  it('accepts the Agency DTO shape and proves the references it adds', async () => {
+    const { service, query } = setup();
+    const patch = (body: Record<string, unknown>) =>
+      service.resolve('leadflow_crm', context, '', {
+        method: 'PATCH',
+        routePath: '/crm/opportunities/:id',
+        params: { id },
+        body,
+      });
+    expect(
+      await patch({ followMode: 'manual', metadata: { note: 'x' } }),
+    ).not.toBeNull();
+    const foreign = randomUUID();
+    query.mockImplementation((_sql: string, values: unknown[]) =>
+      Promise.resolve(values[4] === foreign ? [] : [row]),
+    );
+    expect(
+      await service.resolve('leadflow_crm', context, '', {
+        method: 'PATCH',
+        routePath: '/crm/opportunities/:id/stage',
+        params: { id },
+        body: { stageId: id, beforeOpportunityId: foreign },
+      }),
+    ).toBeNull();
+    expect(
+      await service.resolve('leadflow_crm', context, '', {
+        method: 'PATCH',
+        routePath: '/agency/contacts/leadflow/company-contacts/:contactId',
+        params: { contactId: id },
+        body: { companyContactId: foreign },
+      }),
+    ).toBeNull();
+    const appointments = {
+      ...context,
+      memberAccess: {
+        leadflow_appointments: { available: true, level: 'manager' },
+      },
+    } as unknown as ClientAreaContext;
+    expect(
+      await service.resolve('leadflow_appointments', appointments, '', {
+        method: 'POST',
+        routePath: '/leadflow/agenda/v1/appointments',
+        body: { title: 'a', sourceLeadId: randomUUID() },
+      }),
+    ).toBeNull();
+  });
+  it('keeps agency handoff targets and policy keys while proving new references', async () => {
+    const { service, query } = setup();
+    const agencyUser = randomUUID(),
+      foreignChannel = randomUUID();
+    query.mockImplementation((sql: string, values: unknown[]) => {
+      if (sql.includes('client_area_memberships')) return Promise.resolve([]);
+      if (values[4] === foreignChannel) return Promise.resolve([]);
+      return Promise.resolve([
+        { ...row, id: values[4], handoff: { targetUserIds: [agencyUser] } },
+      ]);
+    });
+    const managerContext = {
+      ...context,
+      memberAccess: { leadflow_agents: { available: true, level: 'manager' } },
+    } as unknown as ClientAreaContext;
+    const patch = (body: Record<string, unknown>) =>
+      service.resolve('leadflow_agents', managerContext, '', {
+        method: 'PATCH',
+        routePath: '/leadflow/agents/:id',
+        params: { id },
+        body,
+      });
+    expect(
+      await patch({ handoffPolicy: { targetUserIds: [agencyUser] } }),
+    ).not.toBeNull();
+    expect(
+      await patch({ handoffPolicy: { targetUserIds: [randomUUID()] } }),
+    ).toBeNull();
+    expect(
+      await patch({
+        channelPolicy: {
+          allowedChannels: ['whatsapp'],
+          activationPolicy: { version: 1, trigger: 'always' },
+          channelActivationPolicies: { [id]: { trigger: 'always' } },
+          futureKey: true,
+        },
+      }),
+    ).not.toBeNull();
+    expect(
+      await patch({
+        channelPolicy: {
+          channelActivationPolicies: {
+            [foreignChannel]: { trigger: 'always' },
+          },
+        },
+      }),
+    ).toBeNull();
+  });
 });

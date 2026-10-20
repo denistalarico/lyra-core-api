@@ -122,6 +122,27 @@ const ctx = {
 } as never;
 
 describe('LeadFlowAgentService lifecycle (archive / unarchive / soft delete)', () => {
+  describe('patch promptConfig', () => {
+    it('keeps developer overrides a non-developer payload omits (CA11.1)', async () => {
+      const agent = buildAgent({
+        promptConfig: {
+          clientPromptConfigRef: 'old',
+          developerOverrides: { systemPrompt: 'dev' },
+        },
+      });
+      const { service } = buildService(agent);
+
+      await service.patch(ctx, agent.id, {
+        promptConfig: { clientPromptConfigRef: 'new' },
+      } as never);
+
+      expect(agent.promptConfig).toEqual({
+        clientPromptConfigRef: 'new',
+        developerOverrides: { systemPrompt: 'dev' },
+      });
+    });
+  });
+
   describe('archive', () => {
     it('sets status and archivedAt, reconciles bindings, and records offline status', async () => {
       const agent = buildAgent({ status: LeadFlowAgentStatus.Active });

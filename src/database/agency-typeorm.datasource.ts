@@ -12,6 +12,8 @@ import { DataSource } from 'typeorm';
 import { agencyEntities } from '../config/typeorm.config';
 import { CreateLeadflowAnalyticsDashboards1800000000000 } from './migrations/1800000000000-create-leadflow-analytics-dashboards';
 import { IsolateLeadflowContactsByCompany1800050000000 } from './migrations/1800050000000-isolate-leadflow-contacts-by-company';
+import { AddCrmOpportunityAuthor1800060000000 } from './migrations/1800060000000-add-crm-opportunity-author';
+import { ConsolidateInboxQuickReplies1800070000000 } from './migrations/1800070000000-consolidate-inbox-quick-replies';
 import { CreateAgencySettingsCore1760001000000 } from './migrations/1760001000000-create-agency-settings-core';
 import { CreateAgencyEmailSettings1760001001000 } from './migrations/1760001001000-create-agency-email-settings';
 import { CreateAgencySalesCore1760001002000 } from './migrations/1760001002000-create-agency-sales-core';
@@ -548,5 +550,7 @@ export const AgencyDataSource = new DataSource({
     CreateFinanceReceivableWriteOffs1799900000000,
     CreateLeadflowAnalyticsDashboards1800000000000,
     IsolateLeadflowContactsByCompany1800050000000,
+    AddCrmOpportunityAuthor1800060000000,
+    ConsolidateInboxQuickReplies1800070000000,
   ],
 });

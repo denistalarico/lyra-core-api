@@ -20,6 +20,7 @@ import { AgentActivationPolicyService } from '../services/agent-activation-polic
 import { LeadFlowAgentBindingReconcilerService } from '../../leadflow-agents/services/leadflow-agent-binding-reconciler.service';
 import { ReconcileDefaultBindingDto } from './dto/reconcile-default-binding.dto';
 import { InboxService } from '../inbox.service';
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
 
 @Controller('inbox/channels')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -32,6 +33,7 @@ export class InboxChannelsController {
     private readonly inboxService: InboxService,
   ) {}
 
+  @ClientAreaExposed('leadflow_agents')
   @Post('bindings/reconcile')
   @RequirePermission('leadflow.channels.channel.update.admin')
   async reconcileDefaultBinding(

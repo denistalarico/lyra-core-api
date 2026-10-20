@@ -25,7 +25,6 @@ export type LeadFlowClientRoute = {
   path: string;
   module: ClientAreaModuleKey;
   kind: LeadFlowClientKind;
-  fields: readonly string[];
 };
 const routes: LeadFlowClientRoute[] = [];
 const add = (
@@ -33,37 +32,16 @@ const add = (
   kind: LeadFlowClientKind,
   method: string,
   path: string,
-  fields: readonly string[] = [],
-) => routes.push({ module, kind, method, path, fields });
-const inbox = (
-  kind: LeadFlowClientKind,
-  method: string,
-  path: string,
-  fields?: readonly string[],
-) => add('leadflow_inbox', kind, method, `/inbox${path}`, fields);
-const crm = (
-  kind: LeadFlowClientKind,
-  method: string,
-  path: string,
-  fields?: readonly string[],
-) => add('leadflow_crm', kind, method, `/crm${path}`, fields);
-const conversation = [
-  'channelId',
-  'contactId',
-  'externalThreadId',
-  'title',
-  'status',
-  'priority',
-  'assignedUserId',
-  'assignedAgentId',
-  'source',
-  'businessMode',
-];
+) => routes.push({ module, kind, method, path });
+const inbox = (kind: LeadFlowClientKind, method: string, path: string) =>
+  add('leadflow_inbox', kind, method, `/inbox${path}`);
+const crm = (kind: LeadFlowClientKind, method: string, path: string) =>
+  add('leadflow_crm', kind, method, `/crm${path}`);
 inbox('channel', 'GET', '/channels');
 inbox('conversation', 'GET', '/conversations');
-inbox('conversation', 'POST', '/conversations', conversation);
+inbox('conversation', 'POST', '/conversations');
 inbox('conversation', 'GET', '/conversations/:id');
-inbox('conversation', 'PATCH', '/conversations/:id', conversation);
+inbox('conversation', 'PATCH', '/conversations/:id');
 for (const action of [
   'mark-read',
   'mark-unread',
@@ -79,323 +57,103 @@ for (const action of [
   'return-ai',
   'close',
 ])
-  inbox('conversation', 'POST', `/conversations/:id/${action}`, ['reason']);
+  inbox('conversation', 'POST', `/conversations/:id/${action}`);
 inbox('message', 'GET', '/conversations/:id/messages');
 // This resource writes notes only. External replies use the canonical channel outbox.
-inbox('message', 'POST', '/conversations/:id/messages', [
-  'content',
-  'messageType',
-  'direction',
-]);
+inbox('message', 'POST', '/conversations/:id/messages');
 for (const action of ['reaction', 'pin', 'favorite'])
-  inbox('message', 'POST', `/conversations/:id/messages/:messageId/${action}`, [
-    'emoji',
-    'enabled',
-  ]);
+  inbox('message', 'POST', `/conversations/:id/messages/:messageId/${action}`);
 inbox('media', 'GET', '/media/:mediaId/content');
 inbox('settings', 'GET', '/settings');
-inbox('settings', 'PATCH', '/settings', ['quickReplies']);
+inbox('settings', 'PATCH', '/settings');
 for (const channel of ['whatsapp', 'instagram', 'facebook-messenger']) {
-  inbox('outbound', 'POST', `/channels/${channel}/send-text`, [
-    'channelId',
-    'conversationId',
-    'to',
-    'text',
-    'replyToMessageId',
-    'idempotencyKey',
-  ]);
-  inbox('outbound', 'POST', `/channels/${channel}/send-media`, [
-    'channelId',
-    'conversationId',
-    'to',
-    'caption',
-    'replyToMessageId',
-    'idempotencyKey',
-  ]);
+  inbox('outbound', 'POST', `/channels/${channel}/send-text`);
+  inbox('outbound', 'POST', `/channels/${channel}/send-media`);
 }
-for (const [kind, path, fields] of [
-  [
-    'pipeline',
-    'pipelines',
-    [
-      'name',
-      'description',
-      'businessMode',
-      'status',
-      'sortOrder',
-      'isDefault',
-      'visibility',
-      'ownerUserId',
-      'channels',
-      'allowedUserIds',
-    ],
-  ],
-  [
-    'stage',
-    'stages',
-    [
-      'pipelineId',
-      'name',
-      'description',
-      'color',
-      'sortOrder',
-      'probability',
-      'type',
-      'isWonStage',
-      'isLostStage',
-      'isInitialStage',
-      'isFolded',
-      'operationMode',
-      'role',
-    ],
-  ],
-  [
-    'tag',
-    'tags',
-    ['name', 'slug', 'color', 'icon', 'description', 'scope', 'ownerUserId'],
-  ],
+for (const [kind, path] of [
+  ['pipeline', 'pipelines'],
+  ['stage', 'stages'],
+  ['tag', 'tags'],
 ] as const) {
   crm(kind, 'GET', `/${path}`);
   crm(kind, 'GET', `/${path}/:id`);
-  crm(kind, 'POST', `/${path}`, fields);
-  crm(kind, 'PATCH', `/${path}/:id`, fields);
+  crm(kind, 'POST', `/${path}`);
+  crm(kind, 'PATCH', `/${path}/:id`);
 }
-crm('stage', 'PATCH', '/stages/reorder', ['stages']);
-crm('stage', 'PATCH', '/stages/:id/fold', ['isFolded']);
+crm('stage', 'PATCH', '/stages/reorder');
+crm('stage', 'PATCH', '/stages/:id/fold');
 for (const path of ['opportunity-fields', 'loss-reasons'])
   crm('catalog', 'GET', `/${path}`);
-const opportunity = [
-  'pipelineId',
-  'stageId',
-  'contactId',
-  'contactName',
-  'contactEmail',
-  'contactPhone',
-  'inboxConversationId',
-  'title',
-  'description',
-  'valueAmount',
-  'currency',
-  'status',
-  'priority',
-  'source',
-  'businessMode',
-  'operationalStatus',
-  'businessContext',
-  'assignedUserId',
-  'expectedCloseDate',
-  'lostReason',
-  'cardColor',
-  'sortOrder',
-  'visibility',
-  'expectedVersion',
-  'reasonCode',
-];
 crm('opportunity', 'GET', '/opportunities');
-crm('opportunity', 'POST', '/opportunities', opportunity);
+crm('opportunity', 'POST', '/opportunities');
 crm('opportunity', 'GET', '/opportunities/:id');
-crm('opportunity', 'PATCH', '/opportunities/:id', opportunity);
-crm('opportunity', 'PATCH', '/opportunities/reorder', ['opportunities']);
-for (const [path, method, fields] of [
-  [
-    'stage',
-    'PATCH',
-    [
-      'stageId',
-      'expectedVersion',
-      'reasonCode',
-      'manualOverride',
-      'manualOverrideReason',
-    ],
-  ],
-  [
-    'status',
-    'PATCH',
-    ['status', 'lostReason', 'expectedVersion', 'reasonCode'],
-  ],
-  ['card-color', 'PATCH', ['cardColor']],
-  ['visibility', 'PATCH', ['visibility']],
-  [
-    'transfer',
-    'POST',
-    ['pipelineId', 'stageId', 'expectedVersion', 'reasonCode'],
-  ],
-  [
-    'copy',
-    'POST',
-    ['pipelineId', 'stageId', 'title', 'expectedVersion', 'reasonCode'],
-  ],
-  [
-    'reconvert',
-    'POST',
-    ['pipelineId', 'title', 'expectedVersion', 'reasonCode'],
-  ],
-  ['tags', 'POST', ['tagId']],
+crm('opportunity', 'PATCH', '/opportunities/:id');
+crm('opportunity', 'PATCH', '/opportunities/reorder');
+for (const [path, method] of [
+  ['stage', 'PATCH'],
+  ['status', 'PATCH'],
+  ['card-color', 'PATCH'],
+  ['visibility', 'PATCH'],
+  ['transfer', 'POST'],
+  ['copy', 'POST'],
+  ['reconvert', 'POST'],
+  ['tags', 'POST'],
 ] as const)
-  crm('opportunity', method, `/opportunities/:id/${path}`, fields);
+  crm('opportunity', method, `/opportunities/:id/${path}`);
 for (const path of ['tags', 'events', 'lead-score'])
   crm('opportunity', 'GET', `/opportunities/:id/${path}`);
+const contacts = '/agency/contacts/leadflow';
+add('leadflow_crm', 'contact', 'GET', `${contacts}/company-contacts`);
+add('leadflow_crm', 'contact', 'POST', `${contacts}/company-contacts`);
 add(
   'leadflow_crm',
   'contact',
   'GET',
-  '/agency/contacts/leadflow/company-contacts',
-);
-add(
-  'leadflow_crm',
-  'contact',
-  'POST',
-  '/agency/contacts/leadflow/company-contacts',
-  [
-    'type',
-    'displayName',
-    'email',
-    'phone',
-    'phoneLabel',
-    'website',
-    'instagramUsername',
-    'facebookProfile',
-    'tiktokUsername',
-    'documentType',
-    'documentNumber',
-    'address',
-    'clientId',
-    'clientName',
-  ],
-);
-add(
-  'leadflow_crm',
-  'contact',
-  'GET',
-  '/agency/contacts/leadflow/company-contacts/:contactId',
+  `${contacts}/company-contacts/:contactId`,
 );
 add(
   'leadflow_crm',
   'contact',
   'PATCH',
-  '/agency/contacts/leadflow/company-contacts/:contactId',
-  [
-    'type',
-    'displayName',
-    'firstName',
-    'lastName',
-    'legalName',
-    'documentType',
-    'documentNumber',
-    'jobTitle',
-    'status',
-    'notes',
-  ],
+  `${contacts}/company-contacts/:contactId`,
 );
-add(
-  'leadflow_crm',
-  'contact-list',
-  'GET',
-  '/agency/contacts/leadflow/company-list',
-);
-const appointment = [
-  'type',
-  'status',
-  'priority',
-  'title',
-  'description',
-  'notes',
-  'startAt',
-  'endAt',
-  'dueAt',
-  'allDay',
-  'timezone',
-  'locationType',
-  'locationText',
-  'videoMode',
-  'videoUrl',
-  'phoneUrl',
-  'visibility',
-  'ownerUserId',
-  'assignedUserId',
-  'contactId',
-  'sourceChannel',
-  'sourceConversationId',
-  'sourceOpportunityId',
-];
-const agenda = (
-  kind: LeadFlowClientKind,
-  method: string,
-  path: string,
-  fields?: readonly string[],
-) =>
-  add(
-    'leadflow_appointments',
-    kind,
-    method,
-    `/leadflow/agenda/v1${path}`,
-    fields,
-  );
+add('leadflow_crm', 'contact-list', 'GET', `${contacts}/company-list`);
+const agenda = (kind: LeadFlowClientKind, method: string, path: string) =>
+  add('leadflow_appointments', kind, method, `/leadflow/agenda/v1${path}`);
 agenda('agenda', 'GET', '/items');
 agenda('appointment', 'GET', '/appointments');
-agenda('appointment', 'POST', '/appointments', appointment);
+agenda('appointment', 'POST', '/appointments');
 agenda('appointment', 'GET', '/appointments/:id');
-agenda('appointment', 'PATCH', '/appointments/:id', appointment);
-agenda('appointment', 'PATCH', '/appointments/:id/lifecycle-status', [
-  'status',
-  'reason',
-  'confirmedVia',
-]);
+agenda('appointment', 'PATCH', '/appointments/:id');
+agenda('appointment', 'PATCH', '/appointments/:id/lifecycle-status');
 agenda('participant', 'GET', '/appointments/:id/participants');
-agenda('participant', 'POST', '/appointments/:id/participants', [
-  'participantType',
-  'userId',
-  'contactId',
-  'externalName',
-  'externalEmail',
-  'externalPhone',
-  'responseStatus',
-]);
+agenda('participant', 'POST', '/appointments/:id/participants');
 agenda(
   'participant',
   'PATCH',
   '/appointments/:id/participants/:participantId/response',
-  ['responseStatus'],
 );
 agenda('reminder', 'GET', '/appointments/:id/reminders');
-agenda('reminder', 'POST', '/appointments/:id/reminders', [
-  'reminderType',
-  'offsetMinutes',
-  'scheduledAt',
-]);
+agenda('reminder', 'POST', '/appointments/:id/reminders');
 agenda('reminder', 'POST', '/appointments/:id/reminders/:reminderId/cancel');
-const agent = (
-  kind: LeadFlowClientKind,
-  method: string,
-  path: string,
-  fields?: readonly string[],
-) => add('leadflow_agents', kind, method, `/leadflow/agents${path}`, fields);
+const agent = (kind: LeadFlowClientKind, method: string, path: string) =>
+  add('leadflow_agents', kind, method, `/leadflow/agents${path}`);
 agent('agent', 'GET', '');
 agent('agent', 'GET', '/:id');
 agent('preset', 'GET', '/presets');
-agent('agent', 'POST', '/provision', [
-  'presetKey',
-  'type',
-  'name',
-  'description',
-  'behaviorConfig',
-  'avatarConfig',
-  'activate',
-]);
-agent('agent', 'PATCH', '/:id', [
-  'name',
-  'type',
-  'description',
-  'behaviorConfig',
-  'handoffPolicy',
-  'crmPolicy',
-  'channelPolicy',
-  'avatarConfig',
-]);
+agent('agent', 'POST', '/provision');
+agent('agent', 'PATCH', '/:id');
 for (const action of ['activate', 'pause', 'publish', 'archive', 'unarchive'])
   agent('agent', 'POST', `/:id/${action}`);
+// CA11.1: the agent page binds a company channel to an explicit agent (or clears it).
+add('leadflow_agents', 'channel', 'POST', '/inbox/channels/bindings/reconcile');
 
-/** Closed method+template contract. Controller opt-ins and frontend transport must match this table. */
+/**
+ * Closed method+template contract (D-02 item 8). Controller opt-ins and the frontend transport
+ * must match this table. CA11.1 (D-02 revisada): no per-route field list — the Agency DTO
+ * (ValidationPipe whitelist + forbidNonWhitelisted) is the only write contract and the domain
+ * serializer the only read contract; the scope adapter proves company, level and authorship.
+ */
 export const LEADFLOW_CLIENT_AREA_ROUTES: readonly LeadFlowClientRoute[] =
   Object.freeze(routes);
 export function leadFlowClientAreaRoute(method: string, path: string) {

@@ -91,6 +91,9 @@ function projectLeadFlowPermissions(
           ...['configure', 'activate', 'deactivate', 'publish'].map((action) =>
             grant(`leadflow.agents.agent.${action}.admin`, ['POST', 'PATCH']),
           ),
+          // CA11.1: only the exposed binding route carries this key; the scope adapter
+          // requires an explicit company channel and agent (never the workspace sweep).
+          grant('leadflow.channels.channel.update.admin', ['POST']),
         ];
   }
   return [];
