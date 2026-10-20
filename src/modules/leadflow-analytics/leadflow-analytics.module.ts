@@ -1,3 +1,7 @@
+import { LeadFlowAnalyticsDashboardsController } from './dashboards/leadflow-analytics-dashboards.controller';
+import { LeadFlowAnalyticsDashboardsService } from './dashboards/leadflow-analytics-dashboards.service';
+import { LeadFlowAnalyticsDashboardEntity } from './dashboards/leadflow-analytics-dashboard.entity';
+import { LeadFlowTimeseriesService } from './services/leadflow-timeseries.service';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CrmOpportunityEntity } from '../crm/entities/crm-opportunity.entity';
@@ -44,6 +48,7 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     LeadFlowSettingsModule,
     TypeOrmModule.forFeature(
       [
+        LeadFlowAnalyticsDashboardEntity,
         CrmOpportunityEntity,
         CrmOpportunityEventEntity,
         CrmPipelineEntity,
@@ -62,8 +67,13 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
       'agency',
     ),
   ],
-  controllers: [LeadFlowAnalyticsController],
+  controllers: [
+    LeadFlowAnalyticsController,
+    LeadFlowAnalyticsDashboardsController,
+  ],
   providers: [
+    LeadFlowAnalyticsDashboardsService,
+    LeadFlowTimeseriesService,
     LeadFlowAnalyticsService,
     LeadFlowOperationalAnalyticsService,
     LeadFlowOverviewService,

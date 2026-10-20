@@ -16,6 +16,7 @@ import { CrmPipelineEntity } from '../../crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../../crm/entities/crm-stage.entity';
 import { InboxConversationEventEntity } from '../../inbox/entities/inbox-conversation-event.entity';
 import type { GetCommercialJourneyAnalyticsDto } from '../dto/get-commercial-journey-analytics.dto';
+import type { CommercialJourneyProjectionInput } from '../types/commercial-journey-analytics.types';
 import { projectCommercialJourney } from './commercial-journey-projector';
 
 const MAX_COHORT_DAYS = 366;
@@ -40,6 +41,69 @@ export class LeadFlowAnalyticsService {
     ctx: RequestContext,
     query: GetCommercialJourneyAnalyticsDto,
   ) {
+    return projectCommercialJourney(
+      await this.loadCommercialJourney(ctx, query),
+    );
+  }
+
+  /** Daily creation cohorts, evaluated by the same projector at the window end.
+   * Won is not grouped by close date; that would silently change the grain.
+   */
+  async getCommercialDaily(
+    ctx: RequestContext,
+    query: GetCommercialJourneyAnalyticsDto,
+  ) {
+    const input = await this.loadCommercialJourney(ctx, query);
+    const byDay = new Map<string, CrmOpportunityEntity[]>();
+    for (const opportunity of input.opportunities) {
+      const day = opportunity.createdAt.toISOString().slice(0, 10);
+      byDay.set(day, [...(byDay.get(day) ?? []), opportunity]);
+    }
+    const eventsByOpportunity = new Map<string, CrmOpportunityEventEntity[]>();
+    for (const event of input.opportunityEvents) {
+      const events = eventsByOpportunity.get(event.opportunityId) ?? [];
+      events.push(event);
+      eventsByOpportunity.set(event.opportunityId, events);
+    }
+    const eventsByConversation = new Map<
+      string,
+      InboxConversationEventEntity[]
+    >();
+    for (const event of input.conversationEvents) {
+      const events = eventsByConversation.get(event.conversationId) ?? [];
+      events.push(event);
+      eventsByConversation.set(event.conversationId, events);
+    }
+    return [...byDay].map(([day, opportunities]) => {
+      const conversations = new Set(
+        opportunities.flatMap((opportunity) =>
+          opportunity.inboxConversationId
+            ? [opportunity.inboxConversationId]
+            : [],
+        ),
+      );
+      const report = projectCommercialJourney({
+        ...input,
+        opportunities,
+        opportunityEvents: opportunities.flatMap(
+          (opportunity) => eventsByOpportunity.get(opportunity.id) ?? [],
+        ),
+        conversationEvents: [...conversations].flatMap(
+          (id) => eventsByConversation.get(id) ?? [],
+        ),
+      });
+      return {
+        day,
+        opportunities_created: report.summary.opportunities,
+        opportunities_won: report.summary.won,
+      };
+    });
+  }
+
+  private async loadCommercialJourney(
+    ctx: RequestContext,
+    query: GetCommercialJourneyAnalyticsDto,
+  ): Promise<CommercialJourneyProjectionInput> {
     const tenantId = this.requireTenantId(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
     // CC2G.1: fails closed in client mode without a Company Context — the same
@@ -66,7 +130,7 @@ export class LeadFlowAnalyticsService {
       );
     }
     if (cohort.length === 0) {
-      return projectCommercialJourney({
+      return {
         from,
         to,
         opportunities: [],
@@ -74,7 +138,7 @@ export class LeadFlowAnalyticsService {
         conversationEvents: [],
         pipelineNames: new Map(),
         stageNames: new Map(),
-      });
+      };
     }
 
     const opportunityIds = cohort.map((opportunity) => opportunity.id);
@@ -131,7 +195,7 @@ export class LeadFlowAnalyticsService {
         })
       : [];
 
-    return projectCommercialJourney({
+    return {
       from,
       to,
       opportunities: cohort,
@@ -146,7 +210,7 @@ export class LeadFlowAnalyticsService {
           { name: stage.name, pipelineId: stage.pipelineId },
         ]),
       ),
-    });
+    };
   }
 
   private resolvePeriod(query: GetCommercialJourneyAnalyticsDto) {

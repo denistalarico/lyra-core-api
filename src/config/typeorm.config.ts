@@ -1,3 +1,4 @@
+import { LeadFlowAnalyticsDashboardEntity } from '../modules/leadflow-analytics/dashboards/leadflow-analytics-dashboard.entity';
 import { ClientAreaIdentityPreferencesEntity } from '../modules/client-area/entities/client-area-identity-preferences.entity';
 import { ClientAreaMemberModuleAccessEntity } from '../modules/client-area/entities/client-area-member-module-access.entity';
 import { AuditChangeEventEntity } from '../modules/client-area/entities/audit-change-event.entity';
@@ -433,6 +434,7 @@ import {
 } from '../modules/client-conversations/entities';
 
 export const agencyEntities = [
+  LeadFlowAnalyticsDashboardEntity,
   ClientAreaIdentityPreferencesEntity,
   ClientAreaMemberModuleAccessEntity,
   AuditChangeEventEntity,

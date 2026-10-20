@@ -1,3 +1,5 @@
+import { GetLeadFlowTimeseriesDto } from './dto/get-leadflow-timeseries.dto';
+import { LeadFlowTimeseriesService } from './services/leadflow-timeseries.service';
 import {
   Body,
   Controller,
@@ -48,12 +50,25 @@ export class LeadFlowAnalyticsController {
 
   constructor(
     private readonly analytics: LeadFlowAnalyticsService,
+    private readonly timeseries: LeadFlowTimeseriesService,
     private readonly operationalAnalytics: LeadFlowOperationalAnalyticsService,
     private readonly overview: LeadFlowOverviewService,
     private readonly reports: LeadFlowAnalyticsReportService,
     private readonly intelligence: LeadFlowIntelligenceService,
     private readonly views: LeadFlowAnalyticsViewsService,
   ) {}
+
+  @Get('timeseries')
+  @RequireAnyPermission(
+    LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
+    LEADFLOW_ANALYTICS_PERMISSIONS.fullView,
+  )
+  getTimeseries(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: GetLeadFlowTimeseriesDto,
+  ) {
+    return this.timeseries.get(ctx, query);
+  }
 
   @Get('views')
   @RequireAnyPermission(
