@@ -1,3 +1,5 @@
+import { Optional } from '@nestjs/common';
+import { CompanyLogoRegistry } from '../../../common/client-area-bridge/company-logo.registry';
 import {
   Body,
   Controller,
@@ -81,6 +83,7 @@ export class AgencyClientConversationsController {
     private readonly clientRealtime: ClientConversationsGateway,
     private readonly agencyRealtime: AgencyClientConversationsGateway,
     private readonly notificationPublisher: ClientConversationNotificationPublisher,
+    @Optional() private readonly logos?: CompanyLogoRegistry,
   ) {}
 
   private actorOf(user: AuthTokenPayload) {
@@ -126,11 +129,20 @@ export class AgencyClientConversationsController {
       companyContextId: string;
       agencyClientId: string;
       displayName: string | null;
+      companyLogoUrl?: string | null;
       conversation: Awaited<
         ReturnType<ClientConversationsService['list']>
       >[number];
     }> = [];
-    for (const item of eligible) {
+    const urls = await this.logos?.resolveMany(
+      eligible.map((item) => ({
+        tenantId: actor.tenantId,
+        workspaceId: actor.workspaceId,
+        agencyClientId: item.agencyClientId,
+        companyContextId: item.companyContextId,
+      })),
+    );
+    for (const [index, item] of eligible.entries()) {
       const contact = nameBy.get(item.companyContactId);
       const scope = {
         tenantId: actor.tenantId,
@@ -147,6 +159,7 @@ export class AgencyClientConversationsController {
         companyContextId: item.companyContextId,
         agencyClientId: item.agencyClientId,
         displayName: conversation.companyDisplayName,
+        ...(this.logos ? { companyLogoUrl: urls?.[index] ?? null } : {}),
         conversation,
       });
     }

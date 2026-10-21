@@ -1,3 +1,6 @@
+import { Res, ParseUUIDPipe } from '@nestjs/common';
+import type { Response } from 'express';
+import { CompanyLogoRegistry } from '../../../common/client-area-bridge/company-logo.registry';
 import {
   Body,
   Controller,
@@ -31,6 +34,7 @@ function contextFromUser(user: AuthTokenPayload) {
 export class ClientCompaniesController {
   constructor(
     private readonly companyContexts: AgencyClientCompanyContextService,
+    private readonly logos: CompanyLogoRegistry,
   ) {}
 
   @Get()
@@ -42,6 +46,28 @@ export class ClientCompaniesController {
     return this.companyContexts.list(contextFromUser(user), clientId);
   }
 
+  @Get(':contextId/logo')
+  @RequirePermission('agency.clients.profile.view.basic.assigned')
+  async logo(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('clientId', new ParseUUIDPipe({ errorHttpStatusCode: 404 }))
+    clientId: string,
+    @Param('contextId', new ParseUUIDPipe({ errorHttpStatusCode: 404 }))
+    companyContextId: string,
+    @Res() res: Response,
+  ) {
+    const file = await this.logos.read({
+      tenantId: user.tenantId,
+      workspaceId: user.workspaceId,
+      agencyClientId: clientId,
+      companyContextId,
+    });
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    file.body.pipe(res);
+  }
   @Get('options')
   @RequirePermission('agency.clients.profile.view.basic.assigned')
   listOptions(

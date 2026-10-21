@@ -1,3 +1,4 @@
+import { BrandKitController } from '../brand-kit/brand-kit.controller';
 /**
  * CA10 — reflective inventory of the Social controllers, for the route
  * table/decorator parity spec and the HTTP matrix. Test support only: the
@@ -32,6 +33,7 @@ import { SocialContentReferenceController } from '../social-planner/social-conte
 import { SocialPlannerController } from '../social-planner/social-planner.controller';
 
 export const SOCIAL_CLIENT_AREA_CONTROLLERS = [
+  BrandKitController,
   SocialPlannerController,
   SocialContentReferenceController,
   DestinationCreativeController,

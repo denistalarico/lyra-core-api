@@ -53,7 +53,8 @@ export type SocialClientAreaRef =
   | 'videoGeneration'
   | 'connection'
   | 'adAction'
-  | 'alert';
+  | 'alert'
+  | 'brandKitAsset';
 
 export type SocialClientAreaRule = {
   module: ClientAreaModuleKey;
@@ -111,6 +112,13 @@ const adAction = { ref: 'adAction', param: 'actionId' } as const;
 export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
   Record<string, SocialClientAreaRule>
 > = {
+  'GET /brand-kit': studio(),
+  'PATCH /brand-kit': studio({ manager: true }),
+  'GET /brand-kit/assets': studio(),
+  'POST /brand-kit/assets': studio({ manager: true }),
+  'GET /brand-kit/assets/:assetId/content': studio({
+    subject: { ref: 'brandKitAsset', param: 'assetId' },
+  }),
   // ------------------------------------------------------------- Planner
   [`GET ${P}/plans`]: planner(),
   [`POST ${P}/plans`]: planner({ manager: true }),

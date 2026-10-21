@@ -1,3 +1,6 @@
+import { Optional } from '@nestjs/common';
+import { hashOAuthState } from '../../../../../common/meta/meta-oauth.support';
+import { ClientAreaSettingsRegistry } from '../../../../../common/client-area-bridge/client-area-settings.registry';
 import {
   BadRequestException,
   Injectable,
@@ -26,6 +29,7 @@ type StartInput = {
 };
 
 type CompleteInput = {
+  clientAreaSessionId?: string;
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
@@ -54,6 +58,8 @@ export class WhatsAppEmbeddedSignupService {
     private readonly metaGraphService: MetaGraphService,
     private readonly cryptoService: SettingsCryptoService,
     private readonly bindingReconciler: LeadFlowAgentBindingReconcilerService,
+    @Optional()
+    private readonly clientAreaSettings?: ClientAreaSettingsRegistry,
   ) {}
 
   async start(input: StartInput) {
@@ -77,7 +83,9 @@ export class WhatsAppEmbeddedSignupService {
         provider: 'meta',
         channelType: 'whatsapp',
         status: 'pending',
-        state,
+        state: input.metadata?.clientAreaBinding
+          ? hashOAuthState(state)
+          : state,
         expiresAt,
         payload: {},
         metadata: {
@@ -91,7 +99,7 @@ export class WhatsAppEmbeddedSignupService {
 
     return {
       sessionId: session.id,
-      state: session.state,
+      state: input.metadata?.clientAreaBinding ? state : session.state,
       status: session.status,
       expiresAt: session.expiresAt,
       provider: 'meta',
@@ -177,7 +185,12 @@ export class WhatsAppEmbeddedSignupService {
       throw new BadRequestException('Embedded signup session expired.');
     }
 
-    if (session.state !== input.state) {
+    if (
+      session.state !==
+      (session.metadata?.clientAreaBinding
+        ? hashOAuthState(input.state)
+        : input.state)
+    ) {
       session.status = 'failed';
       session.errorMessage = 'Invalid embedded signup state.';
       await this.sessionsRepository.save(session);
@@ -188,6 +201,45 @@ export class WhatsAppEmbeddedSignupService {
       throw new BadRequestException(
         'Embedded signup completion requires at least phoneNumberId or wabaId.',
       );
+    }
+
+    if (session.metadata?.clientAreaBinding) {
+      if (
+        (session.metadata.clientAreaBinding as { sessionId?: string })
+          .sessionId !== input.clientAreaSessionId
+      )
+        throw new BadRequestException('invalid_session');
+      if (!this.clientAreaSettings)
+        throw new BadRequestException('Client Area OAuth is unavailable.');
+      await this.clientAreaSettings.assertOAuthBinding(
+        session.metadata.clientAreaBinding,
+        {
+          tenantId: session.tenantId,
+          workspaceId: session.workspaceId,
+          agencyClientId: session.agencyClientId,
+          companyContextId: session.companyContextId,
+          userId: session.userId,
+        },
+      );
+      const claimed = await this.sessionsRepository
+        .createQueryBuilder()
+        .update()
+        .set({
+          metadata: () =>
+            "metadata || jsonb_build_object('clientAreaClaimedAt', now()::text)",
+        })
+        .where('id = :id AND status = :status', {
+          id: session.id,
+          status: 'pending',
+        })
+        .andWhere("NOT (metadata ? 'clientAreaClaimedAt')")
+        .execute();
+      if (claimed.affected !== 1)
+        throw new BadRequestException('Connection session already consumed.');
+      session.metadata = {
+        ...session.metadata,
+        clientAreaClaimedAt: new Date().toISOString(),
+      };
     }
 
     session.code = input.code;

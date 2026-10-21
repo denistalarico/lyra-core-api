@@ -177,6 +177,9 @@ export class AgencyUserTrustedDeviceEntity {
   @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true })
   revokedAt!: Date | null;
 
+  @Column({ type: 'varchar', length: 16, default: 'agency' })
+  surface!: AuthSurface;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

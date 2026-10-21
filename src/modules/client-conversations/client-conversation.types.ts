@@ -1,3 +1,4 @@
+import type { ClientAreaSettingsRequest } from '../client-area/client-area-settings-requests.registry';
 /**
  * CCOM1 — Client Conversation domain contracts.
  *
@@ -92,9 +93,21 @@ export type ClientConversationAttachmentKind =
  * The same discipline AP4 already proved with `replacementApprovalId`, which is
  * resolved by the projection and has no column.
  */
-export const CLIENT_CONVERSATION_CARD_KINDS = ['approval_card'] as const;
+export const CLIENT_CONVERSATION_CARD_KINDS = [
+  'approval_card',
+  'settings_request',
+] as const;
 export type ClientConversationCardKind =
   (typeof CLIENT_CONVERSATION_CARD_KINDS)[number];
+
+/** CA14 — platform-authored request, with the verified human requester retained. */
+export interface ClientConversationSettingsRequestCard {
+  kind: 'settings_request';
+  title: string;
+  requestedByUserId: string;
+  request: ClientAreaSettingsRequest;
+  [key: string]: unknown;
+}
 
 export interface ClientConversationApprovalCard {
   kind: 'approval_card';

@@ -7,7 +7,7 @@ describe('CA10 Social routes on the Surface Bridge', () => {
   const exposed = routes.filter((route) => route.exposed);
 
   it('keeps the decorator opt-ins and the adapter table identical', () => {
-    expect(exposed).toHaveLength(118);
+    expect(exposed).toHaveLength(123);
     expect(exposed.map((route) => route.key).sort()).toEqual(
       Object.keys(SOCIAL_CLIENT_AREA_ROUTES).sort(),
     );

@@ -39,7 +39,7 @@ const SOCIAL_INTEGRATIONS_PERMISSION =
 const SOCIAL_ORGANIC_ANALYTICS_PERMISSION =
   'social.analytics.organic.view.operational';
 
-const CONNECTION_MODES: Record<
+export const CONNECTION_MODES: Record<
   SocialOrganicConnectionMode,
   { provider: string; allowedAssetTypes: string[] }
 > = {

@@ -1,3 +1,6 @@
+import { Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { exportAuditChangesCsv } from '../services/audit-change-csv';
 import { CompanyProductClientAccessGuard } from '../../clients/controllers/company-product-client-access.guard';
 import {
   Body,
@@ -71,6 +74,30 @@ export class ClientAreaAccessAgencyController {
     @Param('membershipId') member: string,
   ) {
     return this.access.transfer(actor(user), clientId, company, member);
+  }
+  @Get('audit-changes/export')
+  async export(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('clientId') clientId: string,
+    @Query() query: ListAuditChangesDto,
+    @Res() res: Response,
+  ) {
+    const csv = await exportAuditChangesCsv(
+      this.audit,
+      {
+        tenantId: user.tenantId,
+        workspaceId: user.workspaceId,
+        agencyClientId: clientId,
+      },
+      query,
+    );
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="historico.csv"',
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(csv);
   }
   @Get('audit-changes')
   list(

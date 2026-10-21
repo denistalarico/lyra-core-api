@@ -1,3 +1,9 @@
+import { clientAreaOAuthRedirect } from '../../../common/client-area-bridge/client-area-oauth-redirect';
+import { Optional } from '@nestjs/common';
+import {
+  ClientAreaSettingsRegistry,
+  type ClientAreaOAuthBinding,
+} from '../../../common/client-area-bridge/client-area-settings.registry';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
@@ -29,6 +35,7 @@ import { normalizeIanaTimeZone } from './social-organic-asset-timezone';
 export const SOCIAL_ORGANIC_OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
 
 export type StartSocialOrganicConnectionInput = {
+  clientAreaBinding?: ClientAreaOAuthBinding;
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
@@ -45,6 +52,7 @@ export type HandleSocialOrganicCallbackInput =
   };
 
 export type SelectSocialOrganicAssetsInput = {
+  clientAreaSessionId?: string;
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
@@ -93,6 +101,8 @@ export class SocialOrganicOAuthService {
     private readonly cryptoService: SettingsCryptoService,
     private readonly credentialResolver: SocialOrganicCredentialResolver,
     private readonly providers: SocialOrganicOAuthProviderRegistry,
+    @Optional()
+    private readonly clientAreaSettings?: ClientAreaSettingsRegistry,
   ) {}
 
   async start(input: StartSocialOrganicConnectionInput) {
@@ -134,6 +144,9 @@ export class SocialOrganicOAuthService {
       createdById: input.userId,
       lastError: null,
       metadata: {
+        ...(input.clientAreaBinding
+          ? { clientAreaBinding: input.clientAreaBinding }
+          : {}),
         startedAt: new Date().toISOString(),
         companyContextId,
         ...(input.connectionMode
@@ -165,6 +178,17 @@ export class SocialOrganicOAuthService {
       return this.buildFallbackRedirect('provider_not_configured');
     }
 
+    const navigation =
+      this.clientAreaSettings &&
+      typeof input.state === 'string' &&
+      input.state.length <= 512
+        ? await this.connectionsRepository
+            .findOne({
+              where: { oauthStateHash: hashOAuthState(input.state) },
+              select: { metadata: true },
+            })
+            .catch(() => null)
+        : null;
     let outcome: CallbackOutcome;
 
     try {
@@ -179,7 +203,10 @@ export class SocialOrganicOAuthService {
     }
 
     try {
-      return this.buildFrontendRedirect(hooks, outcome);
+      return clientAreaOAuthRedirect(
+        this.buildFrontendRedirect(hooks, outcome),
+        navigation?.metadata,
+      );
     } catch (error) {
       this.logger.warn(
         `Organic OAuth redirect failed: ${
@@ -237,6 +264,14 @@ export class SocialOrganicOAuthService {
       if ((connection.metadata.companyContextId ?? null) !== companyContextId) {
         return { ok: false as const, reason: 'invalid_connection' as const };
       }
+
+      if (
+        connection.metadata?.clientAreaBinding &&
+        (connection.metadata.clientAreaBinding as ClientAreaOAuthBinding)
+          .sessionId !== input.clientAreaSessionId
+      )
+        throw new BadRequestException('invalid_connection');
+      await this.assertClientBinding(connection);
 
       if (connection.connectionStatus !== 'awaiting_selection') {
         return { ok: false as const, reason: 'connection_consumed' as const };
@@ -398,6 +433,25 @@ export class SocialOrganicOAuthService {
     return toSocialOrganicConnectionView(result.connection);
   }
 
+  private async assertClientBinding(connection: SocialOrganicConnectionEntity) {
+    if (!connection.metadata?.clientAreaBinding) return;
+    if (!this.clientAreaSettings)
+      throw new BadRequestException('Client Area OAuth is unavailable.');
+    await this.clientAreaSettings.assertOAuthBinding(
+      connection.metadata.clientAreaBinding,
+      {
+        tenantId: connection.tenantId,
+        workspaceId: connection.workspaceId,
+        agencyClientId: connection.agencyClientId,
+        companyContextId:
+          typeof connection.metadata.companyContextId === 'string'
+            ? connection.metadata.companyContextId
+            : null,
+        userId: connection.createdById,
+      },
+    );
+  }
+
   private async complete(
     hooks: SocialOrganicOAuthProviderHooks,
     input: SocialOrganicOAuthCallbackInput,
@@ -420,6 +474,8 @@ export class SocialOrganicOAuthService {
         .getOne();
 
       if (!connection) return { ok: false, reason: 'invalid_state' };
+
+      await this.assertClientBinding(connection);
 
       if (connection.connectionStatus !== 'pending') {
         return { ok: false, reason: 'connection_consumed' };

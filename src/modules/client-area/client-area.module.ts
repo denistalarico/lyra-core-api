@@ -1,3 +1,13 @@
+import { CompanyLogoRegistryModule } from '../../common/client-area-bridge/company-logo.registry';
+import { ClientAreaProductSettingsController } from './controllers/client-area-product-settings.controller';
+import {
+  ClientAreaSettingsRegistry,
+  ClientAreaSettingsRegistryModule,
+} from '../../common/client-area-bridge/client-area-settings.registry';
+import { ClientAreaSettingsRequestsRegistry } from './client-area-settings-requests.registry';
+import { ClientAreaSettingsRequestsController } from './controllers/client-area-settings-requests.controller';
+import { ClientAreaSecurityController } from './controllers/client-area-security.controller';
+import { ClientAreaSecurityService } from './services/client-area-security.service';
 import { ClientAreaCompanyHooksRegistry } from './client-area-company-hooks.registry';
 import { ClientAreaPublicController } from './controllers/client-area-public.controller';
 import { ClientAreaPreferencesController } from './controllers/client-area-preferences.controller';
@@ -30,6 +40,7 @@ import {
   AgencyPasswordResetEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
+  AgencyUserTrustedDeviceEntity,
 } from '../agency/entities/agency-auth.entities';
 import {
   AgencyUserProfileEntity,
@@ -96,6 +107,8 @@ const AGENCY_CONNECTION = 'agency';
  */
 @Module({
   imports: [
+    CompanyLogoRegistryModule,
+    ClientAreaSettingsRegistryModule,
     ClientAreaBridgeRegistryModule,
     PassportModule,
     JwtModule.register({}),
@@ -120,6 +133,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyPasswordResetEntity,
         AgencyUserSecuritySettingsEntity,
         AgencyUserSessionEntity,
+        AgencyUserTrustedDeviceEntity,
         AgencyUserProfileEntity,
         AgencyWorkspaceUserEntity,
         AgencyWorkspaceCompanySettingsEntity,
@@ -134,6 +148,9 @@ const AGENCY_CONNECTION = 'agency';
     ),
   ],
   controllers: [
+    ClientAreaProductSettingsController,
+    ClientAreaSettingsRequestsController,
+    ClientAreaSecurityController,
     ClientAreaPublicController,
     ClientAreaPreferencesController,
     ClientAreaAccessController,
@@ -142,6 +159,8 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaInvitationsController,
   ],
   providers: [
+    ClientAreaSettingsRequestsRegistry,
+    ClientAreaSecurityService,
     ClientAreaCompanyHooksRegistry,
     ClientAreaPublicBrandingService,
     ClientAreaBridgeAuthenticator,
@@ -173,6 +192,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaSelfContextGuard,
   ],
   exports: [
+    ClientAreaSettingsRequestsRegistry,
     ClientAreaCompanyHooksRegistry,
     ClientAreaPublicBrandingService,
     ClientAreaMemberAccessService,
@@ -203,6 +223,10 @@ export class ClientAreaModule implements OnModuleInit {
   private readonly logger = new Logger(ClientAreaModule.name);
 
   constructor(
+    private readonly settingsRegistry: ClientAreaSettingsRegistry,
+    private readonly sessions: ClientAreaSessionService,
+    private readonly authorization: ClientAreaAuthorizationService,
+    private readonly audit: AuditChangeService,
     private readonly config: ConfigService,
     private readonly bridgeRegistry: ClientAreaBridgeRegistry,
     private readonly bridge: ClientAreaBridgeAuthenticator,
@@ -210,6 +234,28 @@ export class ClientAreaModule implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    this.settingsRegistry.registerAuditWriter((input) =>
+      this.audit.record(input),
+    );
+    this.settingsRegistry.registerOAuthValidator(async (binding) => {
+      const identity = await this.sessions.authenticate({
+        sub: binding.userId,
+        tenantId: binding.tenantId,
+        sessionId: binding.sessionId,
+        typ: 'client_area',
+      });
+      const context = await this.authorization.authorize({
+        identity,
+        companyContextId: binding.companyContextId,
+        module: binding.module,
+      });
+      if (
+        context.workspaceId !== binding.workspaceId ||
+        context.agencyClientId !== binding.agencyClientId ||
+        context.role !== 'client_owner'
+      )
+        throw new Error('OAuth requires the current Owner.');
+    });
     this.bridgeRegistry.register(this.bridge);
     this.bridgeRegistry.registerActorDirectory((tenantId, ids) =>
       this.actors.resolveNames(tenantId, ids),

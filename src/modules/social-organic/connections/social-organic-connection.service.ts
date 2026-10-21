@@ -28,6 +28,7 @@ export const SOCIAL_ORGANIC_PUBLICATION_CANCELLATION_HOOK = Symbol(
 );
 
 export type SocialOrganicConnectionScope = {
+  clientAreaSessionId?: string;
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
@@ -93,12 +94,17 @@ export class SocialOrganicConnectionService {
       });
 
     this.applyClientScope(query, input.agencyClientId);
+    if (input.clientAreaSessionId)
+      query.andWhere(
+        "(connection.connectionStatus NOT IN ('pending','awaiting_selection') OR connection.metadata->'clientAreaBinding'->>'sessionId' = :clientAreaSessionId)",
+        { clientAreaSessionId: input.clientAreaSessionId },
+      );
     query.andWhere(
       `(
         asset.id IS NOT NULL OR
-        COALESCE(connection.metadata ->> 'companyContextId', '') = :companyContextId
+        COALESCE(connection.metadata ->> 'companyContextId', '') = :metadataCompanyContextId
       )`,
-      { companyContextId: input.companyContextId ?? '' },
+      { metadataCompanyContextId: input.companyContextId ?? '' },
     );
     // A disconnected row is retained for publication audit integrity, but it
     // is never a reconnect card. New OAuth state replaces the visible flow.

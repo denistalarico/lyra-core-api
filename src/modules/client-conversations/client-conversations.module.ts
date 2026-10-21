@@ -1,3 +1,6 @@
+import { CompanyLogoRegistryModule } from '../../common/client-area-bridge/company-logo.registry';
+import { ClientAreaSettingsRequestsRegistry } from '../client-area/client-area-settings-requests.registry';
+import { ClientSettingsRequestPublisher } from './services/client-settings-request.publisher';
 import { Module, type OnModuleInit } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -41,6 +44,7 @@ const AGENCY_CONNECTION = 'agency';
  */
 @Module({
   imports: [
+    CompanyLogoRegistryModule,
     TypeOrmModule.forFeature(
       [
         ClientConversationEntity,
@@ -70,6 +74,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaConversationsPreviewController,
   ],
   providers: [
+    ClientSettingsRequestPublisher,
     ClientConversationsService,
     ClientConversationAttachmentsService,
     AgencyClientConversationAccessService,
@@ -96,6 +101,8 @@ const AGENCY_CONNECTION = 'agency';
 })
 export class ClientConversationsModule implements OnModuleInit {
   constructor(
+    private readonly requests: ClientAreaSettingsRequestsRegistry,
+    private readonly requestPublisher: ClientSettingsRequestPublisher,
     private readonly conversations: ClientConversationsService,
     private readonly attachments: ClientConversationAttachmentsService,
   ) {}
@@ -111,6 +118,9 @@ export class ClientConversationsModule implements OnModuleInit {
    * that once, at the only place that knows both.
    */
   onModuleInit(): void {
+    this.requests.register((context, input) =>
+      this.requestPublisher.publish(context, input),
+    );
     this.conversations.registerAttachmentProjection((messageIds) =>
       this.attachments.forMessages(messageIds),
     );

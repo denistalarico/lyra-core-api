@@ -57,6 +57,12 @@ const CONNECTION_JOIN = (alias: string) =>
  */
 export const SOCIAL_CLIENT_AREA_SCOPE_SQL: Record<SocialClientAreaRef, string> =
   {
+    brandKitAsset:
+      scoped(
+        'brand_kit_assets a JOIN brand_kits k ON k.id = a.brand_kit_id AND k.tenant_id = a.tenant_id AND k.workspace_id = a.workspace_id',
+        'a',
+        'a.agency_client_id AS client, k.company_context_id AS company, a.created_by_id AS creator, a.brand_kit_id AS parent',
+      ) + ' AND a.deleted_at IS NULL',
     plan: `${scoped('social_plans p', 'p', own('p'))} AND p.deleted_at IS NULL`,
     content: `${scoped(`social_content_items c ${PLAN_JOIN}`, 'c', 'c.agency_client_id AS client, p.company_context_id AS company, c.created_by_id AS creator, c.plan_id AS parent')} AND c.deleted_at IS NULL`,
     revision: scoped(

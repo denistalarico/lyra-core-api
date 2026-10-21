@@ -1,3 +1,4 @@
+import { CompanyLogoRegistryModule } from '../../common/client-area-bridge/company-logo.registry';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ContextModule } from '../../common/context/context.module';
@@ -10,6 +11,7 @@ const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
+    CompanyLogoRegistryModule,
     ContextModule,
     TypeOrmModule.forFeature(
       [TenantProductEntitlementEntity, PlatformAccountEntity],

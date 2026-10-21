@@ -134,6 +134,32 @@ export class ClientAreaConsentService {
       purposes: notices,
     };
   }
+  async history(context: ClientAreaContext, page: number, limit: number) {
+    const scope = toCompanyAwareScope(context);
+    const [rows, total] = await this.db
+      .getRepository(LeadFlowTelemetryConsentEntity)
+      .findAndCount({
+        where: { ...scope, contextType: LeadFlowSettingsContextType.Client },
+        order: { occurredAt: 'DESC', id: 'DESC' },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+    return {
+      events: rows.map((row) => ({
+        id: row.id,
+        purposeKey: row.purposeKey,
+        status: row.status,
+        actorUserId: row.actorUserId,
+        actorSurface: row.actorSurface,
+        noticeVersion: row.noticeVersion,
+        occurredAt: row.occurredAt.toISOString(),
+      })),
+      total,
+      page,
+      limit,
+    };
+  }
+
   async decide(context: ClientAreaContext, input: ClientAreaConsentDecision) {
     if (context.role !== 'client_owner')
       throw new ForbiddenException('Only the Owner can decide consent.');

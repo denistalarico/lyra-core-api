@@ -1,3 +1,5 @@
+import { Optional } from '@nestjs/common';
+import { CompanyLogoRegistry } from '../../../common/client-area-bridge/company-logo.registry';
 import { AgencyContactsService } from '../../agency/agency-contacts.service';
 import {
   BadRequestException,
@@ -57,6 +59,7 @@ export class AgencyClientCompanyContextService {
     private readonly companyLinksRepository: Repository<ContactCompanyLinkEntity>,
     private readonly lifecycleHooks: AgencyClientLifecycleHooks,
     private readonly agencyContacts: AgencyContactsService,
+    @Optional() private readonly logos?: CompanyLogoRegistry,
   ) {}
 
   async list(
@@ -80,7 +83,23 @@ export class AgencyClientCompanyContextService {
       order: { isPrimary: 'DESC', createdAt: 'ASC' },
     });
 
-    return this.projectMany(contexts, this.contactsRepository);
+    const projected = await this.projectMany(contexts, this.contactsRepository);
+    if (!this.logos) return projected;
+    const urls = await this.logos.resolveMany(
+      contexts.map((entry) => ({
+        tenantId: entry.tenantId,
+        workspaceId: entry.workspaceId,
+        agencyClientId: entry.agencyClientId,
+        companyContextId: entry.id,
+      })),
+    );
+    const byId = new Map(
+      contexts.map((entry, index) => [entry.id, urls[index] ?? null]),
+    );
+    return projected.map((entry) => ({
+      ...entry,
+      companyLogoUrl: byId.get(entry.id) ?? null,
+    }));
   }
 
   async listOptions(

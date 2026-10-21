@@ -81,6 +81,7 @@ export class AuditChangeService {
       page?: number;
       limit?: number;
     },
+    clientVisibleOnly = false,
   ) {
     if (
       !isUuid(scope.agencyClientId) ||
@@ -97,7 +98,14 @@ export class AuditChangeService {
       filters.companyContextId &&
       !(await this.repo.manager
         .getRepository(AgencyClientCompanyContext)
-        .exists({ where: { id: filters.companyContextId, ...scope } }))
+        .exists({
+          where: {
+            id: filters.companyContextId,
+            tenantId: scope.tenantId,
+            workspaceId: scope.workspaceId,
+            agencyClientId: scope.agencyClientId,
+          },
+        }))
     )
       throw new NotFoundException('Company is not available.');
     const page = filters.page ?? 1,
@@ -108,6 +116,7 @@ export class AuditChangeService {
         'e.tenant_id=:tenantId AND e.workspace_id=:workspaceId AND e.agency_client_id=:agencyClientId',
         scope,
       );
+    if (clientVisibleOnly) query.andWhere('e.internal = false');
     for (const [key, column] of Object.entries({
       companyContextId: 'company_context_id',
       moduleKey: 'module_key',

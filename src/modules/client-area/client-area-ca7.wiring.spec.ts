@@ -1,3 +1,8 @@
+import { AuditChangeService } from './services/audit-change.service';
+import { ClientAreaSettingsRegistry } from '../../common/client-area-bridge/client-area-settings.registry';
+import { ClientAreaSessionService } from './services/client-area-session.service';
+import { ClientAreaAuthorizationService } from './services/client-area-authorization.service';
+import type { ClientAreaContext } from './client-area.types';
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
@@ -72,6 +77,86 @@ describe('CA7 real Nest module wiring', () => {
     await expect(
       ref.get(ClientAreaBridgeRegistry).resolveActorNames('tenant', ['client']),
     ).resolves.toEqual({ client: 'Client (cliente)' });
+    const binding = {
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      agencyClientId: 'client',
+      userId: 'user',
+      sessionId: 'session',
+      companyContextId: 'company',
+      module: 'social_planner' as const,
+    };
+    const sessionCheck = jest
+      .spyOn(ref.get(ClientAreaSessionService), 'authenticate')
+      .mockResolvedValue({
+        tenantId: 'tenant',
+        userId: 'user',
+        sessionId: 'session',
+        email: 'person@example.test',
+      });
+    const membershipCheck = jest
+      .spyOn(ref.get(ClientAreaAuthorizationService), 'authorize')
+      .mockResolvedValue({
+        workspaceId: 'workspace',
+        agencyClientId: 'client',
+        role: 'client_owner',
+      } as ClientAreaContext);
+    const settings = ref.get(ClientAreaSettingsRegistry);
+    await expect(
+      settings.assertOAuthBinding(binding, {
+        tenantId: 'tenant',
+        companyContextId: 'company',
+        userId: 'user',
+      }),
+    ).resolves.toBeUndefined();
+    expect(sessionCheck).toHaveBeenCalledWith({
+      sub: 'user',
+      tenantId: 'tenant',
+      sessionId: 'session',
+      typ: 'client_area',
+    });
+    expect(membershipCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        companyContextId: 'company',
+        module: 'social_planner',
+      }),
+    );
+    membershipCheck.mockResolvedValueOnce({
+      workspaceId: 'workspace',
+      agencyClientId: 'client',
+      role: 'client_member',
+    } as ClientAreaContext);
+    await expect(
+      settings.assertOAuthBinding(binding, {
+        tenantId: 'tenant',
+        companyContextId: 'company',
+      }),
+    ).rejects.toThrow();
+    sessionCheck.mockRejectedValueOnce(new Error('revoked session'));
+    await expect(
+      settings.assertOAuthBinding(binding, {
+        tenantId: 'tenant',
+        companyContextId: 'company',
+      }),
+    ).rejects.toThrow('revoked session');
+    await expect(
+      settings.assertOAuthBinding(binding, {
+        tenantId: 'tenant',
+        companyContextId: 'another-company',
+      }),
+    ).rejects.toThrow();
+    const write = jest
+      .spyOn(ref.get(AuditChangeService), 'record')
+      .mockResolvedValue(undefined);
+    const event = {
+      tenantId: 'tenant',
+      actorSurface: 'client_area' as const,
+      moduleKey: 'settings',
+      entityType: 'brand_kit',
+      action: 'update' as const,
+    };
+    await settings.record(event);
+    expect(write).toHaveBeenCalledWith(event);
     await ref.close();
   });
 });

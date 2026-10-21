@@ -1,3 +1,5 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
+import { RequirePermission, RequireProductEntitlement } from '../permissions';
 // src/modules/brand-kit/brand-kit.controller.ts
 //
 // Neutral Brand Kit surface (Lyra Social S1.4.9).
@@ -81,16 +83,20 @@ export class BrandKitController {
     private readonly permissionService: PlatformPermissionService,
   ) {}
 
+  @ClientAreaExposed('social_creative_studio')
+  @RequireProductEntitlement('social')
   @Get()
-  @RequireAnyPermission(...BRAND_KIT_ANY_PERMISSIONS)
+  @RequirePermission('social.brandkit.asset.view.client')
   async getBrandKit(@RequestContextData() ctx: RequestContext) {
     await this.assertProductPermission(ctx, 'view');
 
     return this.brandKitService.getBrandKit(ctx);
   }
 
+  @ClientAreaExposed('social_creative_studio')
+  @RequireProductEntitlement('social')
   @Patch()
-  @RequireAnyPermission(...BRAND_KIT_ANY_PERMISSIONS)
+  @RequirePermission('social.brandkit.assets.manage.manager_or_admin')
   async updateBrandKit(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: UpdateBrandKitDto,
@@ -100,16 +106,20 @@ export class BrandKitController {
     return this.brandKitService.updateBrandKit(ctx, dto);
   }
 
+  @ClientAreaExposed('social_creative_studio')
+  @RequireProductEntitlement('social')
   @Get('assets')
-  @RequireAnyPermission(...BRAND_KIT_ANY_PERMISSIONS)
+  @RequirePermission('social.brandkit.asset.view.client')
   async listAssets(@RequestContextData() ctx: RequestContext) {
     await this.assertProductPermission(ctx, 'view');
 
     return this.brandKitService.listAssets(ctx);
   }
 
+  @ClientAreaExposed('social_creative_studio')
+  @RequireProductEntitlement('social')
   @Post('assets')
-  @RequireAnyPermission(...BRAND_KIT_ANY_PERMISSIONS)
+  @RequirePermission('social.brandkit.assets.manage.manager_or_admin')
   @UseInterceptors(FileInterceptor('file', BRAND_KIT_UPLOAD_OPTIONS))
   async uploadAsset(
     @RequestContextData() ctx: RequestContext,
@@ -142,8 +152,10 @@ export class BrandKitController {
    * allowed the read. `nosniff` so a browser cannot be talked into
    * interpreting an image as something executable.
    */
+  @ClientAreaExposed('social_creative_studio')
+  @RequireProductEntitlement('social')
   @Get('assets/:assetId/content')
-  @RequireAnyPermission(...BRAND_KIT_ANY_PERMISSIONS)
+  @RequirePermission('social.brandkit.asset.view.client')
   async getAssetContent(
     @RequestContextData() ctx: RequestContext,
     @Param('assetId') assetId: string,
@@ -187,6 +199,9 @@ export class BrandKitController {
       ctx.managedContext?.productKey,
       verb,
     );
+
+    // The Surface Bridge has already checked module + verb + company.
+    if (ctx.role === 'client_area_actor') return;
 
     await this.permissionService.assertCan(
       {

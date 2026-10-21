@@ -154,6 +154,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
   // public way to reach a credential is what keeps the next module from
   // reaching for the connection repository instead.
   exports: [
+    MetaAdsOAuthService,
     SocialAdBreakdownReadService,
     MetaAdsGraphService,
     SocialAdConnectionService,

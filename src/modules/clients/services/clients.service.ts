@@ -1,3 +1,5 @@
+import { Optional } from '@nestjs/common';
+import { CompanyLogoRegistry } from '../../../common/client-area-bridge/company-logo.registry';
 import {
   BadRequestException,
   ConflictException,
@@ -81,6 +83,7 @@ export class ClientsService {
     private readonly clientCostCenterService: ClientCostCenterService,
     private readonly lifecycleHooks: AgencyClientLifecycleHooks,
     private readonly companySetup: ClientCompanySetupService,
+    @Optional() private readonly logos?: CompanyLogoRegistry,
   ) {}
 
   async list(context: RequestContext, query: ListClientsQueryDto) {
@@ -178,8 +181,16 @@ export class ClientsService {
     }
 
     const pending = await this.companySetup.pendingForClients(items);
+    const logoUrls = await this.logos?.resolveMany(
+      items.map((client) => ({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        agencyClientId: client.id,
+      })),
+    );
     return {
-      items: items.map((client) => ({
+      items: items.map((client, index) => ({
+        ...(this.logos ? { companyLogoUrl: logoUrls?.[index] ?? null } : {}),
         ...client,
         companySetupPending: pending.has(client.id),
         productsProvisioned: Boolean(client.managedTenantId),
@@ -362,6 +373,15 @@ export class ClientsService {
 
     return {
       ...client,
+      ...(this.logos
+        ? {
+            companyLogoUrl: await this.logos.resolve({
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+              agencyClientId: client.id,
+            }),
+          }
+        : {}),
       companySetupPending: (
         await this.companySetup.pendingForClients([client])
       ).has(client.id),

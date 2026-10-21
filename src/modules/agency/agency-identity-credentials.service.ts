@@ -2,7 +2,9 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
 import { createHash, randomInt } from 'crypto';
-import { verify } from 'otplib';
+import { generateSecret, generateURI, verify } from 'otplib';
+import * as QRCode from 'qrcode';
+import { IsNull } from 'typeorm';
 import { Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import {
@@ -150,6 +152,82 @@ export class AgencyIdentityCredentialsService {
         location: client.location ?? client.ipAddress ?? null,
       }),
     );
+  }
+
+  /** CA14 — additive setup primitives; existing Agency flows are unchanged. */
+  async beginTwoFactorSetup(
+    security: AgencyUserSecuritySettingsEntity,
+    method: TwoFactorMethod,
+    issuer: string,
+  ) {
+    if (method === 'email') {
+      await this.sendEmailTwoFactorCode(security, 'setup', issuer);
+      return { method, email: security.currentEmail };
+    }
+    const secret = generateSecret();
+    const otpauth = generateURI({
+      issuer,
+      label: security.currentEmail,
+      secret,
+    });
+    await this.securityRepo.update(
+      { tenantId: security.tenantId, userId: security.userId },
+      {
+        twoFactorPendingSecretEncrypted: this.cryptoService.encrypt(secret),
+      },
+    );
+    return { method, otpauth, qrCodeDataUrl: await QRCode.toDataURL(otpauth) };
+  }
+
+  async confirmTwoFactorSetup(
+    identity: { tenantId: string; userId: string },
+    method: TwoFactorMethod,
+    code: string,
+  ) {
+    await this.securityRepo.manager.transaction(async (manager) => {
+      const security = manager.getRepository(AgencyUserSecuritySettingsEntity);
+      const row = await security.findOne({
+        where: identity,
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!row) throw new UnauthorizedException('Invalid identity.');
+      if (method === 'email') {
+        const codes = manager.getRepository(AgencyEmailTwoFactorCodeEntity);
+        const pending = await codes.findOne({
+          where: { ...identity, purpose: 'setup' },
+          order: { createdAt: 'DESC' },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (
+          !pending ||
+          pending.usedAt ||
+          pending.attempts >= 5 ||
+          pending.expiresAt.getTime() <= Date.now() ||
+          pending.codeHash !== this.hashToken(code.trim())
+        ) {
+          throw new UnauthorizedException('Invalid 2FA code');
+        }
+        await codes.update(
+          { id: pending.id, usedAt: IsNull() },
+          { usedAt: new Date() },
+        );
+      } else {
+        const secret = this.cryptoService.decrypt(
+          row.twoFactorPendingSecretEncrypted,
+        );
+        if (!secret || !(await isValidAuthenticatorCode(code, secret)))
+          throw new UnauthorizedException('Invalid 2FA code');
+      }
+      await security.update(identity, {
+        twoFactorEnabled: true,
+        twoFactorMethod: method,
+        twoFactorSecretEncrypted:
+          method === 'authenticator'
+            ? row.twoFactorPendingSecretEncrypted
+            : null,
+        twoFactorPendingSecretEncrypted: null,
+      });
+    });
   }
 
   async getEmailTransportOverride(

@@ -226,6 +226,9 @@ import { AgencyClientCompanyContext } from '../clients/entities/agency-client-co
     InstagramContactEnrichmentService,
   ],
   exports: [
+    InboxChannelLifecycleService,
+    FacebookInstagramOAuthService,
+    FacebookMessengerOAuthService,
     InboxRealtimeEventBusService,
     InboxService,
     InboxSettingsService,

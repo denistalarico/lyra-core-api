@@ -1,3 +1,9 @@
+import { clientAreaOAuthRedirect } from '../../../common/client-area-bridge/client-area-oauth-redirect';
+import { Optional } from '@nestjs/common';
+import {
+  ClientAreaSettingsRegistry,
+  type ClientAreaOAuthBinding,
+} from '../../../common/client-area-bridge/client-area-settings.registry';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
@@ -36,6 +42,7 @@ const PROVIDER = 'meta_ads' as const;
 const SOCIAL_META_ADS_CHANNEL_PATH = '/social/channels/metaads';
 
 export type StartMetaAdsConnectionInput = {
+  clientAreaBinding?: ClientAreaOAuthBinding;
   tenantId: string;
   workspaceId: string;
   userId: string | null;
@@ -44,6 +51,7 @@ export type StartMetaAdsConnectionInput = {
 };
 
 export type SelectMetaAdsAccountInput = {
+  clientAreaSessionId?: string;
   tenantId: string;
   workspaceId: string;
   agencyClientId?: string | null;
@@ -88,6 +96,8 @@ export class MetaAdsOAuthService {
     private readonly graphService: MetaAdsGraphService,
     private readonly cryptoService: SettingsCryptoService,
     private readonly backfillPlanner: SocialAdBackfillPlannerService,
+    @Optional()
+    private readonly clientAreaSettings?: ClientAreaSettingsRegistry,
   ) {}
 
   async start(input: StartMetaAdsConnectionInput) {
@@ -122,7 +132,12 @@ export class MetaAdsOAuthService {
       oauthStateHash: hashOAuthState(state),
       oauthExpiresAt: expiresAt,
       createdById: input.userId,
-      metadata: { startedAt: new Date().toISOString() },
+      metadata: {
+        startedAt: new Date().toISOString(),
+        ...(input.clientAreaBinding
+          ? { clientAreaBinding: input.clientAreaBinding }
+          : {}),
+      },
     });
 
     await this.connectionsRepository.save(connection);
@@ -148,6 +163,17 @@ export class MetaAdsOAuthService {
    * becomes a safe reason code in the query string.
    */
   async handleCallback(input: MetaAdsCallbackInput) {
+    const navigation =
+      this.clientAreaSettings &&
+      typeof input.state === 'string' &&
+      input.state.length <= 512
+        ? await this.connectionsRepository
+            .findOne({
+              where: { oauthStateHash: hashOAuthState(input.state) },
+              select: { metadata: true },
+            })
+            .catch(() => null)
+        : null;
     let outcome: CallbackOutcome;
 
     try {
@@ -161,7 +187,10 @@ export class MetaAdsOAuthService {
       outcome = { ok: false, reason: 'callback_failed' };
     }
 
-    return this.buildFrontendRedirect(outcome);
+    return clientAreaOAuthRedirect(
+      this.buildFrontendRedirect(outcome),
+      navigation?.metadata,
+    );
   }
 
   async select(input: SelectMetaAdsAccountInput) {
@@ -197,6 +226,14 @@ export class MetaAdsOAuthService {
       if (!pending) {
         return { ok: false as const, code: 'invalid_connection' as const };
       }
+
+      if (
+        pending.metadata?.clientAreaBinding &&
+        (pending.metadata.clientAreaBinding as ClientAreaOAuthBinding)
+          .sessionId !== input.clientAreaSessionId
+      )
+        throw new BadRequestException('invalid_connection');
+      await this.assertClientBinding(pending);
 
       if (pending.connectionStatus !== 'awaiting_selection') {
         return { ok: false as const, code: 'connection_consumed' as const };
@@ -344,6 +381,24 @@ export class MetaAdsOAuthService {
     return toSocialAdConnectionView(result.connection);
   }
 
+  private async assertClientBinding(
+    connection: SocialAdAccountConnectionEntity,
+  ) {
+    if (!connection.metadata?.clientAreaBinding) return;
+    if (!this.clientAreaSettings)
+      throw new BadRequestException('Client Area OAuth is unavailable.');
+    await this.clientAreaSettings.assertOAuthBinding(
+      connection.metadata.clientAreaBinding,
+      {
+        tenantId: connection.tenantId,
+        workspaceId: connection.workspaceId,
+        agencyClientId: connection.agencyClientId,
+        companyContextId: connection.companyContextId,
+        userId: connection.createdById,
+      },
+    );
+  }
+
   private async complete(
     input: MetaAdsCallbackInput,
   ): Promise<CallbackOutcome> {
@@ -368,6 +423,8 @@ export class MetaAdsOAuthService {
       if (!connection) {
         return { ok: false, reason: 'invalid_state' };
       }
+
+      await this.assertClientBinding(connection);
 
       if (connection.connectionStatus !== 'pending') {
         return { ok: false, reason: 'connection_consumed' };

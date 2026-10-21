@@ -19,5 +19,6 @@ import { PlatformBusinessProfileService } from './services/platform-business-pro
   imports: [PermissionsModule, LeadFlowSettingsModule],
   controllers: [PlatformBusinessProfileController],
   providers: [PlatformBusinessProfileService],
+  exports: [PlatformBusinessProfileService],
 })
 export class PlatformSettingsModule {}

@@ -1,3 +1,6 @@
+import { Optional } from '@nestjs/common';
+import { ClientAreaSettingsRegistry } from '../../../common/client-area-bridge/client-area-settings.registry';
+import { recordChange } from '../../client-area/services/audit-change.service';
 // src/modules/brand-kit/services/brand-kit.service.ts
 //
 // Brand Kit domain service (Lyra Social S1.4.9).
@@ -68,6 +71,8 @@ export class BrandKitService {
     @InjectRepository(BrandKitAssetEntity, AGENCY_CONNECTION)
     private readonly assets: Repository<BrandKitAssetEntity>,
     private readonly filesService: FilesService,
+    @Optional()
+    private readonly clientAreaSettings?: ClientAreaSettingsRegistry,
   ) {}
 
   /**
@@ -94,6 +99,12 @@ export class BrandKitService {
     const scope = this.resolveScope(ctx);
     const kit = await this.ensureKit(scope, ctx.userId ?? null);
 
+    const before = {
+      palette: kit.palette,
+      typography: kit.typography,
+      guidelines: kit.guidelines,
+    };
+
     // Only keys actually present are written. Assigning the whole DTO would
     // blank `guidelines` on a palette-only PATCH — the undefined-overwrite
     // bug this codebase has hit before.
@@ -118,6 +129,24 @@ export class BrandKitService {
     kit.updatedById = ctx.userId ?? null;
 
     const saved = await this.kits.save(kit);
+    await this.clientAreaSettings?.record({
+      ...scope,
+      actorUserId: ctx.userId ?? null,
+      actorSurface: ctx.role === 'client_area_actor' ? 'client_area' : 'agency',
+      moduleKey: 'social_creative_studio',
+      entityType: 'brand_kit',
+      entityId: saved.id,
+      action: 'update',
+      ...recordChange(
+        before,
+        {
+          palette: saved.palette,
+          typography: saved.typography,
+          guidelines: saved.guidelines,
+        },
+        ['palette', 'typography', 'guidelines'],
+      ),
+    });
     const assets = await this.listKitAssets(saved.id, scope);
 
     return mapBrandKitResponse(saved, assets, scope.agencyClientId);
@@ -215,6 +244,20 @@ export class BrandKitService {
         }),
       );
 
+      await this.clientAreaSettings?.record({
+        ...scope,
+        actorUserId: ctx.userId ?? null,
+        actorSurface:
+          ctx.role === 'client_area_actor' ? 'client_area' : 'agency',
+        moduleKey: 'social_creative_studio',
+        entityType: 'brand_kit_asset',
+        entityId: saved.id,
+        action: 'create',
+        ...recordChange({}, { assetId: saved.id, kind: saved.kind }, [
+          'assetId',
+          'kind',
+        ]),
+      });
       return mapBrandKitAssetResponse(saved);
     } catch (error) {
       await this.bestEffortRemoveObject(objectKey, 'upload rollback');

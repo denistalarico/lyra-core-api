@@ -1,3 +1,6 @@
+import { clientAreaOAuthRedirect } from '../../../../../../common/client-area-bridge/client-area-oauth-redirect';
+import { Optional } from '@nestjs/common';
+import { ClientAreaSettingsRegistry } from '../../../../../../common/client-area-bridge/client-area-settings.registry';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
@@ -57,6 +60,7 @@ type EncryptedFacebookCredentials = {
 };
 
 type SelectFacebookMessengerPageInput = {
+  clientAreaSessionId?: string;
   tenantId: string;
   workspaceId: string;
   agencyClientId: string | null;
@@ -102,6 +106,8 @@ export class FacebookMessengerOAuthService {
     private readonly assetDiscoveryService: MetaAssetDiscoveryService,
     private readonly cryptoService: SettingsCryptoService,
     private readonly channelConnectionService: FacebookMessengerChannelConnectionService,
+    @Optional()
+    private readonly clientAreaSettings?: ClientAreaSettingsRegistry,
   ) {}
 
   async start(input: StartFacebookMessengerOAuthInput) {
@@ -150,6 +156,17 @@ export class FacebookMessengerOAuthService {
   }
 
   async handleCallback(input: FacebookLoginCallbackInput) {
+    const navigation =
+      this.clientAreaSettings &&
+      typeof input.state === 'string' &&
+      input.state.length <= 512
+        ? await this.sessionsRepository
+            .findOne({
+              where: { state: hashFacebookOAuthState(input.state) },
+              select: { metadata: true },
+            })
+            .catch(() => null)
+        : null;
     let outcome: CallbackOutcome;
 
     try {
@@ -158,7 +175,10 @@ export class FacebookMessengerOAuthService {
       outcome = { ok: false, reason: 'session_persistence_failed' };
     }
 
-    return this.buildFrontendRedirect(outcome);
+    return clientAreaOAuthRedirect(
+      this.buildFrontendRedirect(outcome),
+      navigation?.metadata,
+    );
   }
 
   async getSessionAssets(input: GetFacebookMessengerSessionAssetsInput) {
@@ -189,6 +209,13 @@ export class FacebookMessengerOAuthService {
     if (!session) {
       throw new BadRequestException('invalid_session');
     }
+    if (
+      session.metadata?.clientAreaBinding &&
+      (session.metadata.clientAreaBinding as { sessionId?: string })
+        .sessionId !== input.clientAreaSessionId
+    )
+      throw new BadRequestException('invalid_session');
+    await this.assertClientBinding(session);
     if (session.status === 'expired') {
       throw new BadRequestException('session_expired');
     }
@@ -255,9 +282,17 @@ export class FacebookMessengerOAuthService {
         if (!session) {
           return { ok: false, code: 'invalid_session' };
         }
+        if (
+          session.metadata?.clientAreaBinding &&
+          (session.metadata.clientAreaBinding as { sessionId?: string })
+            .sessionId !== input.clientAreaSessionId
+        )
+          throw new BadRequestException('invalid_session');
+        await this.assertClientBinding(session);
         if (session.status === 'expired') {
           return { ok: false, code: 'session_expired' };
         }
+        await this.assertClientBinding(session);
         if (session.status !== 'pending') {
           return { ok: false, code: 'session_consumed' };
         }
@@ -364,6 +399,24 @@ export class FacebookMessengerOAuthService {
     return { channelId: result.channelId };
   }
 
+  private async assertClientBinding(
+    session: InboxChannelConnectionSessionEntity,
+  ) {
+    if (!session.metadata?.clientAreaBinding) return;
+    if (!this.clientAreaSettings)
+      throw new BadRequestException('Client Area OAuth is unavailable.');
+    await this.clientAreaSettings.assertOAuthBinding(
+      session.metadata.clientAreaBinding,
+      {
+        tenantId: session.tenantId,
+        workspaceId: session.workspaceId,
+        agencyClientId: session.agencyClientId,
+        companyContextId: session.companyContextId,
+        userId: session.userId,
+      },
+    );
+  }
+
   private async complete(
     input: FacebookLoginCallbackInput,
   ): Promise<CallbackOutcome> {
@@ -389,6 +442,8 @@ export class FacebookMessengerOAuthService {
       if (!session) {
         return { ok: false, reason: 'invalid_state' };
       }
+
+      await this.assertClientBinding(session);
 
       if (
         session.status !== 'pending' ||

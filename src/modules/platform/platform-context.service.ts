@@ -1,3 +1,5 @@
+import { Optional } from '@nestjs/common';
+import { CompanyLogoRegistry } from '../../common/client-area-bridge/company-logo.registry';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -60,6 +62,7 @@ export class PlatformContextService {
     private readonly platformAccountsRepository: Repository<PlatformAccountEntity>,
     private readonly configService: ConfigService,
     private readonly managedContextDirectory: ManagedContextDirectoryService,
+    @Optional() private readonly logos?: CompanyLogoRegistry,
   ) {}
 
   async getContext(
@@ -139,6 +142,21 @@ export class PlatformContextService {
             productKey,
           );
 
+        if (this.logos) {
+          const companyScopes = clients.flatMap((client) =>
+            client.companies.map((company) => ({
+              tenantId: input.tenantId,
+              workspaceId: input.workspaceId,
+              agencyClientId: client.clientId,
+              companyContextId: company.companyContextId,
+            })),
+          );
+          const urls = await this.logos.resolveMany(companyScopes);
+          let index = 0;
+          for (const client of clients)
+            for (const company of client.companies)
+              Object.assign(company, { companyLogoUrl: urls[index++] ?? null });
+        }
         return [
           productKey,
           {

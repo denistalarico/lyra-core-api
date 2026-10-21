@@ -134,10 +134,21 @@ function projectSocialPermissions(
     ];
   }
   if (module === 'social_creative_studio') {
-    const reads = [grant('social.creative.content.view.assigned', read)];
+    const reads = [
+      grant('social.creative.content.view.assigned', read),
+      grant('social.brandkit.asset.view.client', read),
+    ];
     if (level === 'viewer') return reads;
     return [
       ...reads,
+      ...(level === 'manager'
+        ? [
+            grant('social.brandkit.assets.manage.manager_or_admin', [
+              'POST',
+              'PATCH',
+            ]),
+          ]
+        : []),
       grant('social.creative.content.create_draft.assigned', ['POST']),
       grant('social.creative.content.update.assigned', ['POST', 'PATCH'], own),
     ];

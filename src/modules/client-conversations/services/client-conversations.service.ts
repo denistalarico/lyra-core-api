@@ -18,6 +18,7 @@ import {
   isUuid,
   timelineSourceRank,
   type ClientConversationApprovalCard,
+  type ClientConversationSettingsRequestCard,
   type ClientConversationCursor,
   type ClientConversationMessageKind,
   type ClientConversationMessageMetadata,
@@ -765,7 +766,9 @@ export class ClientConversationsService {
    */
   async publishCard(
     scope: ClientConversationScope,
-    card: ClientConversationApprovalCard,
+    card:
+      | ClientConversationApprovalCard
+      | ClientConversationSettingsRequestCard,
     dedupeKey: string,
   ): Promise<{
     status: 'posted' | 'duplicate' | 'skipped';
@@ -810,7 +813,10 @@ export class ClientConversationsService {
         conversationId: conversation.id,
         senderSurface: 'agency',
         senderUserId: null,
-        body: approvalCardBody(card.title, card.version),
+        body:
+          card.kind === 'approval_card'
+            ? approvalCardBody(card.title, card.version)
+            : card.title,
         kind: 'system',
         metadata: { card, dedupeKey },
       }),

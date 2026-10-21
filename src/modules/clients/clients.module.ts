@@ -1,3 +1,4 @@
+import { CompanyLogoRegistryModule } from '../../common/client-area-bridge/company-logo.registry';
 import { CompanyProductClientAccessGuard } from './controllers/company-product-client-access.guard';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { CompanyProductsModule } from '../../common/company-products/company-products.module';
@@ -46,6 +47,7 @@ const AGENCY_CONNECTION = 'agency';
 
 @Module({
   imports: [
+    CompanyLogoRegistryModule,
     CompanyProductsModule,
     AgencyContactsModule,
     FinanceModule,

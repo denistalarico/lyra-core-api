@@ -27,6 +27,8 @@ export type ClientConversationMessageNotice = {
   authorSurface: NotificationRecipientSurface;
   authorUserId: string;
   createdAt: Date;
+  /** CA14 requests notify workspace Owner/Admin when the conversation has no Agency seat yet. */
+  agencyFallbackRecipientUserIds?: string[];
 };
 
 /**
@@ -161,6 +163,15 @@ export class ClientConversationNotificationPublisher {
       },
     });
 
+    if (!rows.length && notice.agencyFallbackRecipientUserIds?.length) {
+      return notice.agencyFallbackRecipientUserIds
+        .filter((userId) => userId !== notice.authorUserId)
+        .map((userId) => ({
+          userId,
+          interestReason: NotificationInterestReason.PARTICIPANT,
+          surface: NotificationRecipientSurface.AGENCY,
+        }));
+    }
     return rows
       .filter((row) => row.userId && row.userId !== notice.authorUserId)
       .map((row) => ({

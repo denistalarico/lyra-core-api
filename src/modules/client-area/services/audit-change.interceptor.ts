@@ -44,7 +44,8 @@ export class AuditChangeInterceptor implements NestInterceptor {
     if (!covered || ['GET', 'HEAD', 'OPTIONS'].includes(req.method))
       return next.handle();
     const ctx = req.clientAreaContext;
-    const tenantId = ctx?.tenantId ?? req.user?.tenantId;
+    const tenantId =
+      ctx?.tenantId ?? req.clientAreaIdentity?.tenantId ?? req.user?.tenantId;
     if (!isUuid(tenantId)) return next.handle();
     const requestId = randomUUID();
     return next.handle().pipe(
@@ -70,7 +71,9 @@ export class AuditChangeInterceptor implements NestInterceptor {
                 ? req.params.companyContextId
                 : null),
             actorUserId:
-              ctx?.userId ?? (isUuid(req.user?.sub) ? req.user.sub : null),
+              ctx?.userId ??
+              req.clientAreaIdentity?.userId ??
+              (isUuid(req.user?.sub) ? req.user.sub : null),
             actorSurface:
               ctx || req.clientAreaIdentity ? 'client_area' : 'agency',
             moduleKey: exposed ?? 'settings',

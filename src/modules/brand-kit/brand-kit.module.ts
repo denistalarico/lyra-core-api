@@ -1,3 +1,6 @@
+import { CompanyLogoRegistryModule } from '../../common/client-area-bridge/company-logo.registry';
+import { CompanyLogoResolver } from './services/company-logo.resolver';
+import { ClientAreaSettingsRegistryModule } from '../../common/client-area-bridge/client-area-settings.registry';
 // src/modules/brand-kit/brand-kit.module.ts
 //
 // Brand Kit domain (Lyra Social S1.4.9) — visual identity for the agency or
@@ -19,12 +22,14 @@ import { SocialBrandKitContextPort } from './services/social-brand-kit-context.p
 
 @Module({
   imports: [
+    CompanyLogoRegistryModule,
+    ClientAreaSettingsRegistryModule,
     PermissionsModule,
     FilesModule,
     TypeOrmModule.forFeature([BrandKitEntity, BrandKitAssetEntity], 'agency'),
   ],
   controllers: [BrandKitController],
-  providers: [BrandKitService, SocialBrandKitContextPort],
+  providers: [BrandKitService, SocialBrandKitContextPort, CompanyLogoResolver],
   // Exported for the future consumers the architecture names (Creative
   // Studio, Pletor): they must read Brand Kit through this service, never by
   // building a storage URL by hand.

@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -8,11 +9,12 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import type { Request } from 'express';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { AgencyIdentityCredentialsService } from '../../agency/agency-identity-credentials.service';
 import {
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
+  AgencyUserTrustedDeviceEntity,
 } from '../../agency/entities/agency-auth.entities';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
 import {
@@ -92,7 +94,8 @@ function sessionInvalid(message = 'Invalid Client Area session.') {
  *
  * Forgot/reset password and invitation acceptance (CA2) live in their own
  * services and reuse `findEligibleIdentities`/`createAuthenticatedSession`.
- * Not implemented: login alerts and trusted devices.
+ * CA14 tracks Client Area trusted devices independently; trust never bypasses 2FA.
+ * Login alerts remain outside this surface.
  */
 @Injectable()
 export class ClientAreaAuthService {
@@ -110,6 +113,9 @@ export class ClientAreaAuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly management: ClientAreaManagementService,
+    @Optional()
+    @InjectRepository(AgencyUserTrustedDeviceEntity, AGENCY_CONNECTION)
+    private readonly trustedDevicesRepo?: Repository<AgencyUserTrustedDeviceEntity>,
   ) {}
 
   async login(
@@ -447,6 +453,19 @@ export class ClientAreaAuthService {
       client,
       CLIENT_AREA_SURFACE,
     );
+
+    if (client.deviceFingerprint && this.trustedDevicesRepo) {
+      await this.trustedDevicesRepo.update(
+        {
+          tenantId: identity.tenantId,
+          userId: identity.userId,
+          surface: CLIENT_AREA_SURFACE,
+          deviceFingerprint: client.deviceFingerprint,
+          revokedAt: IsNull(),
+        },
+        { lastUsedAt: new Date() },
+      );
+    }
 
     return {
       accessToken: await this.signAccessToken(identity, session.id),

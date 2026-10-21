@@ -438,6 +438,7 @@ export class AgencyAuthService {
             tenantId: security.tenantId,
             userId: security.userId,
             deviceFingerprint: client.deviceFingerprint,
+            surface: AGENCY_SURFACE,
           },
         })
       : null;

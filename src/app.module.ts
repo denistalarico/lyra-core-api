@@ -1,3 +1,4 @@
+import { ClientAreaProductSettingsModule } from './modules/client-area-product-settings/client-area-product-settings.module';
 import { ClientAreaAnalyticsModule } from './modules/client-area-analytics/client-area-analytics.module';
 import { ClientAgencyBillingModule } from './modules/client-agency-billing/client-agency-billing.module';
 // src/app.module.ts
@@ -73,6 +74,7 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
 
 @Module({
   imports: [
+    ClientAreaProductSettingsModule,
     HealthModule,
     TeamChatModule,
     QuotesModule,

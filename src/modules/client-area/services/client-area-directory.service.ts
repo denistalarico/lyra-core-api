@@ -1,3 +1,7 @@
+import { clientAreaSettingsUiPermissions } from '../client-area-settings-ui-permissions';
+import { Optional } from '@nestjs/common';
+import { CompanyLogoRegistry } from '../../../common/client-area-bridge/company-logo.registry';
+import { toCompanyAwareScope } from '../client-area-scope';
 import { clientAreaUiPermissions } from '../client-area-agency-permission-projection';
 import { Injectable } from '@nestjs/common';
 import {
@@ -14,12 +18,14 @@ import { ClientAreaSelfAccessService } from './client-area-self-access.service';
 
 export type ClientAreaCompanyListItem = {
   companyContextId: string;
+  companyLogoUrl?: string | null;
   displayName: string;
   role: ClientAreaContext['role'];
 };
 
 export type ClientAreaContextProjection = {
   companyContextId: string;
+  companyLogoUrl?: string | null;
   displayName: string;
   role: ClientAreaContext['role'];
   permissions: string[];
@@ -42,6 +48,7 @@ export type ClientAreaDirectoryEntry =
       kind: 'company';
       contextId: string;
       companyContextId: string;
+      companyLogoUrl?: string | null;
       displayName: string;
       role: ClientAreaContext['role'];
     }
@@ -80,6 +87,7 @@ export class ClientAreaDirectoryService {
     private readonly auth: ClientAreaAuthService,
     private readonly management: ClientAreaManagementService,
     private readonly selfAccess: ClientAreaSelfAccessService,
+    @Optional() private readonly logos?: CompanyLogoRegistry,
   ) {}
 
   async me(identity: ClientAreaIdentity) {
@@ -113,6 +121,7 @@ export class ClientAreaDirectoryService {
       contextId: company.companyContextId,
       companyContextId: company.companyContextId,
       displayName: company.displayName,
+      ...(this.logos ? { companyLogoUrl: company.companyLogoUrl ?? null } : {}),
       role: company.role,
     }));
 
@@ -163,9 +172,18 @@ export class ClientAreaDirectoryService {
       ),
     );
 
-    return contexts
-      .filter((context): context is ClientAreaContext => context !== null)
-      .map((context) => ({
+    const authorized = contexts.filter(
+      (context): context is ClientAreaContext => context !== null,
+    );
+    const urls = await this.logos?.resolveMany(
+      authorized.map((context) => ({
+        ...toCompanyAwareScope(context),
+        surface: 'client_area',
+      })),
+    );
+    return authorized
+      .map((context, index) => ({
+        ...(this.logos ? { companyLogoUrl: urls?.[index] ?? null } : {}),
         companyContextId: context.companyContextId,
         displayName: context.companyDisplayName,
         role: context.role,
@@ -183,12 +201,21 @@ export class ClientAreaDirectoryService {
     return {
       companyContextId: context.companyContextId,
       displayName: context.companyDisplayName,
+      ...(this.logos
+        ? {
+            companyLogoUrl: await this.logos.resolve({
+              ...toCompanyAwareScope(context),
+              surface: 'client_area',
+            }),
+          }
+        : {}),
       role: context.role,
       permissions: [...context.permissions].sort(),
       modules: context.memberAccess!,
       accountRole: context.accountRole!,
       uiPermissions: [
         ...new Set([
+          ...clientAreaSettingsUiPermissions(context),
           ...context.permissions,
           ...(context.memberAccess
             ? clientAreaUiPermissions(context.memberAccess)

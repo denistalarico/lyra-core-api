@@ -599,7 +599,13 @@ export class AgencySettingsService {
     currentSessionId?: string,
   ) {
     const device = await this.trustedDevicesRepo.findOne({
-      where: { tenantId, userId, id: deviceId, revokedAt: IsNull() },
+      where: {
+        tenantId,
+        userId,
+        id: deviceId,
+        surface: 'agency',
+        revokedAt: IsNull(),
+      },
     });
 
     if (!device) {
@@ -624,7 +630,7 @@ export class AgencySettingsService {
     }
 
     const session = await this.userSessionsRepo.findOne({
-      where: { tenantId, userId, id: sessionId },
+      where: { tenantId, userId, id: sessionId, surface: 'agency' },
     });
 
     if (!session || !session.deviceFingerprint) {
@@ -649,6 +655,7 @@ export class AgencySettingsService {
       where: {
         tenantId,
         userId,
+        surface: 'agency',
         deviceFingerprint: session.deviceFingerprint!,
       },
     });
@@ -668,6 +675,7 @@ export class AgencySettingsService {
         : this.trustedDevicesRepo.create({
             tenantId,
             userId,
+            surface: 'agency',
             deviceFingerprint: session.deviceFingerprint,
             deviceName: session.deviceName,
             userAgent: session.userAgent,
@@ -697,6 +705,7 @@ export class AgencySettingsService {
       where: {
         tenantId,
         userId,
+        surface: 'agency',
         deviceFingerprint: session.deviceFingerprint!,
       },
     });
@@ -706,6 +715,7 @@ export class AgencySettingsService {
         this.trustedDevicesRepo.create({
           tenantId,
           userId,
+          surface: 'agency',
           deviceFingerprint: session.deviceFingerprint,
           deviceName: session.deviceName,
           userAgent: session.userAgent,
@@ -1798,6 +1808,7 @@ export class AgencySettingsService {
       where: {
         tenantId,
         userId,
+        surface: 'agency',
         revokedAt: IsNull(),
       },
       order: { lastUsedAt: 'DESC', trustedAt: 'DESC', createdAt: 'DESC' },

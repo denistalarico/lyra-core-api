@@ -8,6 +8,7 @@ import {
 } from '../views/social-ad-connection.view';
 
 export type ListSocialAdConnectionsInput = {
+  clientAreaSessionId?: string;
   tenantId: string;
   workspaceId: string;
   /** NULL means agency context: only the agency's own connections. */
@@ -56,6 +57,11 @@ export class SocialAdConnectionService {
 
     this.applyClientScope(query, input.agencyClientId);
     this.applyCompanyScope(query, input.companyContextId);
+    if (input.clientAreaSessionId)
+      query.andWhere(
+        "(connection.connectionStatus NOT IN ('pending','awaiting_selection') OR connection.metadata->'clientAreaBinding'->>'sessionId' = :clientAreaSessionId)",
+        { clientAreaSessionId: input.clientAreaSessionId },
+      );
 
     // An abandoned authorization is scaffolding, not a connection. Showing it
     // would leave a permanent "connecting…" card that no action can clear.
