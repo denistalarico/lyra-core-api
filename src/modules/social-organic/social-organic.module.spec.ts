@@ -257,6 +257,8 @@ describe('SocialOrganicModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.EXPORTS, SocialOrganicModule),
     ).toEqual([
+      SocialOrganicAudienceReadService,
+      SocialOrganicActivityReadService,
       // CS5-B: the Creative Studio hands a selected version off to a
       // destination through the destination owner.
       DestinationCreativeService,

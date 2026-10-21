@@ -170,6 +170,8 @@ export function projectAgencyPermissions(
   level: ClientAreaAccessLevel | null,
 ): readonly ClientAreaAgencyGrant[] {
   if (!level) return [];
+  if (module === 'analytics')
+    return [grant('agency.dashboards.view.agency', read)];
   if (module.startsWith('leadflow_'))
     return projectLeadFlowPermissions(module, level);
   if (module !== 'agency_projects')

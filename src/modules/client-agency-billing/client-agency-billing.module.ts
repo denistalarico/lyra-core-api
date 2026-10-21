@@ -16,6 +16,7 @@ import { ClientAgencyBillingController } from './client-agency-billing.controlle
     DocumentLayoutsModule,
   ],
   controllers: [ClientAgencyBillingController],
+  exports: [ClientAgencyBillingService],
   providers: [
     ClientAgencyBillingService,
     ClientAgencyBillingNotificationsService,

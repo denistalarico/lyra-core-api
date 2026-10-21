@@ -1,3 +1,4 @@
+import { CreateClientAreaAnalyticsDashboards1800100000000 } from './migrations/1800100000000-create-client-area-analytics-dashboards';
 import { CreateFinanceReceivableWriteOffs1799900000000 } from './migrations/1799900000000-create-finance-receivable-write-offs';
 import { ClientAreaPublicBrandingAndPreferences1799800000000 } from './migrations/1799800000000-client-area-public-branding-and-preferences';
 import { ClientAreaAccessModelV21799700000000 } from './migrations/1799700000000-client-area-access-model-v2';
@@ -552,5 +553,6 @@ export const AgencyDataSource = new DataSource({
     IsolateLeadflowContactsByCompany1800050000000,
     AddCrmOpportunityAuthor1800060000000,
     ConsolidateInboxQuickReplies1800070000000,
+    CreateClientAreaAnalyticsDashboards1800100000000,
   ],
 });

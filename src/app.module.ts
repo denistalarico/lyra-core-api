@@ -1,3 +1,4 @@
+import { ClientAreaAnalyticsModule } from './modules/client-area-analytics/client-area-analytics.module';
 import { ClientAgencyBillingModule } from './modules/client-agency-billing/client-agency-billing.module';
 // src/app.module.ts
 import { Module } from '@nestjs/common';
@@ -153,6 +154,7 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     // Client Area, instead of dropping it silently as AP3's token did.
     ClientNotificationsModule,
     ClientAgencyBillingModule,
+    ClientAreaAnalyticsModule,
     ClientAreaAgencyModule,
     SocialOrganicModule,
   ],

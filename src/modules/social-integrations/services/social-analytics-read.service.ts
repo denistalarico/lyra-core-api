@@ -270,6 +270,45 @@ export class SocialAnalyticsReadService {
     private readonly reachPeriods: SocialAdReachPeriodReadService,
   ) {}
 
+  /** Latest campaign identity in the already-proven connection scope;
+   * reuse the canonical campaign projection without recomputing metrics. */
+  async latestCampaign(input: SocialAdAnalyticsOverviewInput) {
+    const connection = await this.findInScope(input);
+    const latest = await this.entitiesRepository.findOne({
+      where: {
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+        connectionId: connection.id,
+        entityLevel: 'campaign',
+      },
+      order: {
+        providerCreatedTime: { direction: 'DESC', nulls: 'LAST' },
+        firstSeenAt: 'DESC',
+        externalId: 'DESC',
+      },
+      select: ['externalId', 'name', 'providerCreatedTime', 'firstSeenAt'],
+    });
+    if (!latest) return null;
+    const metrics = await this.campaigns(input);
+    return {
+      externalId: latest.externalId,
+      name: latest.name,
+      createdAt: latest.providerCreatedTime?.toISOString() ?? null,
+      selectedAt: (
+        latest.providerCreatedTime ?? latest.firstSeenAt
+      ).toISOString(),
+      selectionBasis: latest.providerCreatedTime
+        ? 'provider_created_time'
+        : 'first_seen_at',
+      currency: metrics.currency,
+      period: metrics.period,
+      metrics:
+        metrics.items.find((row) => row.externalId === latest.externalId) ??
+        null,
+    };
+  }
+
   /**
    * The ad accounts this caller may report on, for the dashboard's picker.
    *

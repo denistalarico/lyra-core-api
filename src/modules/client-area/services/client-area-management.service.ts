@@ -1,3 +1,4 @@
+import { ClientAreaCompanyHooksRegistry } from '../client-area-company-hooks.registry';
 import { clientAreaUiPermissions } from '../client-area-agency-permission-projection';
 import { randomBytes } from 'node:crypto';
 import { ClientAreaMemberAccessService } from './client-area-member-access.service';
@@ -104,6 +105,7 @@ export class ClientAreaManagementService {
     private readonly productsRepo: Repository<AgencyClientCompanyProduct>,
     @Optional() private readonly consents?: ClientAreaConsentService,
     @Optional() private readonly memberAccess?: ClientAreaMemberAccessService,
+    @Optional() private readonly companyHooks?: ClientAreaCompanyHooksRegistry,
   ) {}
 
   private async findSettings(tenantId: string, workspaceId: string) {
@@ -472,6 +474,11 @@ export class ClientAreaManagementService {
         },
         ['companyContextId'],
       );
+      if (dto.enabled === true)
+        await this.companyHooks?.enabled(
+          { tenantId, workspaceId, agencyClientId, companyContextId },
+          manager,
+        );
     });
     return this.getCompanySettings(
       tenantId,

@@ -100,6 +100,7 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "agency/agency-contacts.controller.ts:getLeadFlowCompanyContactList",
        "agency/agency-contacts.controller.ts:listLeadFlowCompanyContacts",
        "agency/agency-contacts.controller.ts:patchLeadFlowCompanyContact",
+       "client-area-analytics/client-area-analytics.controller.ts:get",
        "crm/crm.controller.ts:assignOpportunityTag",
        "crm/crm.controller.ts:copyOpportunity",
        "crm/crm.controller.ts:createOpportunity",

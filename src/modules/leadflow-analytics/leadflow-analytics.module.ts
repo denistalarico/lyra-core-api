@@ -102,6 +102,7 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     BusinessModeDimensionAdapter,
   ],
   exports: [
+    LeadFlowTimeseriesService,
     LeadFlowAnalyticsService,
     LeadFlowOperationalAnalyticsService,
     LeadFlowOverviewService,

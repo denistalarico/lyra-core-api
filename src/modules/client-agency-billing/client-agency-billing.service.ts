@@ -1,3 +1,4 @@
+import type { ClientAreaCompanyScope } from '../client-area/client-area-company-hooks.registry';
 import {
   clientContractDocumentTypes,
   isClientSignedDocument,
@@ -76,8 +77,10 @@ export class ClientAgencyBillingService {
   ) {}
 
   async invoices(context: ClientAreaContext) {
-    const scope = billingOwnerScope(context),
-      owners = await this.ownership.resolve(scope);
+    return this.invoicesInScope(billingOwnerScope(context));
+  }
+  async invoicesInScope(scope: ClientAreaCompanyScope) {
+    const owners = await this.ownership.resolve(scope);
     const customers = [
       scope.agencyClientId,
       ...[...owners]
@@ -209,7 +212,9 @@ export class ClientAgencyBillingService {
     };
   }
   async contractHistory(context: ClientAreaContext) {
-    const scope = billingOwnerScope(context);
+    return this.contractHistoryInScope(billingOwnerScope(context));
+  }
+  async contractHistoryInScope(scope: ClientAreaCompanyScope) {
     const records = await this.db.getRepository(ContractRecord).find({
       where: {
         tenantId: scope.tenantId,

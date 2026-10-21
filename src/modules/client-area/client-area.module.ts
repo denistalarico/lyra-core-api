@@ -1,3 +1,4 @@
+import { ClientAreaCompanyHooksRegistry } from './client-area-company-hooks.registry';
 import { ClientAreaPublicController } from './controllers/client-area-public.controller';
 import { ClientAreaPreferencesController } from './controllers/client-area-preferences.controller';
 import { ClientAreaPublicBrandingService } from './services/client-area-public-branding.service';
@@ -141,6 +142,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaInvitationsController,
   ],
   providers: [
+    ClientAreaCompanyHooksRegistry,
     ClientAreaPublicBrandingService,
     ClientAreaBridgeAuthenticator,
     ClientAreaMemberAccessService,
@@ -171,6 +173,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaSelfContextGuard,
   ],
   exports: [
+    ClientAreaCompanyHooksRegistry,
     ClientAreaPublicBrandingService,
     ClientAreaMemberAccessService,
     ClientAreaConsentService,
