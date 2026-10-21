@@ -28,6 +28,12 @@ jest.mock('otplib', () => ({
   ),
 }));
 
+/** D-CA14-FE-1 — a wrong proof is a 400 with a stable code, never a 401 the transport would refresh and resend. */
+const invalidProof = (message: string) => ({
+  status: 400,
+  response: { code: 'client_area_invalid_credentials', message },
+});
+
 describePostgresIntegration()('CA14 security (lyra_agency_test only)', () => {
   let admin: DataSource,
     db: DataSource,
@@ -173,7 +179,7 @@ describePostgresIntegration()('CA14 security (lyra_agency_test only)', () => {
         password: 'new-password-valid',
         passwordConfirmation: 'new-password-valid',
       }),
-    ).rejects.toThrow('Invalid credentials');
+    ).rejects.toMatchObject(invalidProof('Invalid credentials.'));
     await expect(
       service.changePassword(identity, {
         currentPassword: 'old-password-valid',
@@ -316,7 +322,7 @@ describePostgresIntegration()('CA14 security (lyra_agency_test only)', () => {
         method: 'authenticator',
         code: '000000',
       }),
-    ).rejects.toThrow('Invalid 2FA code');
+    ).rejects.toMatchObject(invalidProof('Invalid 2FA code'));
     expect((await service.get(identity)).twoFactorEnabled).toBe(false);
     await service.confirmTwoFactor(identity, {
       currentPassword: 'old-password-valid',
@@ -336,7 +342,7 @@ describePostgresIntegration()('CA14 security (lyra_agency_test only)', () => {
         currentPassword: 'old-password-valid',
         code: '000000',
       }),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject(invalidProof('Invalid 2FA code'));
     await service.disableTwoFactor(identity, {
       currentPassword: 'old-password-valid',
       code: '123456',
@@ -360,7 +366,7 @@ describePostgresIntegration()('CA14 security (lyra_agency_test only)', () => {
       service.sendEmailCode(identity, {
         currentPassword: 'wrong',
       }),
-    ).rejects.toThrow('Invalid credentials.');
+    ).rejects.toMatchObject(invalidProof('Invalid credentials.'));
     const codes = db.getRepository(AgencyEmailTwoFactorCodeEntity);
     expect(await codes.count()).toBe(0);
     await service.sendEmailCode(identity, {

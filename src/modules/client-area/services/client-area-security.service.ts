@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -14,7 +15,10 @@ import {
   AgencyUserTrustedDeviceEntity,
 } from '../../agency/entities/agency-auth.entities';
 import { assertClientAreaPasswordPolicy } from '../client-area-password.policy';
-import type { ClientAreaIdentity } from '../client-area.types';
+import {
+  CLIENT_AREA_ERROR_CODES,
+  type ClientAreaIdentity,
+} from '../client-area.types';
 import type {
   ClientAreaChangePasswordDto,
   ClientAreaConfirmTwoFactorDto,
@@ -24,6 +28,34 @@ import type {
 import { isLiveSession } from './client-area-session.service';
 
 const surface = 'client_area' as const;
+
+/**
+ * D-CA14-FE-1 — a wrong password or 2FA code is not a session failure. The
+ * Client Area transport refreshes and resends every 401 once (CA8), so a
+ * proof failure answered as 401 reached this facade twice (rate limit, token
+ * rotation). It is a 400 with the stable `client_area_invalid_credentials`
+ * code instead; the message of the credential service is kept. 401 stays
+ * reserved to the session (guards) and the missing identity.
+ */
+function invalidProof(message = 'Invalid credentials.') {
+  return new BadRequestException({
+    statusCode: 400,
+    error: 'Bad Request',
+    message,
+    code: CLIENT_AREA_ERROR_CODES.invalidCredentials,
+  });
+}
+
+/** Runs one step of the Agency credential service, mapping its proof failures. */
+async function proofStep<T>(step: () => Promise<T>): Promise<T> {
+  try {
+    return await step();
+  } catch (error) {
+    if (error instanceof UnauthorizedException)
+      throw invalidProof(error.message);
+    throw error;
+  }
+}
 
 /** Identity-only facade: browser input never chooses tenant/user/surface. */
 @Injectable()
@@ -49,12 +81,14 @@ export class ClientAreaSecurityService {
       !row ||
       !(await this.credentials.verifyPassword(row, dto.currentPassword))
     )
-      throw new UnauthorizedException('Invalid credentials.');
+      throw invalidProof();
     if (requireFactor && this.credentials.hasTwoFactorEnabled(row))
-      await this.credentials.verifyTwoFactorCode(
-        this.credentials.getTwoFactorMethod(row),
-        this.scope(identity),
-        dto.code ?? '',
+      await proofStep(() =>
+        this.credentials.verifyTwoFactorCode(
+          this.credentials.getTwoFactorMethod(row),
+          this.scope(identity),
+          dto.code ?? '',
+        ),
       );
     return row;
   }
@@ -88,8 +122,9 @@ export class ClientAreaSecurityService {
         where: this.scope(identity),
         lock: { mode: 'pessimistic_write' },
       });
+      // A concurrent change of the same credentials: retry with the new password.
       if (!row || row.passwordHash !== before.passwordHash)
-        throw new UnauthorizedException('Credentials changed. Retry.');
+        throw new ConflictException('Credentials changed. Retry.');
       await repo.update(this.scope(identity), {
         passwordHash,
         passwordUpdatedAt: new Date(),
@@ -142,10 +177,12 @@ export class ClientAreaSecurityService {
     dto: ClientAreaConfirmTwoFactorDto,
   ) {
     await this.prove(identity, dto, false);
-    await this.credentials.confirmTwoFactorSetup(
-      this.scope(identity),
-      dto.method,
-      dto.code,
+    await proofStep(() =>
+      this.credentials.confirmTwoFactorSetup(
+        this.scope(identity),
+        dto.method,
+        dto.code,
+      ),
     );
     return this.get(identity);
   }
