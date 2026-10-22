@@ -40,9 +40,14 @@ import { ClientAreaBridgeAuthenticator } from './services/client-area-bridge-aut
 import { ClientAreaSessionService } from './services/client-area-session.service';
 import { ClientAreaManagementService } from './services/client-area-management.service';
 import { ClientAreaAuthorizationService } from './services/client-area-authorization.service';
+import { ClientAreaSelfAccessService } from './services/client-area-self-access.service';
 import { resolveMemberAccess } from './client-area-permissions.catalog';
+import { resolveSelfMemberAccess } from './client-area-self-modules';
 import type { AuthenticatedRequest } from '../auth/types/authenticated-request.type';
-import type { ClientAreaContext } from './client-area.types';
+import type {
+  ClientAreaContext,
+  ClientAreaSelfContext,
+} from './client-area.types';
 
 const tenant = randomUUID(),
   workspace = randomUUID(),
@@ -103,7 +108,8 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
   const saved = { ...process.env };
   const authorize = jest.fn(),
     authenticate = jest.fn(),
-    assertCan = jest.fn();
+    assertCan = jest.fn(),
+    resolveSelfContext = jest.fn();
   let context: ClientAreaContext;
   beforeAll(async () => {
     Object.assign(process.env, {
@@ -181,6 +187,10 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
           },
         },
         { provide: ClientAreaAuthorizationService, useValue: { authorize } },
+        {
+          provide: ClientAreaSelfAccessService,
+          useValue: { resolveSelfContext },
+        },
         { provide: PlatformPermissionService, useValue: { assertCan } },
         {
           provide: OperationalContextResolver,
@@ -233,6 +243,8 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
   });
   beforeEach(() => {
     process.env.CLIENT_AREA_BRIDGE_ENABLED = 'true';
+    process.env.CLIENT_AREA_SELF_MODULES_ENABLED = 'true';
+    resolveSelfContext.mockReset().mockResolvedValue(selfContext());
     assertCan.mockReset().mockResolvedValue(undefined);
     context = {
       surface: 'client_area',
@@ -279,6 +291,23 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
   afterAll(async () => {
     if (app) await app.close();
     process.env = { ...saved };
+  });
+  const selfContext = (
+    memberAccess = resolveSelfMemberAccess(true, new Set()),
+  ): ClientAreaSelfContext => ({
+    surface: 'client_area',
+    kind: 'agency_self',
+    userId: user,
+    tenantId: tenant,
+    sessionId: session,
+    selfAccessId: randomUUID(),
+    workspaceId: workspace,
+    agencyDisplayName: 'Agency',
+    role: 'client_admin',
+    agencyRole: 'admin',
+    permissions: new Set(),
+    memberAccess,
+    modules: { approvals: false, conversations: false },
   });
   const token = (secret = clientSecret) =>
     jwt.signAsync(
@@ -406,5 +435,55 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
       .expect(200);
     expect(assertCan).toHaveBeenCalled();
     expect(authorize).not.toHaveBeenCalled();
+  });
+  describe('CA15 agency self-context', () => {
+    const getSelf = async (path: string) =>
+      request(app.getHttpServer() as Server)
+        .get(path)
+        .set('Authorization', `Bearer ${await token()}`)
+        .set('x-lyra-client-area-company', 'agency_self')
+        .set('x-lyra-client-id', client)
+        .set('x-lyra-operating-mode', 'client')
+        .set('x-user-role', 'owner');
+    it('acts as the operator in Agency mode, ignoring forged headers', async () => {
+      const response = await getSelf(`/ca7-probe/tasks/${task}`).then((r) =>
+        r.ok ? r : Promise.reject(new Error(String(r.status))),
+      );
+      expect(response.body).toEqual({
+        user: {
+          sub: user,
+          tenantId: tenant,
+          workspaceId: workspace,
+          sessionId: session,
+          email: 'client@example.com',
+          role: 'admin',
+        },
+        managedContext: {
+          operatingMode: 'agency',
+          clientId: null,
+          companyContextId: null,
+          managedTenantId: null,
+          productKey: 'agency',
+        },
+        headers: [],
+      });
+      expect(assertCan).toHaveBeenCalled();
+      expect(authorize).not.toHaveBeenCalled();
+    });
+    it('works with the company Bridge off but needs its own flag (401)', async () => {
+      process.env.CLIENT_AREA_BRIDGE_ENABLED = 'false';
+      expect((await getSelf(`/ca7-probe/tasks/${task}`)).status).toBe(200);
+      process.env.CLIENT_AREA_SELF_MODULES_ENABLED = 'false';
+      expect((await getSelf(`/ca7-probe/tasks/${task}`)).status).toBe(401);
+    });
+    it('is 401 without a usable self access and 403 for an unavailable module', async () => {
+      resolveSelfContext.mockResolvedValueOnce(null);
+      expect((await getSelf(`/ca7-probe/tasks/${task}`)).status).toBe(401);
+      resolveSelfContext.mockResolvedValueOnce(
+        selfContext(resolveSelfMemberAccess(false, new Set())),
+      );
+      expect((await getSelf(`/ca7-probe/tasks/${task}`)).status).toBe(403);
+      expect((await getSelf('/ca7-probe/unexposed')).status).toBe(401);
+    });
   });
 });

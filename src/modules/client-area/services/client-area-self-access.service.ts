@@ -3,8 +3,16 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isActiveProductEntitlement } from '../../../common/context/product-entitlement-availability';
+import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
+import {
+  isClientAreaSelfModulesEnabled,
+  resolveSelfMemberAccess,
+  type SelfProductKey,
+} from '../client-area-self-modules';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository, type EntityManager } from 'typeorm';
 import { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-auth.entities';
@@ -100,7 +108,25 @@ export class ClientAreaSelfAccessService {
     @InjectRepository(AgencyWorkspaceCompanySettingsEntity, AGENCY_CONNECTION)
     private readonly companyIdentityRepo: Repository<AgencyWorkspaceCompanySettingsEntity>,
     private readonly sessions: ClientAreaSessionService,
+    @Optional()
+    @InjectRepository(TenantProductEntitlementEntity, AGENCY_CONNECTION)
+    private readonly entitlementsRepo?: Repository<TenantProductEntitlementEntity>,
   ) {}
+
+  /** CA15 — products the agency tenant itself has contracted. */
+  private async agencyProducts(tenantId: string): Promise<Set<SelfProductKey>> {
+    const rows =
+      (await this.entitlementsRepo?.find({ where: { tenantId } })) ?? [];
+    return new Set(
+      rows
+        .filter((row) => isActiveProductEntitlement(row))
+        .map((row) => String(row.productKey))
+        .filter(
+          (key): key is SelfProductKey =>
+            key === 'social' || key === 'leadflow',
+        ),
+    );
+  }
 
   private notFound() {
     // One generic answer for "platform off", "self not enabled", "no access",
@@ -213,6 +239,10 @@ export class ClientAreaSelfAccessService {
       role: access.role,
       agencyRole,
       permissions: permissionsForClientAreaRole(access.role),
+      memberAccess: resolveSelfMemberAccess(
+        isClientAreaSelfModulesEnabled(this.config),
+        await this.agencyProducts(access.tenantId),
+      ),
       // V1: no module is company-free yet (§15). Not a placeholder for a
       // future fake scope — approvals/conversations stay off until they have
       // real self semantics.

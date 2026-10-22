@@ -65,6 +65,9 @@ export type ClientAreaSelfContextProjection = {
   role: ClientAreaRole;
   permissions: string[];
   modules: ClientAreaSelfContext['modules'];
+  /** CA15 — same shape the company workspace gates on (`modules` there). */
+  memberAccess: NonNullable<ClientAreaSelfContext['memberAccess']> | null;
+  uiPermissions: string[];
   branding: Awaited<ReturnType<ClientAreaManagementService['branding']>>;
 };
 
@@ -152,6 +155,14 @@ export class ClientAreaDirectoryService {
         approvals: context.modules.approvals,
         conversations: context.modules.conversations,
       },
+      memberAccess: context.memberAccess ?? null,
+      // Only personal settings: consent, access and integrations are company-bound.
+      uiPermissions: context.memberAccess
+        ? [
+            'client_area.settings.security.manage_self',
+            ...clientAreaUiPermissions(context.memberAccess),
+          ]
+        : [],
       // §32 — the self Client Area wears the agency's own branding, reusing
       // the PD1-corrected resolver. No separate self branding.
       branding: await this.management.branding(

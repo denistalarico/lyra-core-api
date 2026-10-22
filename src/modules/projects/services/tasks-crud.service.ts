@@ -1,4 +1,5 @@
 import {
+  CLIENT_AREA_CLIENT_SQL,
   clientProjectWhere,
   type ProjectRequestContext,
 } from '../client-area/projects-client-area.context';
@@ -302,7 +303,7 @@ export class TasksCrudService {
     }
 
     if (context.clientArea)
-      qb.andWhere('task.client_id = :clientAreaId', {
+      qb.andWhere(CLIENT_AREA_CLIENT_SQL('task.client_id'), {
         clientAreaId: context.clientArea.agencyClientId,
       }).andWhere(
         "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)",
@@ -364,7 +365,9 @@ export class TasksCrudService {
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       projectId: dto.projectId ?? null,
-      clientId: context.clientArea?.agencyClientId ?? dto.clientId ?? null,
+      clientId: context.clientArea
+        ? context.clientArea.agencyClientId
+        : (dto.clientId ?? null),
       stageId,
       projectStageId:
         dto.projectStageId !== undefined
@@ -418,7 +421,9 @@ export class TasksCrudService {
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
       projectId: dto.projectId ?? null,
-      clientId: context.clientArea?.agencyClientId ?? dto.clientId ?? null,
+      clientId: context.clientArea
+        ? context.clientArea.agencyClientId
+        : (dto.clientId ?? null),
       stageId: null,
       projectStageId: null,
       personalStageId,
@@ -454,7 +459,8 @@ export class TasksCrudService {
     if (dto.title !== undefined) task.title = dto.title;
     if (dto.description !== undefined) task.description = dto.description;
     if (dto.projectId !== undefined) task.projectId = dto.projectId;
-    if (dto.clientId !== undefined) task.clientId = dto.clientId;
+    if (dto.clientId !== undefined && !context.clientArea)
+      task.clientId = dto.clientId;
     if (dto.stageId !== undefined) {
       const legacyProjectStageId =
         await this.getProjectStageIdFromLegacyStagePayload(
@@ -686,7 +692,7 @@ export class TasksCrudService {
     context: RequestContext,
   ) {
     if (context.clientArea) {
-      qb.andWhere('task.client_id = :clientAreaId', {
+      qb.andWhere(CLIENT_AREA_CLIENT_SQL('task.client_id'), {
         clientAreaId: context.clientArea.agencyClientId,
       }).andWhere(
         "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)",

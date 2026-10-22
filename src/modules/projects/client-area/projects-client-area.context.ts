@@ -1,14 +1,17 @@
 import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
+import { IsNull } from 'typeorm';
 import { getAuthorizedContext } from '../../../common/context/authorized-context.decorator';
-import type {
-  ClientAreaContext,
-  ClientAreaRequest,
-} from '../../client-area/client-area.types';
+import type { ClientAreaRequest } from '../../client-area/client-area.types';
 
+/**
+ * The client a Client Area request is confined to. `null` is the agency in its
+ * own Client Area (CA15 / D-CA15-2): only internal projects (no client).
+ */
+export type ProjectClientAreaScope = { agencyClientId: string | null };
 export type AuthorizedRequestContext = ReturnType<
   typeof getAuthorizedContext
 > & {
-  clientArea?: ClientAreaContext;
+  clientArea?: ProjectClientAreaScope;
 };
 export type ProjectRequestContext = Pick<
   AuthorizedRequestContext,
@@ -23,10 +26,21 @@ export const AuthorizedContext = createParamDecorator(
     return {
       ...getAuthorizedContext(request),
       ...(request.clientAreaContext
-        ? { clientArea: request.clientAreaContext }
-        : {}),
+        ? {
+            clientArea: {
+              agencyClientId: request.clientAreaContext.agencyClientId,
+            },
+          }
+        : request.clientAreaSelfContext
+          ? { clientArea: { agencyClientId: null } }
+          : {}),
     };
   },
 );
 export const clientProjectWhere = (context: ProjectRequestContext) =>
-  context.clientArea ? { clientId: context.clientArea.agencyClientId } : {};
+  context.clientArea
+    ? { clientId: context.clientArea.agencyClientId ?? IsNull() }
+    : {};
+/** SQL twin of `clientProjectWhere`; matches `null` (internal) too. */
+export const CLIENT_AREA_CLIENT_SQL = (column: string) =>
+  `${column} IS NOT DISTINCT FROM CAST(:clientAreaId AS uuid)`;

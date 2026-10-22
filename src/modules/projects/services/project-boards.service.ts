@@ -1,4 +1,5 @@
 import {
+  CLIENT_AREA_CLIENT_SQL,
   clientProjectWhere,
   type ProjectRequestContext,
 } from '../client-area/projects-client-area.context';
@@ -317,7 +318,7 @@ export class ProjectBoardsService {
         workspaceId: context.workspaceId,
       })
       .andWhere('task.archived_at IS NULL')
-      .andWhere(context.clientArea ? 'task.client_id = :clientAreaId' : '1=1', {
+      .andWhere(context.clientArea ? CLIENT_AREA_CLIENT_SQL('task.client_id') : '1=1', {
         clientAreaId: context.clientArea?.agencyClientId,
       })
       .andWhere(
@@ -366,7 +367,7 @@ export class ProjectBoardsService {
         workspaceId: context.workspaceId,
       })
       .andWhere('task.archived_at IS NULL')
-      .andWhere(context.clientArea ? 'task.client_id = :clientAreaId' : '1=1', {
+      .andWhere(context.clientArea ? CLIENT_AREA_CLIENT_SQL('task.client_id') : '1=1', {
         clientAreaId: context.clientArea?.agencyClientId,
       })
       .andWhere(

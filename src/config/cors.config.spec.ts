@@ -12,6 +12,12 @@ describe('CORS configuration', () => {
     ).toContain('idempotency-key');
   });
 
+  it('allows the company context header sent by company-scoped Agency screens', () => {
+    expect(
+      CORS_ALLOWED_HEADERS.map((header) => header.toLowerCase()),
+    ).toContain('x-lyra-company-context-id');
+  });
+
   it('adds configured Admin origins without removing Agency origins', () => {
     const environment = {
       CORS_ORIGINS: 'https://agency.lyra.example',

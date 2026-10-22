@@ -1,9 +1,13 @@
 import {
   ForbiddenException,
   Injectable,
+  Optional,
   UnauthorizedException,
   type ExecutionContext,
 } from '@nestjs/common';
+import { ClientAreaSelfAccessService } from './client-area-self-access.service';
+import { isClientAreaSelfModulesEnabled } from '../client-area-self-modules';
+import { AGENCY_SELF_CONTEXT_ID } from '../client-area.types';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -41,12 +45,20 @@ export class ClientAreaBridgeAuthenticator implements ClientAreaBridgePort {
     private readonly reflector: Reflector,
     @InjectRepository(AgencyClient, 'agency')
     private readonly clients: Repository<AgencyClient>,
+    @Optional() private readonly selfAccess?: ClientAreaSelfAccessService,
   ) {}
   async authenticate(execution: ExecutionContext): Promise<boolean> {
     const module = this.reflector.get<ClientAreaModuleKey | undefined>(
       CLIENT_AREA_EXPOSED_METADATA,
       execution.getHandler(),
     );
+    if (
+      module &&
+      execution.switchToHttp().getRequest<ClientAreaRequest>().headers[
+        'x-lyra-client-area-company'
+      ] === AGENCY_SELF_CONTEXT_ID
+    )
+      return this.authenticateSelf(execution, module);
     if (
       !module ||
       this.config
@@ -103,6 +115,58 @@ export class ClientAreaBridgeAuthenticator implements ClientAreaBridgePort {
       clientId: context.agencyClientId,
       companyContextId: context.companyContextId,
       managedTenantId: client.managedTenantId,
+      productKey: product,
+    };
+    return true;
+  }
+
+  /**
+   * CA15 / D-CA15-1 — the agency in its own Client Area. Same exposed routes,
+   * but over the agency's own data: the operator acts with the Agency role
+   * re-validated by `resolveSelfContext` and the Agency operating mode. No
+   * company scope is synthesized (PD3 §18).
+   */
+  private async authenticateSelf(
+    execution: ExecutionContext,
+    module: ClientAreaModuleKey,
+  ): Promise<boolean> {
+    if (!this.selfAccess || !isClientAreaSelfModulesEnabled(this.config))
+      throw new UnauthorizedException();
+    await this.guard.canActivate(execution);
+    const req = execution
+      .switchToHttp()
+      .getRequest<ClientAreaRequest & AuthenticatedRequest>();
+    const context = await this.selfAccess.resolveSelfContext(
+      req.clientAreaIdentity!,
+    );
+    if (!context) throw new UnauthorizedException();
+    if (!context.memberAccess?.[module]?.available)
+      throw new ForbiddenException('Module is unavailable.');
+    const product =
+      this.reflector.getAllAndOverride<ProductKey | undefined>(
+        PRODUCT_ENTITLEMENT_METADATA,
+        [execution.getHandler(), execution.getClass()],
+      ) ?? 'agency';
+    if (product !== clientAreaModuleProduct(module))
+      throw new ForbiddenException(
+        'Route product does not match the exposed module.',
+      );
+    for (const key of Object.keys(req.headers))
+      if (key.toLowerCase().startsWith('x-')) delete req.headers[key];
+    req.clientAreaSelfContext = context;
+    req.user = {
+      sub: context.userId,
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      sessionId: context.sessionId,
+      email: req.clientAreaIdentity!.email,
+      role: context.agencyRole,
+    };
+    req.managedContext = {
+      operatingMode: 'agency',
+      clientId: null,
+      companyContextId: null,
+      managedTenantId: null,
       productKey: product,
     };
     return true;

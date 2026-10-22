@@ -79,6 +79,21 @@ export class ClientAreaDashboardsService implements OnModuleInit {
     );
     if (!rows.length) throw new NotFoundException('Company not found.');
   }
+  private async companyExists(
+    scope: ClientAreaCompanyScope,
+    manager: EntityManager,
+  ) {
+    const rows = await manager.query<{ id: string }[]>(
+      'SELECT id FROM agency_client_company_contexts WHERE tenant_id=$1 AND workspace_id=$2 AND agency_client_id=$3 AND id=$4',
+      [
+        scope.tenantId,
+        scope.workspaceId,
+        scope.agencyClientId,
+        scope.companyContextId,
+      ],
+    );
+    return rows.length > 0;
+  }
   private assertActor(scope: ClientAreaCompanyScope, actor: DashboardActor) {
     if (actor.surface === 'agency') return;
     const current = toCompanyAwareScope(actor.context);
@@ -105,7 +120,10 @@ export class ClientAreaDashboardsService implements OnModuleInit {
     force = false,
   ) {
     await this.lock(scope, manager);
-    await this.assertScope(scope, manager);
+    // Product lifecycle runs for any client status (offboarded, paused…) and
+    // inside archival; only Client Area reads require an active client.
+    if (!change) await this.assertScope(scope, manager);
+    else if (!(await this.companyExists(scope, manager))) return;
     const settings = await manager.query<{ enabled: boolean }[]>(
       'SELECT enabled FROM client_area_company_settings WHERE tenant_id=$1 AND workspace_id=$2 AND agency_client_id=$3 AND company_context_id=$4',
       [

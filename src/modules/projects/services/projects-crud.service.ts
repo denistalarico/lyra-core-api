@@ -1,4 +1,5 @@
 import {
+  CLIENT_AREA_CLIENT_SQL,
   clientProjectWhere,
   type ProjectRequestContext,
 } from '../client-area/projects-client-area.context';
@@ -116,7 +117,7 @@ export class ProjectsCrudService {
     context: RequestContext,
   ) {
     if (context.clientArea) {
-      qb.andWhere('project.client_id = :clientAreaId', {
+      qb.andWhere(CLIENT_AREA_CLIENT_SQL('project.client_id'), {
         clientAreaId: context.clientArea.agencyClientId,
       });
       return;
@@ -197,7 +198,9 @@ export class ProjectsCrudService {
     const project = this.projectsRepository.create({
       tenantId: context.tenantId,
       workspaceId: context.workspaceId,
-      clientId: context.clientArea?.agencyClientId ?? dto.clientId ?? null,
+      clientId: context.clientArea
+        ? context.clientArea.agencyClientId
+        : (dto.clientId ?? null),
       stageId: dto.stageId ?? null,
       ownerId: dto.ownerId ?? context.userId,
       name: dto.name,
@@ -230,7 +233,8 @@ export class ProjectsCrudService {
 
     if (dto.name !== undefined) project.name = dto.name;
     if (dto.description !== undefined) project.description = dto.description;
-    if (dto.clientId !== undefined) project.clientId = dto.clientId;
+    if (dto.clientId !== undefined && !context.clientArea)
+      project.clientId = dto.clientId;
     if (dto.stageId !== undefined) project.stageId = dto.stageId;
     if (dto.ownerId !== undefined) project.ownerId = dto.ownerId;
     if (dto.priority !== undefined) project.priority = dto.priority;

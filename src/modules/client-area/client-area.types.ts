@@ -249,6 +249,11 @@ export interface ClientAreaSelfContext {
   agencyRole: 'owner' | 'admin';
   permissions: ReadonlySet<ClientAreaPermissionKey>;
   /**
+   * CA15 — modules over the agency's own data (Agency operating mode), gated
+   * by `CLIENT_AREA_SELF_MODULES_ENABLED` and the agency's own entitlements.
+   */
+  memberAccess?: ClientAreaMemberAccess;
+  /**
    * Always all-false in V1. Approvals and Conversations are company-bound
    * artefacts (they need `agencyClientId`/`companyContextId`), so enabling
    * them here would require inventing a company scope. PD3 §15/§34.

@@ -13,6 +13,7 @@ export const CORS_ALLOWED_HEADERS = [
   'x-lyra-product-key',
   'x-lyra-operating-mode',
   'x-lyra-client-id',
+  'x-lyra-company-context-id',
   'x-leadflow-operating-mode',
   'x-client-id',
 ] as const;

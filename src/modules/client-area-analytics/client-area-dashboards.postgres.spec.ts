@@ -515,6 +515,51 @@ run('CA13 dashboards in isolated lyra_agency_test schema', () => {
       ),
     ).toBe(true);
   });
+  it('keeps product lifecycle working for a non-active client so archival is never blocked', async () => {
+    const hooks = new ClientAreaCompanyHooksRegistry(),
+      registry = new CompanyProductRegistry();
+    service = new ClientAreaDashboardsService(db, hooks, registry);
+    service.onModuleInit();
+    for (const [key, productKey] of [
+      ['social-publications', 'social'],
+      ['social-approvals', 'social'],
+      ['leadflow-settings', 'leadflow'],
+      ['leadflow-agents', 'leadflow'],
+      ['leadflow-automations', 'leadflow'],
+      ['leadflow-agenda', 'leadflow'],
+    ] as const)
+      registry.register({
+        key,
+        productKey,
+        pending: () => Promise.resolve([]),
+      });
+    await db.transaction((manager) => hooks.enabled(scope, manager));
+    await db.query("UPDATE agency_clients SET status='ended' WHERE id=$1", [
+      scope.agencyClientId,
+    ]);
+    try {
+      await db.transaction(async (manager) => {
+        const op = { scope, manager, actorUserId: null, afterCommit: [] };
+        for (const participant of registry.forProduct('social'))
+          await participant.activate?.(op);
+        for (const participant of registry.forProduct('leadflow'))
+          await participant.remove?.(op);
+      });
+      // Reads keep requiring an active client.
+      await expect(service.assertCompany(scope)).rejects.toMatchObject({
+        status: 404,
+      });
+    } finally {
+      await db.query("UPDATE agency_clients SET status='active' WHERE id=$1", [
+        scope.agencyClientId,
+      ]);
+    }
+    expect(
+      (await service.list(scope, agency)).items[0].layout.sections.some(
+        (s) => s.channel === 'social.summary' && !s.hidden,
+      ),
+    ).toBe(true);
+  });
   it('exercises the company facade routes against PostgreSQL with fixture authentication', async () => {
     const base = `/api/client-area/companies/${scope.companyContextId}/analytics/dashboards`;
     const http = () => request(app.getHttpServer() as Server);
