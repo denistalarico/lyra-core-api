@@ -398,7 +398,14 @@ export class WhatsAppOutboundService {
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.messagesRepository
       .createQueryBuilder('message')
-      .innerJoin('message.conversation', 'conversation')
+      // InboxMessageEntity has no `conversation` relation, only the
+      // `conversationId` column: joining by property path threw before every
+      // WhatsApp text send (user, agent and automation alike).
+      .innerJoin(
+        InboxConversationEntity,
+        'conversation',
+        'conversation.id = message.conversationId',
+      )
       .where('message.tenant_id = :tenantId', { tenantId: channel.tenantId })
       .andWhere('message.workspace_id = :workspaceId', {
         workspaceId: channel.workspaceId,
