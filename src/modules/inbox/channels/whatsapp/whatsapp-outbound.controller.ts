@@ -25,7 +25,7 @@ import { WhatsAppOutboundService } from './services/whatsapp-outbound.service';
 
 const WHATSAPP_MEDIA_UPLOAD_OPTIONS = {
   storage: memoryStorage(),
-  limits: { fileSize: 16 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 },
 };
 
 @Controller('inbox/channels/whatsapp')

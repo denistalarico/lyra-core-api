@@ -578,7 +578,7 @@ describe('FacebookMessengerOutboundService', () => {
               attachment: {
                 type: expectedType,
                 payload: {
-                  url: `https://api.example.com/api/assets/${fileName}`,
+                  url: `https://api.example.com/api/assets/${fileName}?au=provider%3Ameta&ae=9999999999&as=test-signature`,
                 },
               },
             },
@@ -625,7 +625,9 @@ describe('FacebookMessengerOutboundService', () => {
         expect(JSON.parse(String(request.body)).message).toEqual({
           attachment: {
             type: 'audio',
-            payload: { url: 'https://api.example.com/api/assets/audio.m4a' },
+            payload: {
+              url: 'https://api.example.com/api/assets/audio.m4a?au=provider%3Ameta&ae=9999999999&as=test-signature',
+            },
           },
         });
       } finally {
@@ -921,6 +923,11 @@ function createHarness(
     filesService as never,
     metaLedger as never,
     audioNormalizer as never,
+    {
+      issueGrant: jest.fn().mockReturnValue({
+        query: 'au=provider%3Ameta&ae=9999999999&as=test-signature',
+      }),
+    } as never,
   );
 
   return {

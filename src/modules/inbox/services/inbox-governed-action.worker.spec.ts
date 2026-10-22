@@ -10,6 +10,16 @@ import { InboxConversationEventEntity } from '../entities/inbox-conversation-eve
 import { InboxDomainOutboxEntity } from '../entities/inbox-domain-outbox.entity';
 import { InboxMessageEntity } from '../entities/inbox-message.entity';
 import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
+import { Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
+import { ContactEntity } from '../../contacts/entities/contact.entity';
+import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
+import { ContactListEntity } from '../../contacts/entities/contact-list.entity';
+import { ContactListMemberEntity } from '../../contacts/entities/contact-list-member.entity';
+import { InboxChannelEntity } from '../entities/inbox-channel.entity';
+import { InboxChannelContactIdentityEntity } from '../entities/inbox-channel-contact-identity.entity';
+import { InboxGovernedActionEntity } from '../entities/inbox-governed-action.entity';
+import { InboxAutonomyControlEntity } from '../entities/inbox-autonomy-control.entity';
 
 describe('InboxGovernedActionWorker kill switches', () => {
   it('blocks a claimed action when the effect switch is disabled before execution', async () => {
@@ -313,5 +323,447 @@ describe('InboxGovernedActionWorker kill switches', () => {
       idempotencyKey: 'handoff:action:pipeline-transfer',
       agentId: 'agent',
     });
+  });
+});
+
+describe('InboxGovernedActionWorker social canonical contacts', () => {
+  function setup(options: {
+    channelType: string;
+    externalThreadId: string;
+    metadata?: Record<string, unknown>;
+    inboundMetadata?: Record<string, unknown>;
+    contactId?: string;
+    existingIdentityContactId?: string;
+  }) {
+    const action = {
+      id: 'action-contact',
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      conversationId: 'conversation',
+      policyVersion: 'inbox-autonomy-policy-v1',
+    } as InboxGovernedActionEntity;
+    const conversation = {
+      id: 'conversation',
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      channelId: 'channel',
+      source: options.channelType,
+      externalThreadId: options.externalThreadId,
+      title: options.externalThreadId,
+      businessMode: 'general',
+      metadata: options.metadata ?? {},
+      contactId: options.contactId ?? null,
+    } as InboxConversationEntity;
+    const contacts = {
+      save: jest.fn((value: Record<string, unknown>) =>
+        Promise.resolve({ ...value, id: 'new-contact' }),
+      ),
+    };
+    const methods = { save: jest.fn().mockResolvedValue({}) };
+    const identities = {
+      findOneBy: jest
+        .fn()
+        .mockResolvedValue(
+          options.existingIdentityContactId
+            ? { contactId: options.existingIdentityContactId }
+            : null,
+        ),
+      save: jest.fn().mockResolvedValue({}),
+    };
+    const channels = {
+      findOneBy: jest.fn().mockResolvedValue({
+        id: 'channel',
+        tenantId: 'tenant',
+        workspaceId: 'workspace',
+        type: options.channelType,
+        metadata: {},
+      }),
+    };
+    const messages = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'latest-inbound',
+        metadata: options.inboundMetadata ?? {},
+      }),
+    };
+    const memberInsert = {
+      insert: jest.fn().mockReturnThis(),
+      values: jest.fn().mockReturnThis(),
+      orIgnore: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({}),
+    };
+    const repositories = new Map<unknown, unknown>([
+      [ContactEntity, contacts],
+      [ContactMethodEntity, methods],
+      [InboxChannelContactIdentityEntity, identities],
+      [InboxChannelEntity, channels],
+      [InboxMessageEntity, messages],
+      [
+        InboxConversationEntity,
+        {
+          findOne: jest.fn().mockResolvedValue(conversation),
+          save: jest.fn().mockResolvedValue(conversation),
+        },
+      ],
+      [
+        ContactListEntity,
+        { findOneBy: jest.fn().mockResolvedValue({ id: 'list' }) },
+      ],
+      [ContactListMemberEntity, { createQueryBuilder: () => memberInsert }],
+      [InboxConversationEventEntity, { save: jest.fn().mockResolvedValue({}) }],
+      [InboxDomainOutboxEntity, { save: jest.fn().mockResolvedValue({}) }],
+    ]);
+    const manager = {
+      query: jest.fn().mockResolvedValue([]),
+      getRepository: (entity: unknown) => {
+        if (!repositories.has(entity)) throw new Error('Unexpected repository');
+        return repositories.get(entity);
+      },
+    };
+    const worker = new InboxGovernedActionWorker(
+      {
+        transaction: (callback: (value: typeof manager) => Promise<unknown>) =>
+          callback(manager),
+      } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const ensureContact = () =>
+      (
+        worker as unknown as {
+          ensureContact: (
+            action: InboxGovernedActionEntity,
+            snapshot: InboxConversationEntity,
+          ) => Promise<unknown>;
+        }
+      ).ensureContact(action, conversation);
+    return {
+      ensureContact,
+      conversation,
+      contacts,
+      methods,
+      identities,
+      channels,
+      messages,
+      manager,
+    };
+  }
+
+  it('creates an Instagram contact using the latest inbound name and username without phone matching', async () => {
+    const test = setup({
+      channelType: 'instagram',
+      externalThreadId: 'instagram:account:17841400000000123',
+      inboundMetadata: { senderName: 'Ana Silva', senderUsername: 'ana.silva' },
+      metadata: {
+        contactName: 'Nome antigo',
+        avatarUrl: 'https://cdn.example/avatar.jpg',
+      },
+    });
+
+    await expect(test.ensureContact()).resolves.toEqual({
+      contactId: 'new-contact',
+      contactOutcome: 'created',
+    });
+    expect(test.contacts.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: 'Ana Silva',
+        source: 'leadflow_instagram',
+      }),
+    );
+    expect(test.methods.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'instagram',
+        value: '@ana.silva',
+        contactId: 'new-contact',
+      }),
+    );
+    expect(test.identities.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel',
+        identityType: 'instagram',
+        externalIdentityHash: createHash('sha256')
+          .update('instagram:17841400000000123')
+          .digest('hex'),
+      }),
+    );
+    expect(test.conversation.contactId).toBe('new-contact');
+    expect(test.conversation.metadata.avatarUrl).toBe(
+      'https://cdn.example/avatar.jpg',
+    );
+    expect(
+      test.manager.query.mock.calls.some(([sql]) =>
+        String(sql).includes('JOIN contact_methods'),
+      ),
+    ).toBe(false);
+    expect(test.channels.findOneBy).toHaveBeenCalledWith({
+      id: 'channel',
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+    });
+    expect(test.messages.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId: 'tenant',
+          workspaceId: 'workspace',
+          conversationId: 'conversation',
+          direction: 'inbound',
+        },
+        order: { occurredAt: 'DESC', id: 'DESC' },
+      }),
+    );
+  });
+
+  it('creates a Messenger contact with a readable fallback and a Facebook method', async () => {
+    const test = setup({
+      channelType: 'facebook_messenger',
+      externalThreadId: 'messenger:page:98765432101234567',
+    });
+
+    await expect(test.ensureContact()).resolves.toEqual({
+      contactId: 'new-contact',
+      contactOutcome: 'created',
+    });
+    expect(test.contacts.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: 'Contato do Messenger',
+        source: 'leadflow_messenger',
+      }),
+    );
+    expect(test.methods.save).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'facebook', value: '98765432101234567' }),
+    );
+    expect(test.identities.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identityType: 'messenger',
+        externalIdentityHash: createHash('sha256')
+          .update('messenger:98765432101234567')
+          .digest('hex'),
+      }),
+    );
+    expect(
+      test.manager.query.mock.calls.some(([sql]) =>
+        String(sql).includes('JOIN contact_methods'),
+      ),
+    ).toBe(false);
+  });
+
+  it('uses an Instagram username as the name when the lead has no name', async () => {
+    const test = setup({
+      channelType: 'instagram',
+      externalThreadId: 'instagram:17841400000000123',
+      inboundMetadata: { senderUsername: '@ana.silva' },
+    });
+    await test.ensureContact();
+    expect(test.contacts.save).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: '@ana.silva' }),
+    );
+    expect(test.methods.save).toHaveBeenCalledWith(
+      expect.objectContaining({ value: '@ana.silva' }),
+    );
+  });
+
+  it('uses conversation profile metadata and the scoped Instagram ID when no inbound username exists', async () => {
+    const test = setup({
+      channelType: 'instagram',
+      externalThreadId: 'instagram:17841400000000123',
+      metadata: { contactName: 'Ana do perfil' },
+    });
+    await test.ensureContact();
+    expect(test.contacts.save).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: 'Ana do perfil' }),
+    );
+    expect(test.methods.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'instagram',
+        value: '17841400000000123',
+      }),
+    );
+  });
+
+  it('reuses a channel-scoped social identity without creating another contact or method', async () => {
+    const test = setup({
+      channelType: 'instagram',
+      externalThreadId: 'instagram:17841400000000123',
+      existingIdentityContactId: 'existing-contact',
+    });
+    await expect(test.ensureContact()).resolves.toEqual({
+      contactId: 'existing-contact',
+      contactOutcome: 'reused',
+    });
+    expect(test.conversation.contactId).toBe('existing-contact');
+    expect(test.contacts.save).not.toHaveBeenCalled();
+    expect(test.methods.save).not.toHaveBeenCalled();
+    expect(test.identities.findOneBy).toHaveBeenCalledWith({
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      channelId: 'channel',
+      externalIdentityHash: createHash('sha256')
+        .update('instagram:17841400000000123')
+        .digest('hex'),
+    });
+  });
+
+  it('reuses the contact already linked to the conversation without identity lookup or creation', async () => {
+    const test = setup({
+      channelType: 'instagram',
+      externalThreadId: 'instagram:17841400000000123',
+      contactId: 'linked-contact',
+    });
+    await expect(test.ensureContact()).resolves.toEqual({
+      contactId: 'linked-contact',
+      contactOutcome: 'reused',
+    });
+    expect(test.contacts.save).not.toHaveBeenCalled();
+    expect(test.methods.save).not.toHaveBeenCalled();
+    expect(test.identities.findOneBy).not.toHaveBeenCalled();
+  });
+
+  it('fails closed for an unsupported channel before creating a contact', async () => {
+    const test = setup({
+      channelType: 'webchat',
+      externalThreadId: 'visitor-123',
+    });
+    await expect(test.ensureContact()).rejects.toThrow(
+      'canonical_identity_unsupported',
+    );
+    expect(test.contacts.save).not.toHaveBeenCalled();
+    expect(test.methods.save).not.toHaveBeenCalled();
+  });
+});
+
+describe('InboxGovernedActionWorker readable effect failures', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  async function failReply(error: Error) {
+    const action = {
+      id: 'action-reply',
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      conversationId: 'conversation',
+      decisionId: 'decision',
+      actionType: 'reply',
+      ownershipVersion: 1,
+      policyOutcome: 'allowed',
+      applicationResult: {},
+    };
+    const actionRepository = {
+      findOneBy: jest.fn().mockResolvedValue(action),
+      update: jest
+        .fn<Promise<unknown>, [string, Partial<InboxGovernedActionEntity>]>()
+        .mockResolvedValue({}),
+    };
+    const repositories = new Map<unknown, unknown>([
+      [InboxGovernedActionEntity, actionRepository],
+      [
+        InboxAgentDecisionEntity,
+        {
+          findOneBy: jest.fn().mockResolvedValue({
+            id: 'decision',
+            agentId: 'agent',
+            proposal: { reply: 'private reply body' },
+          }),
+        },
+      ],
+      [
+        InboxConversationEntity,
+        {
+          findOneBy: jest.fn().mockResolvedValue({
+            id: 'conversation',
+            channelId: 'channel',
+            externalThreadId: '+5511999999999',
+            aiEnabled: true,
+            ownershipState: 'ai_active',
+            ownershipVersion: 1,
+          }),
+        },
+      ],
+      [
+        InboxChannelEntity,
+        { findOneBy: jest.fn().mockResolvedValue({ type: 'whatsapp' }) },
+      ],
+      [
+        InboxAutonomyControlEntity,
+        { findOneBy: jest.fn().mockResolvedValue(null) },
+      ],
+    ]);
+    const manager = {
+      query: jest.fn().mockResolvedValue([{ id: action.id }]),
+      getRepository: (entity: unknown) => repositories.get(entity),
+    };
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const worker = new InboxGovernedActionWorker(
+      {
+        transaction: (callback: (value: typeof manager) => Promise<unknown>) =>
+          callback(manager),
+        getRepository: manager.getRepository,
+        query: jest.fn().mockResolvedValue([]),
+      } as never,
+      { autoReplyEnabled: true } as never,
+      { sendAgentText: jest.fn().mockRejectedValue(error) } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    await expect(worker.processOnce('worker-test')).resolves.toBeNull();
+    const failed = actionRepository.update.mock.calls.find(
+      ([, value]) => value.status === 'failed',
+    );
+    expect(failed).toBeDefined();
+    return {
+      failure: failed?.[1] as {
+        errorCode: string;
+        applicationResult: { errorClass: string; errorMessage: string };
+      },
+      warn,
+    };
+  }
+
+  it('persists a readable TypeORM relation failure and logs its action type without changing errorCode', async () => {
+    const error = new Error(
+      'Relation with property path conversation in entity was not found',
+    );
+    error.name = 'TypeORMError';
+    const { failure, warn } = await failReply(error);
+    expect(failure.errorCode).toBe('effect_failed');
+    expect(failure.applicationResult).toEqual({
+      errorClass: 'TypeORMError',
+      errorMessage: error.message,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionType: 'reply',
+        errorClass: 'TypeORMError',
+        errorCode: 'effect_failed',
+      }),
+    );
+  });
+
+  it('keeps slug reason codes stable and never includes tokens, phone numbers or message body in diagnostics', async () => {
+    const secret = 'EAAprivate-access-token';
+    const phone = '+5511999999999';
+    const body = 'private reply body';
+    const error = Object.assign(
+      new Error(
+        `Provider rejected access_token=${secret} phone=${phone} body=${body} ${'x'.repeat(400)}`,
+      ),
+      { response: { reasonCode: 'provider_unavailable' } },
+    );
+    const { failure, warn } = await failReply(error);
+    expect(failure.errorCode).toBe('provider_unavailable');
+    expect(failure.applicationResult.errorClass).toBe('Error');
+    expect(failure.applicationResult.errorMessage.length).toBeLessThanOrEqual(
+      300,
+    );
+    const diagnostics = JSON.stringify({
+      result: failure.applicationResult,
+      logs: warn.mock.calls,
+    });
+    expect(diagnostics).not.toContain(secret);
+    expect(diagnostics).not.toContain(phone);
+    expect(diagnostics).not.toContain(body);
   });
 });

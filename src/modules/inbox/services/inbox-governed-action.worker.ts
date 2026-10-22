@@ -32,6 +32,8 @@ import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity
 import { CrmStageTransitionPolicyEntity } from '../../crm/entities/crm-stage-transition-policy.entity';
 import { LeadFlowAgentEntity } from '../../leadflow-agents/entities/leadflow-agent.entity';
 import { LeadFlowAgentStatus } from '../../leadflow-agents/enums/leadflow-agent-status.enum';
+import { InstagramContactEnrichmentService } from '../channels/instagram/services/instagram-contact-enrichment.service';
+import { FacebookMessengerContactEnrichmentService } from '../channels/facebook-messenger/services/facebook-messenger-contact-enrichment.service';
 
 @Injectable()
 export class InboxGovernedActionWorker
@@ -50,6 +52,10 @@ export class InboxGovernedActionWorker
     private readonly ownership: ConversationOwnershipService,
     @Optional()
     private readonly opportunityCommands?: CrmOpportunityCommandService,
+    @Optional()
+    private readonly instagramEnrichment?: InstagramContactEnrichmentService,
+    @Optional()
+    private readonly messengerEnrichment?: FacebookMessengerContactEnrichmentService,
   ) {}
 
   onModuleInit(): void {
@@ -65,11 +71,13 @@ export class InboxGovernedActionWorker
   async processOnce(workerId = `governed:${process.pid}`) {
     const actionId = await this.claim(workerId);
     if (!actionId) return null;
+    let actionType = 'unknown';
     try {
       const action = await this.dataSource
         .getRepository(InboxGovernedActionEntity)
         .findOneBy({ id: actionId });
       if (!action) return null;
+      actionType = action.actionType;
       if (!(await this.effectEnabled(action))) {
         await this.finish(action, 'blocked', 'effect_kill_switch', {});
         return action;
@@ -179,7 +187,13 @@ export class InboxGovernedActionWorker
           status: 'failed',
           failedAt: new Date(),
           errorCode: safeErrorCode(error),
+          applicationResult: safeEffectError(error),
         });
+      this.logger.warn({
+        actionType,
+        errorClass: safeEffectError(error).errorClass,
+        errorCode: safeErrorCode(error),
+      });
       return null;
     }
   }
@@ -268,6 +282,11 @@ export class InboxGovernedActionWorker
     action: InboxGovernedActionEntity,
     snapshot: InboxConversationEntity,
   ): Promise<{ contactId: string; contactOutcome: 'created' | 'reused' }> {
+    if (snapshot.source === 'instagram') {
+      await this.instagramEnrichment?.refreshProfiles([snapshot]);
+    } else if (snapshot.source === 'facebook_messenger') {
+      await this.messengerEnrichment?.enrichMissingProfiles([snapshot]);
+    }
     return this.dataSource.transaction(async (manager) => {
       await this.assertWorkspaceControl(manager, action, 'crm_enabled');
       const conversation = await manager
@@ -295,7 +314,18 @@ export class InboxGovernedActionWorker
         );
         return { contactId: conversation.contactId, contactOutcome: 'reused' };
       }
-      const identity = normalizeIdentity(conversation.externalThreadId);
+      const channel = await manager
+        .getRepository(InboxChannelEntity)
+        .findOneBy({
+          id: conversation.channelId,
+          tenantId: action.tenantId,
+          workspaceId: action.workspaceId,
+        });
+      const canonical = resolveCanonicalIdentity(
+        channel?.type,
+        conversation.externalThreadId,
+      );
+      const { identity } = canonical;
       const externalIdentityHash = createHash('sha256')
         .update(identity)
         .digest('hex');
@@ -325,10 +355,10 @@ export class InboxGovernedActionWorker
         );
         return { contactId: existing.contactId, contactOutcome: 'reused' };
       }
-      const contactMatches = await manager.query<
-        Array<{ id: string; status: string }>
-      >(
-        `SELECT DISTINCT contact.id, contact.status
+      const contactMatches =
+        canonical.identityType === 'phone'
+          ? await manager.query<Array<{ id: string; status: string }>>(
+              `SELECT DISTINCT contact.id, contact.status
            FROM contacts contact
            JOIN contact_methods method
              ON method.contact_id = contact.id
@@ -337,8 +367,9 @@ export class InboxGovernedActionWorker
           WHERE contact.tenant_id = $1 AND contact.workspace_id = $2
             AND method.type IN ('phone', 'whatsapp')
             AND regexp_replace(method.value, '\\D', '', 'g') = $3`,
-        [action.tenantId, action.workspaceId, identity.slice(1)],
-      );
+              [action.tenantId, action.workspaceId, identity.slice(1)],
+            )
+          : [];
       if (contactMatches.length > 1)
         throw new Error('canonical_identity_ambiguous');
       if (contactMatches[0]?.status === 'archived')
@@ -350,7 +381,7 @@ export class InboxGovernedActionWorker
           channelId: conversation.channelId,
           contactId: contactMatches[0].id,
           externalIdentityHash,
-          identityType: 'whatsapp',
+          identityType: canonical.identityType,
           provenance: {
             source: 'existing_contact_method',
             governedActionId: action.id,
@@ -370,11 +401,34 @@ export class InboxGovernedActionWorker
           contactOutcome: 'reused',
         };
       }
+      const latestInbound =
+        canonical.identityType !== 'phone'
+          ? await manager.getRepository(InboxMessageEntity).findOne({
+              where: {
+                tenantId: action.tenantId,
+                workspaceId: action.workspaceId,
+                conversationId: conversation.id,
+                direction: 'inbound',
+              },
+              order: { occurredAt: 'DESC', id: 'DESC' },
+            })
+          : null;
+      const profile = canonicalContactProfile(
+        conversation,
+        latestInbound?.metadata,
+      );
+      if (canonical.identityType !== 'phone') {
+        conversation.metadata = {
+          ...conversation.metadata,
+          contactName: profile.displayName,
+          ...(profile.username ? { username: profile.username } : {}),
+        };
+      }
       const contact = await manager.getRepository(ContactEntity).save({
         tenantId: action.tenantId,
         workspaceId: action.workspaceId,
         type: 'person',
-        displayName: safeContactName(conversation.title),
+        displayName: profile.displayName,
         firstName: null,
         lastName: null,
         legalName: null,
@@ -382,7 +436,7 @@ export class InboxGovernedActionWorker
         documentNumber: null,
         jobTitle: null,
         companyContactId: null,
-        source: 'leadflow_whatsapp',
+        source: canonical.source,
         businessMode: contactBusinessMode(conversation.businessMode),
         lifecycleStage: 'lead',
         lifecycleStages: ['lead'],
@@ -395,9 +449,14 @@ export class InboxGovernedActionWorker
         tenantId: action.tenantId,
         workspaceId: action.workspaceId,
         contactId: contact.id,
-        type: 'whatsapp',
-        value: identity,
-        label: 'LeadFlow WhatsApp',
+        type: canonical.methodType,
+        value:
+          canonical.methodType === 'instagram' && profile.username
+            ? `@${profile.username}`
+            : canonical.identityType === 'phone'
+              ? identity
+              : identity.split(':').at(-1)!,
+        label: `LeadFlow ${channel?.type === 'instagram' ? 'Instagram' : channel?.type === 'facebook_messenger' ? 'Messenger' : canonical.source === 'leadflow_sms' ? 'SMS' : 'WhatsApp'}`,
         isPrimary: true,
         verifiedAt: null,
       });
@@ -407,7 +466,7 @@ export class InboxGovernedActionWorker
         channelId: conversation.channelId,
         contactId: contact.id,
         externalIdentityHash,
-        identityType: 'whatsapp',
+        identityType: canonical.identityType,
         provenance: {
           source: 'canonical_inbound_identity',
           governedActionId: action.id,
@@ -558,6 +617,10 @@ export class InboxGovernedActionWorker
         action,
       );
       if (existing) {
+        existing.metadata = {
+          ...existing.metadata,
+          leadflowContactProfile: canonicalContactProfile(conversation),
+        };
         existing.operationalStatus = conversation.ownershipState;
         if (
           conversation.ownershipState === 'human_active' &&
@@ -666,7 +729,8 @@ export class InboxGovernedActionWorker
           stageId: stage.id,
           contactId: conversation.contactId,
           contactName:
-            contact?.displayName ?? safeContactName(conversation.title),
+            contact?.displayName ??
+            canonicalContactProfile(conversation).displayName,
           contactEmail: null,
           contactPhone:
             primaryMethod?.type === 'phone' ||
@@ -675,10 +739,11 @@ export class InboxGovernedActionWorker
               : null,
           inboxConversationId: conversation.id,
           sourceOpportunityId: terminalSource?.id ?? null,
-          title: `LeadFlow — ${safeContactName(conversation.title)}`.slice(
-            0,
-            180,
-          ),
+          title:
+            `LeadFlow — ${contact?.displayName ?? canonicalContactProfile(conversation).displayName}`.slice(
+              0,
+              180,
+            ),
           description: null,
           valueAmount: null,
           currency: 'BRL',
@@ -727,6 +792,7 @@ export class InboxGovernedActionWorker
           rowVersion: 1,
           metadata: {
             createdBy: 'governed_autonomy',
+            leadflowContactProfile: canonicalContactProfile(conversation),
             conversionKey: readConversionKey(conversation.metadata),
             sourceProvenance: 'canonical_inbound_channel',
             operatingMode: routedClientId ? 'client' : 'agency',
@@ -1331,6 +1397,120 @@ function normalizeIdentity(value: string): string {
   if (digits.length < 8 || digits.length > 15)
     throw new Error('canonical_identity_invalid');
   return `+${digits}`;
+}
+
+export function resolveCanonicalIdentity(
+  channelType: string | undefined,
+  externalThreadId: string,
+): {
+  identity: string;
+  identityType: string;
+  methodType: ContactMethodEntity['type'];
+  source: string;
+} {
+  if (channelType === 'whatsapp' || channelType === 'sms') {
+    return {
+      identity: normalizeIdentity(externalThreadId),
+      identityType: 'phone',
+      methodType: channelType === 'sms' ? 'phone' : 'whatsapp',
+      source: `leadflow_${channelType}`,
+    };
+  }
+  if (channelType !== 'instagram' && channelType !== 'facebook_messenger') {
+    throw new Error('canonical_identity_unsupported');
+  }
+  const parts = externalThreadId.trim().split(':');
+  if (
+    parts.length > 1 &&
+    (parts.length > 3 ||
+      (parts[0] !== channelType &&
+        !(channelType === 'facebook_messenger' && parts[0] === 'messenger')))
+  ) {
+    throw new Error('canonical_identity_invalid');
+  }
+  const id = parts.at(-1) ?? '';
+  if (!/^[A-Za-z0-9_-]{1,180}$/.test(id))
+    throw new Error('canonical_identity_invalid');
+  const type = channelType === 'instagram' ? 'instagram' : 'messenger';
+  return {
+    identity: `${type}:${id}`,
+    identityType: type,
+    methodType: type === 'instagram' ? 'instagram' : 'facebook',
+    source: `leadflow_${type}`,
+  };
+}
+
+function canonicalContactProfile(
+  conversation: InboxConversationEntity,
+  inbound: Record<string, unknown> = {},
+) {
+  const metadata = conversation.metadata ?? {};
+  const social = ['instagram', 'facebook_messenger'].includes(
+    conversation.source,
+  );
+  if (!social)
+    return {
+      displayName: safeContactName(conversation.title),
+      username: null,
+      avatarUrl: null,
+    };
+  const text = (value: unknown) =>
+    typeof value === 'string' && value.trim() ? value.trim() : null;
+  const username =
+    (text(inbound.senderUsername) ?? text(metadata.username))?.replace(
+      /^@/,
+      '',
+    ) ?? null;
+  const candidate =
+    text(inbound.senderName) ??
+    text(metadata.contactName) ??
+    text(conversation.title);
+  const name =
+    candidate &&
+    !/^(instagram|facebook_messenger|messenger):|^\+?[\d\s()-]+$/.test(
+      candidate,
+    ) &&
+    ![
+      'Nova conversa',
+      'Conversa sem título',
+      'Lead do Instagram',
+      'Lead do Messenger',
+    ].includes(candidate)
+      ? candidate
+      : null;
+  return {
+    displayName: (
+      name ??
+      (social && username
+        ? `@${username}`
+        : social
+          ? `Contato do ${conversation.source === 'instagram' ? 'Instagram' : 'Messenger'}`
+          : safeContactName(conversation.title))
+    ).slice(0, 160),
+    username,
+    avatarUrl: text(metadata.avatarUrl),
+  };
+}
+
+function safeEffectError(error: unknown): {
+  errorClass: string;
+  errorMessage: string;
+} {
+  const name = error instanceof Error ? error.name : 'UnknownError';
+  const errorClass = /^[A-Za-z][A-Za-z0-9]{0,79}$/.test(name) ? name : 'Error';
+  const message = error instanceof Error ? error.message : '';
+  // Arbitrary exception text can contain request bodies and credentials. Only
+  // structural TypeORM errors and domain reason codes are safe to retain.
+  const relation =
+    /^Relation with property path ([A-Za-z_][A-Za-z0-9_.]{0,100}) in entity was not found\.?$/.exec(
+      message,
+    );
+  const errorMessage = relation
+    ? `Relation with property path ${relation[1]} in entity was not found`
+    : /^[a-z][a-z0-9_]{0,79}$/.test(message)
+      ? message
+      : `Falha ao aplicar efeito (${errorClass}); detalhes omitidos para proteger dados da conversa.`;
+  return { errorClass, errorMessage: errorMessage.slice(0, 300) };
 }
 
 function safeContactName(value: string | null): string {

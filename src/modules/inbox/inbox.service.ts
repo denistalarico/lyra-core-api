@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, In, IsNull, Repository, SelectQueryBuilder } from 'typeorm';
+import { In, IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreateInboxChannelDto } from './dto/create-inbox-channel.dto';
 import { CreateInboxConversationDto } from './dto/create-inbox-conversation.dto';
@@ -24,6 +24,8 @@ import { InboxMessageEntity } from './entities/inbox-message.entity';
 import { InboxMediaAssetEntity } from './entities/inbox-media-asset.entity';
 import { InboxMediaDerivativeEntity } from './entities/inbox-media-derivative.entity';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { AssetAccessService } from '../../common/files/asset-access.service';
+import { authorizeInboxMessage } from './inbox-attachment-urls';
 import { FilesService } from '../../common/files/files.service';
 import {
   INBOX_CHANNEL_CUSTOM_NAME_METADATA_KEY,
@@ -86,6 +88,7 @@ export class InboxService {
     private readonly facebookMessengerContactEnrichmentService: FacebookMessengerContactEnrichmentService,
     private readonly instagramContactEnrichmentService: InstagramContactEnrichmentService,
     private readonly notificationsService: NotificationsService,
+    private readonly assetAccess: AssetAccessService,
   ) {}
 
   /**
@@ -957,48 +960,55 @@ export class InboxService {
         asset,
       ]);
     }
-    return messages.map((message) => ({
-      ...message,
-      senderUserName: message.senderUserId
-        ? (senderUserNames.get(message.senderUserId) ?? null)
-        : null,
-      // Mensagens outbound guardam o anexo como descriptor no próprio JSON
-      // (não geram media asset). Sem este fallback o anexo sumia na leitura.
-      attachments: !byMessage.has(message.id)
-        ? Array.isArray(message.attachments)
-          ? message.attachments
-          : []
-        : (byMessage.get(message.id) ?? []).map((asset) => ({
-            id: asset.id,
-            kind: asset.kind,
-            mimeType: asset.mimeType,
-            status: asset.status,
-            name: asset.safeFilename,
-            derivative: (() => {
-              const derivative = derivatives.find(
-                (item) => item.mediaAssetId === asset.id,
-              );
-              return derivative
-                ? {
-                    id: derivative.id,
-                    kind: derivative.kind,
-                    status: derivative.status,
-                    outcome: derivative.outcome,
-                    content:
-                      derivative.status === 'available'
-                        ? derivative.content
-                        : null,
-                    language: derivative.language,
-                    confidence: derivative.confidence,
-                    errorCode:
-                      derivative.status === 'failed'
-                        ? derivative.errorCode
-                        : null,
-                  }
-                : null;
-            })(),
-          })),
-    }));
+    return messages.map((storedMessage) => {
+      const message = authorizeInboxMessage(
+        this.assetAccess,
+        storedMessage,
+        ctx.userId,
+      );
+      return {
+        ...message,
+        senderUserName: message.senderUserId
+          ? (senderUserNames.get(message.senderUserId) ?? null)
+          : null,
+        // Mensagens outbound guardam o anexo como descriptor no próprio JSON
+        // (não geram media asset). Sem este fallback o anexo sumia na leitura.
+        attachments: !byMessage.has(message.id)
+          ? Array.isArray(message.attachments)
+            ? message.attachments
+            : []
+          : (byMessage.get(message.id) ?? []).map((asset) => ({
+              id: asset.id,
+              kind: asset.kind,
+              mimeType: asset.mimeType,
+              status: asset.status,
+              name: asset.safeFilename,
+              derivative: (() => {
+                const derivative = derivatives.find(
+                  (item) => item.mediaAssetId === asset.id,
+                );
+                return derivative
+                  ? {
+                      id: derivative.id,
+                      kind: derivative.kind,
+                      status: derivative.status,
+                      outcome: derivative.outcome,
+                      content:
+                        derivative.status === 'available'
+                          ? derivative.content
+                          : null,
+                      language: derivative.language,
+                      confidence: derivative.confidence,
+                      errorCode:
+                        derivative.status === 'failed'
+                          ? derivative.errorCode
+                          : null,
+                    }
+                  : null;
+              })(),
+            })),
+      };
+    });
   }
 
   async createMessage(

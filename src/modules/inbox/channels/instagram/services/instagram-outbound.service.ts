@@ -11,6 +11,8 @@ import { DataSource, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../../../common/context/request-context.interface';
 import { inboxEntityMatchesScope } from '../../../inbox-company-scope';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
+import { AssetAccessService } from '../../../../../common/files/asset-access.service';
+import { assertInboxMediaSize } from '../../../inbox-media-limits';
 import { FilesService } from '../../../../../common/files/files.service';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
@@ -93,6 +95,7 @@ export class InstagramOutboundService {
     private readonly filesService: FilesService,
     private readonly metaLedger: InboxMetaOperationLedgerService,
     private readonly audioNormalizer: InstagramAudioNormalizerService,
+    private readonly assetAccess: AssetAccessService,
   ) {}
 
   async sendText(input: SendInstagramTextInput) {
@@ -240,6 +243,7 @@ export class InstagramOutboundService {
   async sendMedia(input: SendInstagramMediaInput) {
     if (!input.file) throw new BadRequestException('Arquivo não enviado.');
     const mediaType = this.resolveMediaType(input.file.mimetype);
+    const maxBytes = assertInboxMediaSize('instagram', mediaType, input.file);
     const { channel, conversation, accessToken, recipient } =
       await this.resolveSendContext(input);
     this.assertActorCanSend(conversation, { type: 'user' });
@@ -269,13 +273,14 @@ export class InstagramOutboundService {
       mediaType === 'audio'
         ? await this.audioNormalizer.normalize(input.file)
         : input.file;
+    assertInboxMediaSize('instagram', mediaType, mediaFile);
     const ext = mediaFile.originalname.split('.').pop()?.toLowerCase() ?? 'bin';
     const stored = await this.filesService.uploadRawFile({
       file: mediaFile,
       path: `tenants/${channel.tenantId}/workspaces/${channel.workspaceId}/inbox/attachments/${Date.now()}-${randomUUID()}.${ext}`,
-      maxBytes: 10 * 1024 * 1024,
+      maxBytes,
     });
-    const mediaUrl = this.absoluteAssetUrl(stored.url);
+    const mediaUrl = `${this.absoluteAssetUrl(stored.url)}?${this.assetAccess.issueGrant(stored.path, 'provider:meta', 3600).query}`;
     const caption = input.caption?.trim() || '';
     const label = `[${mediaType === 'image' ? 'imagem' : mediaType === 'audio' ? 'áudio' : 'vídeo'}]`;
     const persistence = await this.persistPendingMessage(

@@ -11,6 +11,8 @@ import { DataSource, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../../../common/context/request-context.interface';
 import { inboxEntityMatchesScope } from '../../../inbox-company-scope';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
+import { AssetAccessService } from '../../../../../common/files/asset-access.service';
+import { assertInboxMediaSize } from '../../../inbox-media-limits';
 import { FilesService } from '../../../../../common/files/files.service';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
@@ -30,8 +32,6 @@ const STANDARD_MESSAGING_WINDOW_MS = 24 * 60 * 60 * 1_000;
 
 export const FACEBOOK_MESSENGER_WINDOW_CLOSED =
   'facebook_messenger_outside_standard_messaging_window';
-
-const MESSENGER_MEDIA_MAX_BYTES = 10 * 1024 * 1024;
 
 type SendMessengerTextInput = {
   ctx: RequestContext;
@@ -109,6 +109,7 @@ export class FacebookMessengerOutboundService {
     // Shared with Instagram: both Meta surfaces reject the OGG/WebM the browser
     // recorder produces, and the normalizer is channel-agnostic AAC transcode.
     private readonly audioNormalizer: InstagramAudioNormalizerService,
+    private readonly assetAccess: AssetAccessService,
   ) {}
 
   async sendText(input: SendMessengerTextInput) {
@@ -265,6 +266,11 @@ export class FacebookMessengerOutboundService {
   async sendMedia(input: SendMessengerMediaInput) {
     if (!input.file) throw new BadRequestException('Arquivo não enviado.');
     const mediaType = this.resolveMediaType(input.file.mimetype);
+    const maxBytes = assertInboxMediaSize(
+      'facebook_messenger',
+      mediaType,
+      input.file,
+    );
     const { channel, conversation, accessToken, recipient } =
       await this.resolveSendContext(input);
     this.assertActorCanSend(conversation, { type: 'user' });
@@ -294,15 +300,16 @@ export class FacebookMessengerOutboundService {
       mediaType === 'audio'
         ? await this.audioNormalizer.normalize(input.file)
         : input.file;
+    assertInboxMediaSize('facebook_messenger', mediaType, mediaFile);
     const ext = mediaFile.originalname.split('.').pop()?.toLowerCase() ?? 'bin';
     const stored = await this.filesService.uploadRawFile({
       file: mediaFile,
       path: `tenants/${channel.tenantId}/workspaces/${channel.workspaceId}/inbox/attachments/${Date.now()}-${randomUUID()}.${ext}`,
-      maxBytes: MESSENGER_MEDIA_MAX_BYTES,
+      maxBytes,
     });
     // Meta fetches the attachment from this URL, so it must be the public API
     // origin — the storage path alone is not reachable from Meta's servers.
-    const mediaUrl = this.absoluteAssetUrl(stored.url);
+    const mediaUrl = `${this.absoluteAssetUrl(stored.url)}?${this.assetAccess.issueGrant(stored.path, 'provider:meta', 3600).query}`;
     const caption = input.caption?.trim() || '';
     const label = MEDIA_LABELS[mediaType];
     const persistence = await this.persistPendingMessage(

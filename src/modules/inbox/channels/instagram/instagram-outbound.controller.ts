@@ -52,7 +52,7 @@ export class InstagramOutboundController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
+      limits: { fileSize: 25 * 1024 * 1024 },
     }),
   )
   async sendMedia(

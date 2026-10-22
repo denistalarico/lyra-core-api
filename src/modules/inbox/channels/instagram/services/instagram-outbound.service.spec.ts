@@ -435,7 +435,7 @@ describe('InstagramOutboundService', () => {
           attachment: {
             type: 'audio',
             payload: {
-              url: 'https://api.example.com/api/assets/audio/audio.m4a',
+              url: 'https://api.example.com/api/assets/audio/audio.m4a?au=provider%3Ameta&ae=9999999999&as=test-signature',
             },
           },
         },
@@ -550,6 +550,11 @@ function createHarness(channelOverrides: Partial<InboxChannelEntity> = {}) {
     filesService as never,
     metaLedger as never,
     audioNormalizer as never,
+    {
+      issueGrant: jest.fn().mockReturnValue({
+        query: 'au=provider%3Ameta&ae=9999999999&as=test-signature',
+      }),
+    } as never,
   );
 
   return {

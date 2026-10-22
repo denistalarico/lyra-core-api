@@ -1,3 +1,4 @@
+import { assertInboxMediaSize } from '../../../inbox-media-limits';
 import {
   BadRequestException,
   ConflictException,
@@ -711,6 +712,11 @@ export class WhatsAppOutboundService {
     }
 
     const mediaType = resolveWhatsAppMediaType(input.file.mimetype);
+    const maxBytes = assertInboxMediaSize(
+      'whatsapp',
+      mediaType === 'document' ? 'file' : mediaType,
+      input.file,
+    );
     const caption = input.caption?.trim() || '';
 
     // Vídeo: só MP4 até 16 MB (sem transcodificação). Falhamos cedo com mensagem
@@ -745,6 +751,15 @@ export class WhatsAppOutboundService {
       uploadFilename = `${input.file.originalname.replace(/\.[^.]+$/, '')}.ogg`;
     }
 
+    assertInboxMediaSize(
+      'whatsapp',
+      mediaType === 'document' ? 'file' : mediaType,
+      {
+        size: uploadBuffer.length,
+        buffer: uploadBuffer,
+      },
+    );
+
     // Não usamos o nome do arquivo como texto da mensagem: a UI mostraria
     // "audio-123.webm" no balão. Sem legenda usamos um rótulo curto que o
     // frontend esconde e a lista aproveita como preview.
@@ -760,8 +775,7 @@ export class WhatsAppOutboundService {
     const stored = await this.filesService.uploadRawFile({
       file: input.file,
       path: storagePath,
-      maxBytes:
-        mediaType === 'video' ? WHATSAPP_VIDEO_MAX_BYTES : 10 * 1024 * 1024,
+      maxBytes,
     });
 
     const now = new Date();
