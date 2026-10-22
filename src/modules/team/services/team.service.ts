@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, In, Repository } from 'typeorm';
+import { ILike, In, IsNull, Repository } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
 import { FilesService } from '../../../common/files/files.service';
@@ -28,6 +28,7 @@ import {
   CreateTeamConfigOptionDto,
   UpdateTeamConfigOptionDto,
   UpsertTeamMemberSkillDto,
+  UpdateTeamConnectionStatusDto,
 } from '../dto';
 import {
   TeamAttendanceSource,
@@ -331,6 +332,38 @@ export class TeamService {
     return this.withUserProfileAvatars(ctx, members);
   }
 
+  async updateOwnConnectionStatus(
+    ctx: RequestContext,
+    memberId: string,
+    dto: UpdateTeamConnectionStatusDto,
+  ) {
+    // Merge only this key; attendance and profile metadata have their own writers.
+    const result = await this.memberRepository
+      .createQueryBuilder()
+      .update(TeamMember)
+      .set({
+        metadata: () =>
+          "jsonb_set(COALESCE(metadata, '{}'::jsonb), '{connectionPresence}', CAST(:connectionPresence AS jsonb), true)",
+      })
+      .where({
+        id: memberId,
+        tenantId: ctx.tenantId,
+        workspaceId: ctx.workspaceId,
+        userId: ctx.userId,
+        status: TeamMemberStatus.Active,
+        archivedAt: IsNull(),
+      })
+      .setParameter(
+        'connectionPresence',
+        JSON.stringify({
+          status: dto.status,
+          seenAt: new Date().toISOString(),
+        }),
+      )
+      .execute();
+    if (!result.affected) throw new NotFoundException('Team member not found');
+  }
+
   async getMember(ctx: RequestContext, id: string) {
     const member = await this.findMember(ctx, id);
     const [memberWithAvatar] = await this.withUserProfileAvatars(ctx, [member]);
@@ -353,12 +386,16 @@ export class TeamService {
     ctx: RequestContext,
     members: TeamMember[],
   ) {
+    const membersWithPresence = members.map((member) => ({
+      ...member,
+      connectionStatus: this.resolveConnectionStatus(member),
+    }));
     const userIds = members
       .map((member) => member.userId)
       .filter((userId): userId is string => Boolean(userId));
 
     if (userIds.length === 0) {
-      return members;
+      return membersWithPresence;
     }
 
     const profiles = await this.userProfileRepository.find({
@@ -372,7 +409,7 @@ export class TeamService {
       profiles.map((profile) => [profile.userId, profile]),
     );
 
-    return members.map((member) => {
+    return membersWithPresence.map((member) => {
       const profile = member.userId
         ? profileByUserId.get(member.userId)
         : undefined;
@@ -394,6 +431,27 @@ export class TeamService {
         avatarPath: profile?.avatarPath ?? null,
       };
     });
+  }
+
+  private resolveConnectionStatus(
+    member: TeamMember,
+  ): UpdateTeamConnectionStatusDto['status'] {
+    const presence = member.metadata?.connectionPresence as
+      | { status?: UpdateTeamConnectionStatusDto['status']; seenAt?: string }
+      | undefined;
+    const age = Date.now() - Date.parse(presence?.seenAt ?? '');
+    if (
+      member.status !== TeamMemberStatus.Active ||
+      member.archivedAt ||
+      !Number.isFinite(age) ||
+      age < 0 ||
+      age >= 90_000
+    )
+      return 'offline';
+    return presence?.status &&
+      ['available', 'busy', 'away', 'offline'].includes(presence.status)
+      ? presence.status
+      : 'offline';
   }
 
   async listConfigOptions(

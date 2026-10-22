@@ -53,30 +53,32 @@ export function resolveDashboardClientHealthCounts(
     ? profitability.clients
     : [];
 
-  return profitabilityClients.reduce<Record<string, number>>(
-    (result, item) => {
-      if (!item || typeof item !== 'object') {
-        return result;
-      }
-
-      const client = item as Record<string, unknown>;
-
-      // Finance can contain records that are not linked to an Agency client.
-      // Those records must not create client-health priorities.
-      if (client.status === null || client.status === undefined) {
-        return result;
-      }
-
-      const health =
-        typeof client.health === 'string' && client.health
-          ? client.health
-          : 'unknown';
-
-      result[health] = (result[health] ?? 0) + 1;
+  return profitabilityClients.reduce<Record<string, number>>((result, item) => {
+    if (!item || typeof item !== 'object') {
       return result;
-    },
-    {},
-  );
+    }
+
+    const client = item as Record<string, unknown>;
+
+    // Finance can contain records that are not linked to an Agency client.
+    // Those records must not create client-health priorities.
+    if (
+      client.status === null ||
+      client.status === undefined ||
+      client.status === 'archived' ||
+      client.archivedAt
+    ) {
+      return result;
+    }
+
+    const health =
+      typeof client.health === 'string' && client.health
+        ? client.health
+        : 'unknown';
+
+    result[health] = (result[health] ?? 0) + 1;
+    return result;
+  }, {});
 }
 
 export function mapDashboardClientLifecycleProcesses(
@@ -301,15 +303,6 @@ export class AgencyDashboardsService {
       values.get('clientsProfitability'),
       access.canViewProfitability,
     );
-
-    // MRR reflects the client portfolio revenue ("Receita da carteira" in the
-    // Clients module), not the finance recurring-profile sum.
-    const portfolioRevenue = this.extractPortfolioRevenue(
-      values.get('clientsProfitability'),
-    );
-    if (finance && portfolioRevenue !== null) {
-      finance.metrics.mrr = portfolioRevenue;
-    }
 
     const sales = this.mapSalesWidget(values.get('sales'));
 
@@ -761,16 +754,6 @@ export class AgencyDashboardsService {
   private toNumber(value: unknown): number {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : 0;
-  }
-
-  // Total revenue of the client portfolio (clientsProfitability.summary.revenue).
-  private extractPortfolioRevenue(value: unknown): number | null {
-    if (!value || typeof value !== 'object') return null;
-    const summary = (value as Record<string, unknown>).summary;
-    if (!summary || typeof summary !== 'object') return null;
-    const revenue = (summary as Record<string, unknown>).revenue;
-    const parsed = Number(revenue);
-    return Number.isFinite(parsed) ? parsed : null;
   }
 
   private toStringValue(value: unknown): string {

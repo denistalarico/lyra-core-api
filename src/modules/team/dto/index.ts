@@ -439,6 +439,11 @@ export class UpsertTeamMemberSkillDto {
   metadata?: Record<string, unknown>;
 }
 
+export class UpdateTeamConnectionStatusDto {
+  @IsIn(['available', 'busy', 'away', 'offline'])
+  status!: 'available' | 'busy' | 'away' | 'offline';
+}
+
 export class UpdateTeamPresenceDto {
   @IsEnum(TeamPresenceStatus)
   status!: TeamPresenceStatus;

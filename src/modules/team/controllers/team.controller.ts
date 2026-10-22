@@ -5,6 +5,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -31,6 +32,7 @@ import {
   UpdateTeamConfigOptionDto,
   UpsertTeamMemberSkillDto,
   GenerateTeamAttendanceReportPdfDto,
+  UpdateTeamConnectionStatusDto,
 } from '../dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
@@ -78,6 +80,17 @@ const IMAGE_UPLOAD_OPTIONS = {
 @Controller('agency/team')
 export class TeamController {
   constructor(private readonly teamService: TeamService) {}
+
+  @Patch('members/:id/connection-status')
+  @HttpCode(204)
+  @RequireTeamPermission('agency.team.member.update.self')
+  async updateOwnConnectionStatus(
+    @AuthorizedContext() context: AuthorizedRequestContext,
+    @Param('id') memberId: string,
+    @Body() dto: UpdateTeamConnectionStatusDto,
+  ) {
+    await this.teamService.updateOwnConnectionStatus(context, memberId, dto);
+  }
 
   @Get('health')
   health() {

@@ -24,6 +24,33 @@ const CONTEXT = {
 };
 
 describe('ClientsProfitabilityService', () => {
+  it('includes archive identity for both financed clients and clients without Finance data', async () => {
+    const archivedAt = new Date('2026-10-21T12:00:00Z');
+    const [contracts, defaults] = contractRepositories();
+    const service = new ClientsProfitabilityService(
+      {
+        getOverview: jest.fn().mockResolvedValue({
+          clients: [{ id: 'with-finance' }],
+          summary: {},
+          notes: [],
+        }),
+      } as never,
+      {
+        find: jest.fn().mockResolvedValue([
+          { id: 'with-finance', status: 'ended', archivedAt },
+          { id: 'without-finance', status: 'ended', archivedAt },
+        ]),
+      } as never,
+      contracts as never,
+      defaults as never,
+    );
+    const result = await service.getPortfolio(CONTEXT);
+    expect(result.clients).toEqual([
+      expect.objectContaining({ id: 'with-finance', archivedAt }),
+      expect.objectContaining({ id: 'without-finance', archivedAt }),
+    ]);
+  });
+
   it.each([
     {
       invoiced: 4897,

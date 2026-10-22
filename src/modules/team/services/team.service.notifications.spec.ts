@@ -17,6 +17,37 @@ import { TeamNotificationPublisher } from './team-notification.publisher';
 import { TeamService } from './team.service';
 
 describe('TeamService notification triggers', () => {
+  it('projects connection status independently of attendance and expires stale browser updates', async () => {
+    const { service, memberRepository } = makeService();
+    memberRepository.find = jest.fn().mockResolvedValue([
+      makeMember({
+        id: 'online',
+        metadata: {
+          connectionPresence: {
+            status: 'available',
+            seenAt: new Date().toISOString(),
+          },
+        },
+      }),
+      makeMember({
+        id: 'stale',
+        metadata: {
+          connectionPresence: {
+            status: 'available',
+            seenAt: '2020-01-01T00:00:00Z',
+          },
+        },
+      }),
+      makeMember({ id: 'unknown' }),
+    ]);
+    const result = await service.listMembers(makeContext(), {});
+    expect(result.map((member) => member.connectionStatus)).toEqual([
+      'available',
+      'offline',
+      'offline',
+    ]);
+  });
+
   it('publishes member_invited only when the new member has a userId', async () => {
     const { service, publisher } = makeService();
 
@@ -174,6 +205,7 @@ function makeService(
   const member = options.member ?? makeMember();
 
   const memberRepository = {
+    find: jest.fn().mockResolvedValue([member]),
     findOne: jest.fn().mockResolvedValue(member),
     create: jest.fn((value: Partial<TeamMember>) => ({ ...member, ...value })),
     save: jest.fn(async (value: TeamMember) => value),
