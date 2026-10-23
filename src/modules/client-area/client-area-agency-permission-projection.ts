@@ -41,7 +41,16 @@ function projectLeadFlowPermissions(
       grant('leadflow.inbox.conversation.close.client', ['POST'], own),
       grant('leadflow.inbox.conversation.view.client', ['POST'], own),
       ...(level === 'manager'
-        ? [grant('leadflow.settings.general.update.admin', ['PATCH'])]
+        ? [
+            // PATCH: quick replies (`/inbox/settings`); POST/DELETE as well
+            // for the company's follow-up templates (IX2). The bridge route
+            // table still decides which routes may carry it.
+            grant('leadflow.settings.general.update.admin', [
+              'PATCH',
+              'POST',
+              'DELETE',
+            ]),
+          ]
         : []),
     ];
   }

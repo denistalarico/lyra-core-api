@@ -55,6 +55,8 @@ export const LEADFLOW_CLIENT_SCOPE_SQL: Partial<
   agent:
     direct('leadflow_agents', 'created_by_id', ',handoff_policy AS handoff') +
     ' AND deleted_at IS NULL',
+  'followup-template':
+    direct('inbox_followup_templates') + " AND scope_kind='company'",
   media: `SELECT m.id,c.agency_client_id AS client,c.company_context_id AS company,c.assigned_user_id AS creator,c.id AS parent FROM inbox_media_assets m JOIN inbox_conversations c ON c.id=m.conversation_id AND c.tenant_id=m.tenant_id AND c.workspace_id=m.workspace_id WHERE c.tenant_id=$1 AND c.workspace_id=$2 AND c.agency_client_id=$3 AND c.company_context_id=$4 AND m.id=$5 AND c.scope_kind='company'`,
 };
 const relations: Record<string, LeadFlowClientKind> = {

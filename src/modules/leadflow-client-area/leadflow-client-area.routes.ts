@@ -7,6 +7,7 @@ export type LeadFlowClientKind =
   | 'media'
   | 'outbound'
   | 'settings'
+  | 'followup-template'
   | 'contact'
   | 'contact-list'
   | 'pipeline'
@@ -66,6 +67,14 @@ for (const action of ['reaction', 'pin', 'favorite'])
 inbox('media', 'GET', '/media/:mediaId/content');
 inbox('settings', 'GET', '/settings');
 inbox('settings', 'PATCH', '/settings');
+// IX2: the company's Lyra follow-up templates, the conversation's messaging
+// window and the one-click send of a pending manual step (as a person).
+inbox('followup-template', 'GET', '/followup-templates');
+inbox('followup-template', 'POST', '/followup-templates');
+inbox('followup-template', 'PATCH', '/followup-templates/:id');
+inbox('followup-template', 'DELETE', '/followup-templates/:id');
+inbox('conversation', 'GET', '/conversations/:id/messaging-window');
+inbox('conversation', 'POST', '/conversations/:id/followup/send');
 for (const channel of ['whatsapp', 'instagram', 'facebook-messenger']) {
   inbox('outbound', 'POST', `/channels/${channel}/send-text`);
   inbox('outbound', 'POST', `/channels/${channel}/send-media`);

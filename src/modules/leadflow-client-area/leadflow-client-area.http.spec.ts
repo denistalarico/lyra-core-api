@@ -39,6 +39,7 @@ import { PermissionScopeEvaluatorService } from '../permissions/services/permiss
 import { AgencyClient } from '../clients/entities/agency-client.entity';
 import { InboxController } from '../inbox/inbox.controller';
 import { InboxSettingsController } from '../inbox/inbox-settings.controller';
+import { InboxFollowupController } from '../inbox/followup/inbox-followup.controller';
 import { InboxMediaController } from '../inbox/inbox-media.controller';
 import { InboxChannelsController } from '../inbox/channels/inbox-channels.controller';
 import { WhatsAppOutboundController } from '../inbox/channels/whatsapp/whatsapp-outbound.controller';
@@ -81,6 +82,7 @@ const fixtureResult = () => ({
 const controllers = [
   InboxController,
   InboxSettingsController,
+  InboxFollowupController,
   InboxMediaController,
   InboxChannelsController,
   WhatsAppOutboundController,
@@ -406,6 +408,37 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     calls.length = 0;
     await call(reconcile).expect(403);
     expect(calls).toHaveLength(0);
+  });
+  it('IX2: follow-up templates are Manager configuration; reading and the window are for every level', async () => {
+    const route = (method: string, path: string) =>
+      LEADFLOW_CLIENT_AREA_ROUTES.find(
+        (item) => item.method === method && item.path === path,
+      )!;
+    const create = route('POST', '/inbox/followup-templates');
+    const remove = route('DELETE', '/inbox/followup-templates/:id');
+    const list = route('GET', '/inbox/followup-templates');
+    const window = route('GET', '/inbox/conversations/:id/messaging-window');
+    const send = route('POST', '/inbox/conversations/:id/followup/send');
+
+    await call(create, company, own, { name: 'D+3', stepKey: 'd3' }).expect(
+      201,
+    );
+    await call(remove).expect(200);
+    level = 'operator';
+    calls.length = 0;
+    await call(create).expect(403);
+    await call(remove).expect(403);
+    expect(calls).toHaveLength(0);
+    await call(list).expect(200);
+    // Operators act on their own assignment: a colleague's conversation is
+    // not addressable, even for the one-click follow-up.
+    await call(send, company, otherCreator, { stepKey: 'd3' }).expect(404);
+    await call(send, company, own, { stepKey: 'd3' }).expect(201);
+    level = 'viewer';
+    calls.length = 0;
+    await call(send).expect(403);
+    expect(calls).toHaveLength(0);
+    await call(window).expect(200);
   });
   it('accepts the Agency DTO shape instead of a parallel field list', async () => {
     const patch = LEADFLOW_CLIENT_AREA_ROUTES.find(

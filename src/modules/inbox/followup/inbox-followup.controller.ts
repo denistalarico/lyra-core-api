@@ -32,6 +32,11 @@ import { InboxFollowupService } from './inbox-followup.service';
  * window as the composer needs it, and the one-click send of a pending step.
  * Permissions mirror the existing surfaces: templates as Inbox settings, the
  * send as a reply.
+ *
+ * Exposed to the Client Area too (the Inbox is used mostly by the companies):
+ * the bridge proves each route in `leadflow-client-area.routes.ts` and the
+ * scope service — templates by `inbox_followup_templates` company row, window
+ * and send by the conversation, operators only on their assignment.
  */
 @Controller('inbox')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
