@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import {
   inboxEntityMatchesScope,
+  inboxScopeRequestContext,
   resolveInboxCompanyScope,
 } from './inbox-company-scope';
 
@@ -46,5 +47,55 @@ describe('Inbox company scope A/B isolation', () => {
         },
       }),
     ).toThrow(BadRequestException);
+  });
+});
+
+describe('inboxScopeRequestContext (unattended sends)', () => {
+  const base = { tenantId: 'tenant-1', workspaceId: 'workspace-1' };
+
+  it('carries a company conversation into its own company', () => {
+    const conversation = {
+      ...base,
+      scopeKind: 'company' as const,
+      agencyClientId: 'client-1',
+      companyContextId: 'company-a',
+    };
+    const ctx = inboxScopeRequestContext(conversation);
+
+    // The bug this guards: a bare tenant/workspace resolved to agency scope,
+    // so the agent reply and the WhatsApp automation never found a company
+    // channel.
+    expect(inboxEntityMatchesScope(base, conversation)).toBe(false);
+    expect(inboxEntityMatchesScope(ctx, conversation)).toBe(true);
+    expect(
+      inboxEntityMatchesScope(ctx, {
+        ...conversation,
+        companyContextId: 'company-b',
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps an agency conversation in agency scope', () => {
+    const conversation = {
+      ...base,
+      scopeKind: 'agency' as const,
+      agencyClientId: null,
+      companyContextId: null,
+    };
+    const ctx = inboxScopeRequestContext(conversation);
+
+    expect(ctx.managedContext).toBeUndefined();
+    expect(inboxEntityMatchesScope(ctx, conversation)).toBe(true);
+  });
+
+  it('never lets a legacy bucket pose as a company', () => {
+    const ctx = inboxScopeRequestContext({
+      ...base,
+      scopeKind: 'legacy_unassigned',
+      agencyClientId: 'client-1',
+      companyContextId: null,
+    });
+
+    expect(ctx.managedContext).toBeUndefined();
   });
 });

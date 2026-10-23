@@ -636,7 +636,40 @@ describe('InboxGovernedActionWorker social canonical contacts', () => {
 describe('InboxGovernedActionWorker readable effect failures', () => {
   afterEach(() => jest.restoreAllMocks());
 
-  async function failReply(error: Error) {
+  it('sends the agent reply under the conversation company scope', async () => {
+    const sendAgentText = jest.fn().mockRejectedValue(new Error('stop'));
+    await failReply(new Error('stop'), {
+      sendAgentText,
+      conversation: {
+        tenantId: 'tenant',
+        workspaceId: 'workspace',
+        scopeKind: 'company',
+        agencyClientId: 'client-1',
+        companyContextId: 'company-a',
+      },
+    });
+
+    const [[payload]] = sendAgentText.mock.calls as Array<
+      [{ ctx: Record<string, unknown> }]
+    >;
+    expect(payload.ctx).toMatchObject({
+      tenantId: 'tenant',
+      workspaceId: 'workspace',
+      managedContext: {
+        operatingMode: 'client',
+        clientId: 'client-1',
+        companyContextId: 'company-a',
+      },
+    });
+  });
+
+  async function failReply(
+    error: Error,
+    options: {
+      sendAgentText?: jest.Mock;
+      conversation?: Record<string, unknown>;
+    } = {},
+  ) {
     const action = {
       id: 'action-reply',
       tenantId: 'tenant',
@@ -676,6 +709,7 @@ describe('InboxGovernedActionWorker readable effect failures', () => {
             aiEnabled: true,
             ownershipState: 'ai_active',
             ownershipVersion: 1,
+            ...options.conversation,
           }),
         },
       ],
@@ -703,7 +737,10 @@ describe('InboxGovernedActionWorker readable effect failures', () => {
         query: jest.fn().mockResolvedValue([]),
       } as never,
       { autoReplyEnabled: true } as never,
-      { sendAgentText: jest.fn().mockRejectedValue(error) } as never,
+      {
+        sendAgentText:
+          options.sendAgentText ?? jest.fn().mockRejectedValue(error),
+      } as never,
       {} as never,
       {} as never,
       {} as never,

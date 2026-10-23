@@ -18,7 +18,10 @@ import ffmpegStatic from 'ffmpeg-static';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { FilesService } from '../../../../../common/files/files.service';
 import type { RequestContext } from '../../../../../common/context/request-context.interface';
-import { inboxEntityMatchesScope } from '../../../inbox-company-scope';
+import {
+  inboxEntityMatchesScope,
+  inboxScopeRequestContext,
+} from '../../../inbox-company-scope';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import { InboxConversationEntity } from '../../../entities/inbox-conversation.entity';
 import { InboxConversationEventEntity } from '../../../entities/inbox-conversation-event.entity';
@@ -246,10 +249,9 @@ export class WhatsAppOutboundService {
     if (insideCustomerServiceWindow && text) {
       const result = await this.sendTextForActor(
         {
-          ctx: {
-            tenantId: input.tenantId,
-            workspaceId: input.workspaceId,
-          },
+          // The conversation's own scope: a bare tenant/workspace resolves to
+          // agency scope and a company channel would look missing.
+          ctx: inboxScopeRequestContext(conversation),
           channelId: conversation.channelId,
           conversationId: conversation.id,
           to: conversation.externalThreadId,

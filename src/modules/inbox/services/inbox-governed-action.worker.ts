@@ -24,6 +24,7 @@ import { InboxChannelContactIdentityEntity } from '../entities/inbox-channel-con
 import { InboxAutonomyControlEntity } from '../entities/inbox-autonomy-control.entity';
 import { InboxRuntimeConfigService } from '../runtime/inbox-runtime-config.service';
 import { resolveRoutedCrmTarget } from '../runtime/inbox-crm-target-resolver';
+import { inboxScopeRequestContext } from '../inbox-company-scope';
 import { WhatsAppOutboundService } from '../channels/whatsapp/services/whatsapp-outbound.service';
 import { InstagramOutboundService } from '../channels/instagram/services/instagram-outbound.service';
 import { FacebookMessengerOutboundService } from '../channels/facebook-messenger/services/facebook-messenger-outbound.service';
@@ -135,10 +136,9 @@ export class InboxGovernedActionWorker
           return action;
         }
         const sent = await outbound.sendAgentText({
-          ctx: {
-            tenantId: action.tenantId,
-            workspaceId: action.workspaceId,
-          },
+          // The conversation's own scope, so the channel service finds a
+          // company-scoped channel in its company instead of refusing it.
+          ctx: inboxScopeRequestContext(conversation),
           channelId: conversation.channelId,
           conversationId: conversation.id,
           to: conversation.externalThreadId,

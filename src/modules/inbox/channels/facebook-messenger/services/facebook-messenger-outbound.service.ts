@@ -9,7 +9,10 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'crypto';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import type { RequestContext } from '../../../../../common/context/request-context.interface';
-import { inboxEntityMatchesScope } from '../../../inbox-company-scope';
+import {
+  inboxEntityMatchesScope,
+  inboxScopeRequestContext,
+} from '../../../inbox-company-scope';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { AssetAccessService } from '../../../../../common/files/asset-access.service';
 import { assertInboxMediaSize } from '../../../inbox-media-limits';
@@ -29,7 +32,6 @@ import {
 } from '../../meta/meta-messaging-window';
 import {
   assertAutomationSendConfirmed,
-  inboxScopeRequestContext,
   isHumanActor,
   metaActorAuthorType,
   metaActorMessageMetadata,

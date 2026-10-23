@@ -1,6 +1,5 @@
 import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import type { RequestContext } from '../../../../common/context/request-context.interface';
-import type { InboxScopeKind } from '../../inbox-company-scope';
 import type { InboxConversationEntity } from '../../entities/inbox-conversation.entity';
 import type { InboxMessageEntity } from '../../entities/inbox-message.entity';
 
@@ -91,37 +90,6 @@ export function metaActorMessageMetadata(
     ...metaActorOutboxFields(actor),
     ...(tag ? { messageTag: tag } : {}),
   };
-}
-
-/**
- * The request context an unattended send runs under: the conversation's own
- * scope, so a company-scoped channel is found in its company and nowhere else.
- */
-export function inboxScopeRequestContext(entity: {
-  tenantId: string;
-  workspaceId: string;
-  scopeKind: InboxScopeKind;
-  agencyClientId: string | null;
-  companyContextId: string | null;
-}): RequestContext {
-  if (
-    entity.scopeKind === 'company' &&
-    entity.agencyClientId &&
-    entity.companyContextId
-  ) {
-    return {
-      tenantId: entity.tenantId,
-      workspaceId: entity.workspaceId,
-      managedContext: {
-        productKey: 'leadflow',
-        operatingMode: 'client',
-        clientId: entity.agencyClientId,
-        companyContextId: entity.companyContextId,
-        managedTenantId: null,
-      },
-    };
-  }
-  return { tenantId: entity.tenantId, workspaceId: entity.workspaceId };
 }
 
 export function assertAutomationSendConfirmed(

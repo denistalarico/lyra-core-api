@@ -61,3 +61,36 @@ export function inboxEntityMatchesScope(
     entity.companyContextId === scope.companyContextId
   );
 }
+
+/**
+ * The request context an unattended send (agent reply, automation)
+ * runs under: the conversation's own scope, so a company-scoped channel is
+ * found in its company and nowhere else. A bare `{ tenantId, workspaceId }`
+ * resolves to agency scope and makes every company channel look missing.
+ */
+export function inboxScopeRequestContext(entity: {
+  tenantId: string;
+  workspaceId: string;
+  scopeKind: InboxScopeKind;
+  agencyClientId: string | null;
+  companyContextId: string | null;
+}): RequestContext {
+  if (
+    entity.scopeKind === 'company' &&
+    entity.agencyClientId &&
+    entity.companyContextId
+  ) {
+    return {
+      tenantId: entity.tenantId,
+      workspaceId: entity.workspaceId,
+      managedContext: {
+        productKey: 'leadflow',
+        operatingMode: 'client',
+        clientId: entity.agencyClientId,
+        companyContextId: entity.companyContextId,
+        managedTenantId: null,
+      },
+    };
+  }
+  return { tenantId: entity.tenantId, workspaceId: entity.workspaceId };
+}
