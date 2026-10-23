@@ -1,4 +1,9 @@
-import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { SendMessageExecutor } from './send-message.executor';
 import { WhatsAppAutomationTemplateError } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
 import type { AutomationEffectRequest } from './automation-executor.types';
@@ -83,7 +88,96 @@ describe('SendMessageExecutor', () => {
   );
 
   it('does not simulate success for a transport without an adapter', async () => {
-    const result = await executor.execute(request({ channel: 'sms' }));
+    // No SMS service wired into this executor, and no e-mail transport at all.
+    for (const channel of ['sms', 'email']) {
+      const result = await executor.execute(request({ channel }));
+
+      expect(result).toMatchObject({
+        status: 'refused',
+        effectConfirmed: false,
+        errorCode: 'followup_channel_transport_unavailable',
+      });
+    }
+    expect(sendAutomationMessage).not.toHaveBeenCalled();
+  });
+
+  describe('SMS (IX4)', () => {
+    const smsSend = jest.fn();
+    const smsExecutor = new SendMessageExecutor(
+      { sendAutomationMessage } as never,
+      { render } as never,
+      { sendAutomationMessage: instagramSend } as never,
+      { sendAutomationMessage: messengerSend } as never,
+      { sendAutomationMessage: smsSend } as never,
+    );
+
+    beforeEach(() => smsSend.mockReset());
+
+    it('dispatches to the SMS service, never to WhatsApp', async () => {
+      smsSend.mockResolvedValue({ message: { id: 'message-sms' } });
+
+      const result = await smsExecutor.execute(
+        request({ channel: 'sms', templateRef: null, connectionRef: 'sms-1' }),
+      );
+
+      expect(result).toMatchObject({
+        status: 'confirmed',
+        reference: 'message-sms',
+      });
+      expect(smsSend).toHaveBeenCalledWith({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+        automationId: 'automation-1',
+        idempotencyKey: 'followup-effect-1',
+        text: 'Podemos continuar?',
+        connectionRef: 'sms-1',
+      });
+      expect(sendAutomationMessage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        new ConflictException('sms_contact_opted_out'),
+        'message_contact_opt_out',
+      ],
+      [
+        new NotFoundException('sms_recipient_unavailable'),
+        'message_conversation_not_found',
+      ],
+      [
+        new BadRequestException('sms_channel_unavailable'),
+        'message_channel_unavailable',
+      ],
+    ])('refuses %p as %s', async (error, code) => {
+      smsSend.mockRejectedValue(error);
+      const result = await smsExecutor.execute(request({ channel: 'sms' }));
+      expect(result).toMatchObject({ status: 'refused', errorCode: code });
+    });
+
+    it('keeps a provider failure transient so the timer retries', async () => {
+      smsSend.mockRejectedValue(new ServiceUnavailableException('x'));
+      const result = await smsExecutor.execute(request({ channel: 'sms' }));
+      expect(result).toMatchObject({
+        status: 'failed',
+        errorCode: 'message_send_failed',
+      });
+    });
+
+    it('needs text: SMS has no templates', async () => {
+      const result = await smsExecutor.execute(
+        request({ channel: 'sms', text: null }),
+      );
+      expect(result).toMatchObject({
+        status: 'refused',
+        errorCode: 'message_content_required',
+      });
+      expect(smsSend).not.toHaveBeenCalled();
+    });
+  });
+
+  it('keeps the explicit refusal for a channel with no transport', async () => {
+    const result = await executor.execute(request({ channel: 'email' }));
 
     expect(result).toMatchObject({
       status: 'refused',

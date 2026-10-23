@@ -28,6 +28,7 @@ import { inboxScopeRequestContext } from '../inbox-company-scope';
 import { WhatsAppOutboundService } from '../channels/whatsapp/services/whatsapp-outbound.service';
 import { InstagramOutboundService } from '../channels/instagram/services/instagram-outbound.service';
 import { FacebookMessengerOutboundService } from '../channels/facebook-messenger/services/facebook-messenger-outbound.service';
+import { SmsOutboundService } from '../channels/sms/sms-outbound.service';
 import { ConversationOwnershipService } from './conversation-ownership.service';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import { CrmStageTransitionPolicyEntity } from '../../crm/entities/crm-stage-transition-policy.entity';
@@ -57,6 +58,8 @@ export class InboxGovernedActionWorker
     private readonly instagramEnrichment?: InstagramContactEnrichmentService,
     @Optional()
     private readonly messengerEnrichment?: FacebookMessengerContactEnrichmentService,
+    @Optional()
+    private readonly smsOutbound?: SmsOutboundService,
   ) {}
 
   onModuleInit(): void {
@@ -1274,6 +1277,7 @@ export class InboxGovernedActionWorker
     if (channelType === 'facebook_messenger') {
       return this.facebookMessengerOutbound;
     }
+    if (channelType === 'sms') return this.smsOutbound ?? null;
     return null;
   }
 

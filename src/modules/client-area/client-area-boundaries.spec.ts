@@ -156,6 +156,8 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "inbox/channels/inbox-channels.controller.ts:reconcileDefaultBinding",
        "inbox/channels/instagram/instagram-outbound.controller.ts:sendMedia",
        "inbox/channels/instagram/instagram-outbound.controller.ts:sendText",
+       "inbox/channels/sms/sms-outbound.controller.ts:sendMedia",
+       "inbox/channels/sms/sms-outbound.controller.ts:sendText",
        "inbox/channels/whatsapp/whatsapp-outbound.controller.ts:sendMedia",
        "inbox/channels/whatsapp/whatsapp-outbound.controller.ts:sendText",
        "inbox/comments/inbox-comments.controller.ts:get",

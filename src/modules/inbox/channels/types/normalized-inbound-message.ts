@@ -4,6 +4,7 @@ export type NormalizedInboundChannelType =
   | 'whatsapp'
   | 'instagram'
   | 'facebook_messenger'
+  | 'sms'
   | 'email'
   | 'phone'
   | 'other';

@@ -52,9 +52,9 @@ export const FOLLOWUP_IN_CONVERSATION_STEPS: readonly FollowupStepKey[] = [
 
 /**
  * Transports that can carry an attempt once the messaging window has closed.
- * Only WhatsApp is integrated; the other two are declared so the surface can
- * show them as coming, and so the runtime refuses them explicitly rather than
- * by omission.
+ * WhatsApp (approved template) and SMS (IX4: no window at all) are integrated;
+ * e-mail is declared so the surface can show it as coming, and so the runtime
+ * refuses it explicitly rather than by omission.
  */
 export const FOLLOWUP_OUTBOUND_CHANNELS: readonly LeadFlowFollowupChannel[] = [
   'whatsapp',
@@ -63,7 +63,7 @@ export const FOLLOWUP_OUTBOUND_CHANNELS: readonly LeadFlowFollowupChannel[] = [
 ];
 
 export const FOLLOWUP_OUTBOUND_CHANNELS_AVAILABLE: readonly LeadFlowFollowupChannel[] =
-  ['whatsapp'];
+  ['whatsapp', 'sms'];
 
 /**
  * Conversations where d3 and d7 are not sent by the platform at all (D-IX-9).

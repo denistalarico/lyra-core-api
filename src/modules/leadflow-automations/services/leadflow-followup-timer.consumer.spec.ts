@@ -21,6 +21,13 @@ describe('LeadFlowFollowupTimerConsumer', () => {
   const inboxChannelsFindOne = jest.fn();
   const publish = jest.fn();
   const resolveHandoffRecipients = jest.fn();
+  const linkedSmsReplied = jest.fn();
+  const linkedSmsQuery = {
+    innerJoin: () => linkedSmsQuery,
+    where: () => linkedSmsQuery,
+    andWhere: () => linkedSmsQuery,
+    getExists: linkedSmsReplied,
+  };
 
   const consumer = new LeadFlowFollowupTimerConsumer(
     { register } as never,
@@ -29,7 +36,11 @@ describe('LeadFlowFollowupTimerConsumer', () => {
     { execute: send } as never,
     { findOne: automationsFindOne } as never,
     { findOne: conversationsFindOne } as never,
-    { findOne: messagesFindOne, exist: messagesExist } as never,
+    {
+      findOne: messagesFindOne,
+      exist: messagesExist,
+      createQueryBuilder: () => linkedSmsQuery,
+    } as never,
     { insert: outboxInsert, create: outboxCreate } as never,
     { findOne: opportunitiesFindOne, update: opportunitiesUpdate } as never,
     { findOne: inboxSettingsFindOne } as never,
@@ -82,6 +93,7 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       channelResults: [],
     });
     resolveHandoffRecipients.mockResolvedValue(['user-route']);
+    linkedSmsReplied.mockResolvedValue(false);
   });
 
   it('registers itself as the named timer consumer', () => {
@@ -953,6 +965,60 @@ describe('LeadFlowFollowupTimerConsumer', () => {
         payload: envelope.payload,
       }),
     );
+  });
+
+  it('never lets an SMS attempt out at night, whatever the automation says (IX4)', async () => {
+    inboxSettingsFindOne.mockResolvedValue({
+      businessHours: { enabled: true, timezone: 'UTC' },
+    });
+    conversationsFindOne.mockResolvedValue({
+      id: 'conversation-1',
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      agencyClientId: 'client-1',
+      companyContextId: 'company-a',
+      scopeKind: 'company',
+      source: 'sms',
+      status: 'open',
+      ownershipState: 'ai_active',
+      ownershipVersion: 3,
+      aiEnabled: true,
+    });
+    const envelope = deliveryEnvelope();
+    envelope.firedAt = '2026-07-27T04:00:00.000Z';
+    envelope.payload.baselineAt = '2026-07-27T04:00:00.000Z';
+    envelope.payload.attemptOffsetsHours = [0, 72, 168];
+    envelope.payload.respectBusinessHours = false;
+
+    await consumer.handleTimer(envelope);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(schedule).toHaveBeenCalledWith(
+      expect.objectContaining({ fireAt: '2026-07-27T07:00:00.000Z' }),
+    );
+  });
+
+  it('stops a D+3 by SMS when the lead already answered on the SMS conversation it opened', async () => {
+    linkedSmsReplied.mockResolvedValue(true);
+    const envelope = deliveryEnvelope();
+    envelope.payload.automationRecipeKey = 'followup_idle_lead';
+    envelope.payload.stepKey = 'd3';
+    envelope.payload.respectBusinessHours = false;
+    envelope.payload.followupSteps = [
+      {
+        stepKey: 'd3',
+        enabled: true,
+        delayMinutes: 4320,
+        channels: [
+          { channel: 'sms', enabled: true, outsideWindowEnabled: true },
+        ],
+      },
+    ];
+
+    await consumer.handleTimer(envelope);
+
+    expect(linkedSmsReplied).toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('sends when the attempt comes due inside the envelope', async () => {

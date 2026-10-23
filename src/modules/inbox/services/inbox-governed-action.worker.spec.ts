@@ -804,3 +804,38 @@ describe('InboxGovernedActionWorker readable effect failures', () => {
     expect(diagnostics).not.toContain(body);
   });
 });
+
+describe('InboxGovernedActionWorker per-channel reply dispatch', () => {
+  it('routes each channel to its own outbound service, SMS included (IX4)', () => {
+    const whatsapp = { name: 'whatsapp' };
+    const instagram = { name: 'instagram' };
+    const messenger = { name: 'messenger' };
+    const sms = { name: 'sms' };
+    const worker = new InboxGovernedActionWorker(
+      {} as never,
+      {} as never,
+      whatsapp as never,
+      instagram as never,
+      messenger as never,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      sms as never,
+    );
+    const dispatch = (type: string | undefined) =>
+      (
+        worker as unknown as {
+          outboundForChannelType: (type: string | undefined) => unknown;
+        }
+      ).outboundForChannelType(type);
+
+    expect(dispatch('whatsapp')).toBe(whatsapp);
+    expect(dispatch('instagram')).toBe(instagram);
+    expect(dispatch('facebook_messenger')).toBe(messenger);
+    expect(dispatch('sms')).toBe(sms);
+    // Unknown types fail the action instead of leaving through WhatsApp.
+    expect(dispatch('email')).toBeNull();
+    expect(dispatch(undefined)).toBeNull();
+  });
+});

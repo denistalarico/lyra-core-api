@@ -26,8 +26,11 @@ import { AgentActivationPolicyService } from '../../services/agent-activation-po
 import { ContactRelationshipResolver } from '../../services/contact-relationship.resolver';
 import { InboxRuntimeConfigService } from '../../runtime/inbox-runtime-config.service';
 import {
+  classifySmsKeyword,
+  clearLeadFlowOutboundOptOut,
   isExplicitLeadFlowOptOut,
   recordLeadFlowOutboundOptOut,
+  type SmsKeyword,
 } from '../../services/leadflow-contact-opt-out';
 
 const DEFAULT_DEBOUNCE_SECONDS = 20;
@@ -100,7 +103,13 @@ export class InboundMessageIngestionService {
           workspaceId: input.workspaceId,
         });
       const internalContact = await this.findInternalContact(manager, input);
-      const explicitOptOut = isExplicitLeadFlowOptOut(input.content);
+      // SMS carrier keywords (D-IX-8): STOP & co. record the opt-out, START
+      // lifts it and HELP gets the channel's help text. None of them is a
+      // conversation for the agent to answer.
+      const smsKeyword: SmsKeyword | null =
+        input.channelType === 'sms' ? classifySmsKeyword(input.content) : null;
+      const explicitOptOut =
+        isExplicitLeadFlowOptOut(input.content) || smsKeyword === 'opt_out';
       const qualification = internalContact
         ? { status: 'internal' as const, reason: 'workspace_internal_contact' }
         : await this.qualify(manager, input, channel);
@@ -314,6 +323,12 @@ export class InboundMessageIngestionService {
           conversation.ownershipChangedAt = occurredAt;
           conversation.ownershipReason = 'contact_opt_out';
         }
+      } else if (smsKeyword === 'opt_in') {
+        // Consent again: sends are allowed, but the agent stays where the
+        // opt-out left it. Handing the conversation back is a person's call.
+        conversation.metadata = clearLeadFlowOutboundOptOut(
+          conversation.metadata,
+        );
       }
 
       const media = await this.createMediaAssets(
@@ -412,13 +427,20 @@ export class InboundMessageIngestionService {
 
       if (
         (this.runtimeConfig?.ingestionWorkerEnabled ?? true) &&
+        smsKeyword === null &&
         conversation.ownershipState === 'ai_active' &&
         conversation.qualificationStatus === 'qualified'
       ) {
         await this.extendDebounce(manager, channel, conversation);
       }
 
-      return { conversation, message, channel, deduplicated: false };
+      return {
+        conversation,
+        message,
+        channel,
+        deduplicated: false,
+        smsKeyword,
+      };
     });
 
     if (!result.deduplicated) {
@@ -605,7 +627,10 @@ export class InboundMessageIngestionService {
     manager: EntityManager,
     input: NormalizedInboundMessage,
   ) {
-    if (input.channelType === 'whatsapp' && input.sender.phone) {
+    if (
+      (input.channelType === 'whatsapp' || input.channelType === 'sms') &&
+      input.sender.phone
+    ) {
       const normalized = input.sender.phone.replace(/\D/g, '');
       if (!normalized) return null;
       return this.internalContactQuery(manager, input)
@@ -681,7 +706,7 @@ export class InboundMessageIngestionService {
     });
     if (
       channelRules.length === 0 &&
-      ['whatsapp', 'instagram', 'facebook_messenger'].includes(
+      ['whatsapp', 'sms', 'instagram', 'facebook_messenger'].includes(
         input.channelType,
       )
     ) {
@@ -942,7 +967,9 @@ export class InboundMessageIngestionService {
           ? 'Lead do WhatsApp'
           : input.channelType === 'facebook_messenger'
             ? 'Lead do Messenger'
-            : 'Nova conversa')
+            : input.channelType === 'sms'
+              ? 'Lead do SMS'
+              : 'Nova conversa')
     ).slice(0, 180);
   }
 
@@ -979,6 +1006,7 @@ export class InboundMessageIngestionService {
         'Conversa sem título',
         'Lead do Instagram',
         'Lead do Messenger',
+        'Lead do SMS',
       ].includes(normalized)
     );
   }

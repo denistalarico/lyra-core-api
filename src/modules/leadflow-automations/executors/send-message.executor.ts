@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { WhatsAppOutboundService } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
 import { WhatsAppAutomationTemplateError } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
@@ -15,6 +16,10 @@ import {
   FacebookMessengerOutboundService,
 } from '../../inbox/channels/facebook-messenger/services/facebook-messenger-outbound.service';
 import { HUMAN_AGENT_TAG_REQUIRES_HUMAN } from '../../inbox/channels/meta/meta-messaging-window';
+import {
+  SMS_CONTACT_OPTED_OUT,
+  SmsOutboundService,
+} from '../../inbox/channels/sms/sms-outbound.service';
 import { LeadFlowAutomationErrorClass } from '../enums/leadflow-automation-run.enums';
 import {
   LeadFlowAppointmentMessageService,
@@ -40,6 +45,8 @@ import type {
  * Dispatch is explicit per channel. Instagram and Messenger carry text only and
  * only inside their window — past it the extension is for people (D-IX-3), so
  * the refusal says "outside the window" and the follow-up records exactly that.
+ * SMS (IX4) carries text with no window; it may leave from another channel's
+ * conversation, through the contact's phone.
  */
 @Injectable()
 export class SendMessageExecutor implements AutomationExecutor {
@@ -50,6 +57,7 @@ export class SendMessageExecutor implements AutomationExecutor {
     private readonly appointmentMessage: LeadFlowAppointmentMessageService,
     private readonly instagram: InstagramOutboundService,
     private readonly messenger: FacebookMessengerOutboundService,
+    @Optional() private readonly sms?: SmsOutboundService,
   ) {}
 
   availability(): AutomationExecutorAvailability {
@@ -70,6 +78,7 @@ export class SendMessageExecutor implements AutomationExecutor {
     if (channel === 'instagram_direct' || channel === 'facebook_messenger') {
       return this.executeMetaSocial(request, channel, conversationId);
     }
+    if (channel === 'sms') return this.executeSms(request, conversationId);
     if (channel !== 'whatsapp') {
       return refused('followup_channel_transport_unavailable');
     }
@@ -208,6 +217,62 @@ export class SendMessageExecutor implements AutomationExecutor {
       };
     }
   }
+
+  /**
+   * SMS: free text, no templates and no window. The service picks the SMS
+   * conversation (this one, or the contact's phone on the scope's SMS
+   * channel) and refuses a contact who sent STOP.
+   */
+  private async executeSms(
+    request: AutomationEffectRequest,
+    conversationId: string,
+  ): Promise<AutomationEffectResult> {
+    if (!this.sms) return refused('followup_channel_transport_unavailable');
+    const text = nullableString(request.payload.text);
+    if (!text) return refused('message_content_required');
+    try {
+      const result = await this.sms.sendAutomationMessage({
+        tenantId: request.tenantId,
+        workspaceId: request.workspaceId,
+        conversationId,
+        automationId: request.automationId,
+        idempotencyKey: request.idempotencyKey,
+        text,
+        connectionRef: nullableString(request.payload.connectionRef),
+      });
+      return {
+        status: 'confirmed',
+        effectConfirmed: true,
+        reference: result.message.id,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        return refused('message_conversation_not_found');
+      }
+      if (error instanceof ConflictException) {
+        return refused(
+          error.message === SMS_CONTACT_OPTED_OUT
+            ? 'message_contact_opt_out'
+            : conflictCode(error),
+        );
+      }
+      if (error instanceof BadRequestException) {
+        return refused('message_channel_unavailable');
+      }
+      return transientFailure();
+    }
+  }
+}
+
+function transientFailure(): AutomationEffectResult {
+  return {
+    status: 'failed',
+    effectConfirmed: false,
+    errorClass: LeadFlowAutomationErrorClass.Transient,
+    errorCode: 'message_send_failed',
+    errorMessage: 'O envio falhou por um erro transitório.',
+    reference: null,
+  };
 }
 
 function refused(errorCode: string): AutomationEffectResult {

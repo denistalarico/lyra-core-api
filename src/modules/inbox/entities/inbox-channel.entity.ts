@@ -17,6 +17,7 @@ export type InboxChannelType =
   | 'instagram'
   | 'facebook_messenger'
   | 'facebook'
+  | 'sms'
   | 'email'
   | 'phone'
   | 'other';

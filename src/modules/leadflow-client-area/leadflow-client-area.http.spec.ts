@@ -46,6 +46,7 @@ import { InboxChannelsController } from '../inbox/channels/inbox-channels.contro
 import { WhatsAppOutboundController } from '../inbox/channels/whatsapp/whatsapp-outbound.controller';
 import { InstagramOutboundController } from '../inbox/channels/instagram/instagram-outbound.controller';
 import { FacebookMessengerOutboundController } from '../inbox/channels/facebook-messenger/facebook-messenger-outbound.controller';
+import { SmsOutboundController } from '../inbox/channels/sms/sms-outbound.controller';
 import { CrmController } from '../crm/crm.controller';
 import { AgencyContactsController } from '../agency/agency-contacts.controller';
 import { LeadFlowAgendaController } from '../leadflow-agenda/leadflow-agenda.controller';
@@ -90,6 +91,7 @@ const controllers = [
   WhatsAppOutboundController,
   InstagramOutboundController,
   FacebookMessengerOutboundController,
+  SmsOutboundController,
   CrmController,
   AgencyContactsController,
   LeadFlowAgendaController,

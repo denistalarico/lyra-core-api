@@ -11,7 +11,13 @@ export type NormalizedMessageStatusUpdate = {
   channelId: string;
 
   provider: string;
-  channelType: 'whatsapp' | 'instagram' | 'facebook_messenger' | 'email' | 'other';
+  channelType:
+    | 'whatsapp'
+    | 'instagram'
+    | 'facebook_messenger'
+    | 'sms'
+    | 'email'
+    | 'other';
 
   externalMessageId: string;
   status: NormalizedMessageDeliveryStatus;
@@ -34,7 +40,13 @@ export type NormalizedMessageStatusWatermarkUpdate = {
   channelId: string;
 
   provider: string;
-  channelType: 'whatsapp' | 'instagram' | 'facebook_messenger' | 'email' | 'other';
+  channelType:
+    | 'whatsapp'
+    | 'instagram'
+    | 'facebook_messenger'
+    | 'sms'
+    | 'email'
+    | 'other';
 
   externalThreadId: string;
   status: Extract<NormalizedMessageDeliveryStatus, 'delivered' | 'read'>;

@@ -84,7 +84,7 @@ inbox('comment', 'GET', '/comments/:commentId');
 for (const action of ['reply', 'hide', 'unhide', 'status'])
   inbox('comment', 'POST', `/comments/:commentId/${action}`);
 inbox('comment', 'DELETE', '/comments/:commentId');
-for (const channel of ['whatsapp', 'instagram', 'facebook-messenger']) {
+for (const channel of ['whatsapp', 'instagram', 'facebook-messenger', 'sms']) {
   inbox('outbound', 'POST', `/channels/${channel}/send-text`);
   inbox('outbound', 'POST', `/channels/${channel}/send-media`);
 }

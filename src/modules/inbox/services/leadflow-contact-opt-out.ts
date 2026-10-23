@@ -74,6 +74,43 @@ export function recordLeadFlowOutboundOptOut(
   };
 }
 
+/**
+ * SMS carrier keywords (D-IX-8). Carriers and the CTIA expect these exact,
+ * single-word commands on a US long code or toll-free number; they are
+ * matched only on SMS, where "end" or "cancel" alone is a command and not a
+ * business intent.
+ */
+const SMS_OPT_OUT_KEYWORDS = new Set([
+  'stop',
+  'stopall',
+  'unsubscribe',
+  'cancel',
+  'end',
+  'quit',
+  'parar',
+]);
+const SMS_OPT_IN_KEYWORDS = new Set(['start', 'unstop']);
+const SMS_HELP_KEYWORDS = new Set(['help', 'info', 'ajuda']);
+
+export type SmsKeyword = 'opt_out' | 'opt_in' | 'help';
+
+export function classifySmsKeyword(value: string): SmsKeyword | null {
+  const normalized = normalizeOptOutText(value);
+  if (SMS_OPT_OUT_KEYWORDS.has(normalized)) return 'opt_out';
+  if (SMS_OPT_IN_KEYWORDS.has(normalized)) return 'opt_in';
+  if (SMS_HELP_KEYWORDS.has(normalized)) return 'help';
+  return null;
+}
+
+/** START/UNSTOP: the contact consents again, so the refusal is lifted. */
+export function clearLeadFlowOutboundOptOut(
+  metadata: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const next = { ...(metadata ?? {}) };
+  delete next[LEADFLOW_OUTBOUND_OPT_OUT_METADATA_KEY];
+  return next;
+}
+
 function normalizeOptOutText(value: string): string {
   return value
     .normalize('NFD')

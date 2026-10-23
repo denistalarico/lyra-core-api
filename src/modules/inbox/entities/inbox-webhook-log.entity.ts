@@ -6,7 +6,13 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
-export type InboxWebhookProvider = 'meta' | 'whatsapp' | 'webchat' | 'email' | 'other';
+export type InboxWebhookProvider =
+  | 'meta'
+  | 'whatsapp'
+  | 'webchat'
+  | 'email'
+  | 'telnyx'
+  | 'other';
 
 export type InboxWebhookStatus = 'received' | 'processed' | 'failed' | 'ignored';
 

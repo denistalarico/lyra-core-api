@@ -321,6 +321,20 @@ export class LeadFlowFollowupTimerConsumer
       ? (plan.find((item) => item.stepKey === currentKey) ?? null)
       : (followupSteps(envelope.payload.followupSteps)[attemptIndex] ?? null);
     if (canonical && !currentKey) return;
+    // IX4: SMS is unsolicited by nature, so quiet hours are not optional for it
+    // (RK-IX-6), whatever the automation's switch says.
+    const smsInStep = Boolean(
+      step?.channels?.some((item) => item.enabled && item.channel === 'sms'),
+    );
+    const smsAttempt = conversation.source === 'sms' || smsInStep;
+    if (
+      smsInStep &&
+      conversation.source !== 'sms' &&
+      booleanField(envelope.payload.stopIfReplied, true) &&
+      (await this.repliedOnLinkedSms(envelope, conversationId, baselineAt))
+    ) {
+      return;
+    }
 
     // Quiet hours move an attempt, they never delete it. Returning here — which
     // is what the business-hours check used to do — dropped this attempt *and*
@@ -345,10 +359,9 @@ export class LeadFlowFollowupTimerConsumer
         dueAt,
         now: firedAt,
         timeZone: await this.resolveTimeZone(envelope),
-        respectQuietHours: booleanField(
-          envelope.payload.respectBusinessHours,
-          true,
-        ),
+        respectQuietHours:
+          smsAttempt ||
+          booleanField(envelope.payload.respectBusinessHours, true),
         allowAnticipation:
           canonical && step !== null && isInConversationStep(step.stepKey),
       });
@@ -579,10 +592,14 @@ export class LeadFlowFollowupTimerConsumer
       dueAt: nextDueAt,
       now: new Date(),
       timeZone: await this.resolveTimeZone(envelope),
-      respectQuietHours: booleanField(
-        envelope.payload.respectBusinessHours,
-        true,
-      ),
+      respectQuietHours:
+        conversation.source === 'sms' ||
+        Boolean(
+          (next as Partial<FollowupPlanStep>).channels?.some(
+            (item) => item.enabled && item.channel === 'sms',
+          ),
+        ) ||
+        booleanField(envelope.payload.respectBusinessHours, true),
       allowAnticipation: canonical && isInConversationStep(next.stepKey),
     });
     const nextIndex = canonical
@@ -616,6 +633,35 @@ export class LeadFlowFollowupTimerConsumer
         { nextFollowUpAt: fireAt },
       );
     }
+  }
+
+  /**
+   * A D+3/D+7 sent by SMS from another conversation opened the lead's SMS
+   * conversation (`metadata.originConversationId`). An answer there is an
+   * answer to this cadence, even though it is not in this conversation.
+   */
+  private async repliedOnLinkedSms(
+    envelope: TimerFireEnvelope,
+    conversationId: string,
+    baselineAt: Date,
+  ): Promise<boolean> {
+    return this.messages
+      .createQueryBuilder('message')
+      .innerJoin(
+        InboxConversationEntity,
+        'linked',
+        'linked.id = message.conversationId',
+      )
+      .where('message.tenant_id = :tenantId', { tenantId: envelope.tenantId })
+      .andWhere('message.workspace_id = :workspaceId', {
+        workspaceId: envelope.workspaceId,
+      })
+      .andWhere("message.direction = 'inbound'")
+      .andWhere('message.occurred_at > :baselineAt', { baselineAt })
+      .andWhere("linked.metadata->>'originConversationId' = :conversationId", {
+        conversationId,
+      })
+      .getExists();
   }
 
   /** Re-arms this same attempt for the first instant it may reach the lead. */
@@ -1019,7 +1065,7 @@ function companyScopeWhere(automation: LeadFlowAutomationEntity): {
 function nextPlanStep(
   plan: FollowupPlanStep[],
   currentKey: FollowupStepKey | null,
-): { stepKey: string; delayMinutes: number } | null {
+): FollowupPlanStep | null {
   if (!currentKey) return null;
   const current = FOLLOWUP_STEP_KEYS.indexOf(currentKey);
   return (
@@ -1193,6 +1239,8 @@ function mapChannelResult(result: {
       return 'skipped_recipient_unavailable';
     case 'message_outside_messaging_window':
       return 'skipped_outside_messaging_window';
+    case 'message_contact_opt_out':
+      return 'skipped_sms_opt_out';
     default:
       return 'skipped_channel_unavailable';
   }

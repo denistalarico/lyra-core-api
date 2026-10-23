@@ -122,6 +122,15 @@ import { InboxCommentAgentService } from './comments/inbox-comment-agent.service
 import { InboxCommentIngestionService } from './comments/inbox-comment-ingestion.service';
 import { InboxCommentReconcileWorker } from './comments/inbox-comment-reconcile.worker';
 import { SocialAdStoryLookupRegistry } from './comments/social-ad-story-lookup.port';
+import { SmsChannelController } from './channels/sms/sms-channel.controller';
+import { SmsChannelService } from './channels/sms/sms-channel.service';
+import { SmsMediaIngestionWorker } from './channels/sms/sms-media-ingestion.worker';
+import { SmsOutboundController } from './channels/sms/sms-outbound.controller';
+import { SmsOutboundService } from './channels/sms/sms-outbound.service';
+import { SmsProviderRegistry } from './channels/sms/sms-provider.registry';
+import { SmsWebhookController } from './channels/sms/sms-webhook.controller';
+import { SmsWebhookService } from './channels/sms/sms-webhook.service';
+import { TelnyxSmsProvider } from './channels/sms/telnyx/telnyx-sms.provider';
 
 @Module({
   imports: [
@@ -188,6 +197,9 @@ import { SocialAdStoryLookupRegistry } from './comments/social-ad-story-lookup.p
     FacebookMessengerChannelHealthController,
     InboxFollowupController,
     InboxCommentsController,
+    SmsChannelController,
+    SmsOutboundController,
+    SmsWebhookController,
   ],
   providers: [
     InboxService,
@@ -252,6 +264,12 @@ import { SocialAdStoryLookupRegistry } from './comments/social-ad-story-lookup.p
     InboxCommentIngestionService,
     InboxCommentReconcileWorker,
     SocialAdStoryLookupRegistry,
+    TelnyxSmsProvider,
+    SmsProviderRegistry,
+    SmsOutboundService,
+    SmsChannelService,
+    SmsWebhookService,
+    SmsMediaIngestionWorker,
   ],
   exports: [
     InboxChannelLifecycleService,
@@ -266,6 +284,7 @@ import { SocialAdStoryLookupRegistry } from './comments/social-ad-story-lookup.p
     WhatsAppOutboundService,
     InstagramOutboundService,
     FacebookMessengerOutboundService,
+    SmsOutboundService,
     WhatsAppEmbeddedSignupService,
     MetaGraphService,
     MetaAssetDiscoveryService,
