@@ -255,6 +255,16 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationRecipientStrategy.EXPLICIT_USERS,
     { defaultPriority: NotificationPriority.HIGH },
   ),
+  // A follow-up step the platform may not send on its own (IX2): on Instagram
+  // and Messenger D+3/D+7 fall outside the 24h window, so the person who owns
+  // the lead is reminded to send it with one click before the 7 days run out.
+  standard(
+    'leadflow.followup.manual_pending',
+    'sales',
+    NotificationCategory.ASSIGNMENT,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+    { defaultPriority: NotificationPriority.HIGH },
+  ),
   standard(
     'leadflow.daily_opportunity_summary.ready',
     'sales',

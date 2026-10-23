@@ -21,15 +21,32 @@ import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.e
 import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
 import { InstagramAudioNormalizerService } from '../../instagram/services/instagram-audio-normalizer.service';
 import { InboxMetaOperationLedgerService } from '../../whatsapp/services/inbox-meta-operation-ledger.service';
+import {
+  HUMAN_AGENT_TAG_REQUIRES_HUMAN,
+  evaluateMetaWindow,
+  loadMetaMessagingWindow,
+  type MetaWindowActor,
+} from '../../meta/meta-messaging-window';
+import {
+  assertAutomationSendConfirmed,
+  inboxScopeRequestContext,
+  isHumanActor,
+  metaActorAuthorType,
+  metaActorMessageMetadata,
+  metaActorOutboxFields,
+  assertFollowUpSendable,
+  type MetaTextActor,
+  type SendMetaAutomationMessageInput,
+  type SendMetaFollowUpTextInput,
+} from '../../meta/meta-outbound-commands';
 
 /**
- * The Messenger standard messaging window: a business may reply for 24 hours
- * after the contact's last message. Outside it Meta only accepts tagged or
- * template traffic, which this sprint deliberately does not implement — the
- * send is refused instead of being silently downgraded.
+ * Refusal for a send outside the Messenger window. A business may reply for
+ * 24 hours after the contact's last message; past that only a person may answer
+ * with `HUMAN_AGENT` (D-IX-3), up to seven days. The window is resolved in
+ * `meta-messaging-window.ts`, shared with Instagram and the follow-up; Utility
+ * and Marketing Messages stay out (D-IX-10).
  */
-const STANDARD_MESSAGING_WINDOW_MS = 24 * 60 * 60 * 1_000;
-
 export const FACEBOOK_MESSENGER_WINDOW_CLOSED =
   'facebook_messenger_outside_standard_messaging_window';
 
@@ -51,15 +68,7 @@ type SendMessengerAgentTextInput = SendMessengerTextInput & {
   policyVersion: string;
 };
 
-type MessengerTextActor =
-  | { type: 'user' }
-  | {
-      type: 'agent';
-      agentId: string;
-      ownershipVersion: number;
-      decisionId: string;
-      policyVersion: string;
-    };
+type MessengerTextActor = MetaTextActor;
 
 /**
  * Messenger accepts `file` in addition to the three media kinds Instagram
@@ -126,6 +135,85 @@ export class FacebookMessengerOutboundService {
     });
   }
 
+  /**
+   * Canonical Messenger command for a governed automation (the D+0/D+1
+   * follow-up). Text only, inside the standard window only.
+   */
+  async sendAutomationMessage(input: SendMetaAutomationMessageInput) {
+    const conversation = await this.conversationsRepository.findOne({
+      where: {
+        id: input.conversationId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+      },
+    });
+    if (
+      !conversation ||
+      !conversation.channelId ||
+      !conversation.externalThreadId
+    ) {
+      throw new NotFoundException(
+        'Facebook Messenger conversation not found for automation.',
+      );
+    }
+    if (input.connectionRef && conversation.channelId !== input.connectionRef) {
+      throw new NotFoundException(
+        'Configured Messenger connection is not the conversation channel.',
+      );
+    }
+    const text = input.text?.trim() ?? '';
+    if (!text) {
+      throw new BadRequestException('Messenger automation text is required.');
+    }
+    const result = await this.sendTextForActor(
+      {
+        ctx: inboxScopeRequestContext(conversation),
+        channelId: conversation.channelId,
+        conversationId: conversation.id,
+        to: conversation.externalThreadId,
+        text,
+        idempotencyKey: input.idempotencyKey,
+      },
+      { type: 'automation', automationId: input.automationId },
+    );
+    assertAutomationSendConfirmed(result.message);
+    return result;
+  }
+
+  /** A person answering a pending follow-up, without taking the conversation. */
+  async sendFollowUpText(input: SendMetaFollowUpTextInput) {
+    const conversation = await this.conversationsRepository.findOne({
+      where: {
+        id: input.conversationId,
+        tenantId: input.ctx.tenantId,
+        workspaceId: this.requireWorkspaceId(input.ctx),
+      },
+    });
+    if (
+      !conversation ||
+      !conversation.channelId ||
+      !conversation.externalThreadId
+    ) {
+      throw new NotFoundException('Inbox conversation not found.');
+    }
+    return this.sendTextForActor(
+      {
+        ctx: input.ctx,
+        channelId: conversation.channelId,
+        conversationId: conversation.id,
+        to: conversation.externalThreadId,
+        text: input.text,
+        idempotencyKey: input.idempotencyKey,
+      },
+      {
+        type: 'followup',
+        automationId: input.automationId,
+        stepKey: input.stepKey,
+        userId: input.ctx.userId ?? null,
+      },
+    );
+  }
+
   private async sendTextForActor(
     input: SendMessengerTextInput,
     actor: MessengerTextActor,
@@ -136,7 +224,11 @@ export class FacebookMessengerOutboundService {
     if (actor.type === 'agent') {
       await this.assertGovernedReply(channel, conversation, input, actor);
     }
-    await this.assertStandardMessagingWindow(channel, conversation);
+    const tag = await this.resolveWindowTag(
+      channel,
+      conversation,
+      isHumanActor(actor) ? 'human' : 'automated',
+    );
 
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.findIdempotentMessage(
@@ -182,8 +274,13 @@ export class FacebookMessengerOutboundService {
         channelId: channel.id,
         contactId: conversation.contactId ?? null,
         direction: 'outbound',
-        senderType: actor.type === 'agent' ? 'agent' : 'user',
-        senderUserId: actor.type === 'user' ? (input.ctx.userId ?? null) : null,
+        senderType:
+          actor.type === 'automation'
+            ? 'system'
+            : actor.type === 'agent'
+              ? 'agent'
+              : 'user',
+        senderUserId: isHumanActor(actor) ? (input.ctx.userId ?? null) : null,
         senderAgentId: actor.type === 'agent' ? actor.agentId : null,
         externalMessageId: null,
         idempotencyKey,
@@ -208,6 +305,7 @@ export class FacebookMessengerOutboundService {
                 ownershipVersion: actor.ownershipVersion,
               }
             : {}),
+          ...metaActorMessageMetadata(actor, tag),
         },
         sentAt: null,
         deliveredAt: null,
@@ -239,7 +337,7 @@ export class FacebookMessengerOutboundService {
       await this.metaLedger.started(ledger);
       response = await this.sendToMeta(channel, accessToken, {
         recipient: { id: recipient },
-        messaging_type: 'RESPONSE',
+        ...messagingTypeFields(tag),
         message: {
           text,
           ...(nativeReplyMid ? { reply_to: { mid: nativeReplyMid } } : {}),
@@ -274,7 +372,7 @@ export class FacebookMessengerOutboundService {
     const { channel, conversation, accessToken, recipient } =
       await this.resolveSendContext(input);
     this.assertActorCanSend(conversation, { type: 'user' });
-    await this.assertStandardMessagingWindow(channel, conversation);
+    const tag = await this.resolveWindowTag(channel, conversation, 'human');
 
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.findIdempotentMessage(
@@ -346,6 +444,7 @@ export class FacebookMessengerOutboundService {
           mimeType: mediaFile.mimetype,
           fileName: mediaFile.originalname,
           fileSize: mediaFile.size,
+          ...(tag ? { messageTag: tag } : {}),
         },
         sentAt: null,
         deliveredAt: null,
@@ -377,7 +476,7 @@ export class FacebookMessengerOutboundService {
       await this.metaLedger.started(ledger);
       response = await this.sendToMeta(channel, accessToken, {
         recipient: { id: recipient },
-        messaging_type: 'RESPONSE',
+        ...messagingTypeFields(tag),
         message: {
           attachment: { type: mediaType, payload: { url: mediaUrl } },
         },
@@ -549,27 +648,30 @@ export class FacebookMessengerOutboundService {
     return derived;
   }
 
-  private async assertStandardMessagingWindow(
+  /**
+   * Applies the shared window: no tag inside it, `HUMAN_AGENT` for a person
+   * past it, and a refusal that names the reason otherwise.
+   */
+  private async resolveWindowTag(
     channel: InboxChannelEntity,
     conversation: InboxConversationEntity,
-  ) {
-    const lastInbound = await this.messagesRepository.findOne({
-      where: {
-        tenantId: channel.tenantId,
-        workspaceId: channel.workspaceId,
-        conversationId: conversation.id,
-        direction: 'inbound',
-      },
-      select: { id: true, occurredAt: true },
-      order: { occurredAt: 'DESC' },
+    actor: MetaWindowActor,
+  ): Promise<'HUMAN_AGENT' | null> {
+    const window = await loadMetaMessagingWindow({
+      messages: this.messagesRepository,
+      tenantId: channel.tenantId,
+      workspaceId: channel.workspaceId,
+      conversationId: conversation.id,
     });
-    const insideWindow =
-      lastInbound !== null &&
-      Date.now() - lastInbound.occurredAt.getTime() <
-        STANDARD_MESSAGING_WINDOW_MS;
-    if (!insideWindow) {
-      throw new ConflictException(FACEBOOK_MESSENGER_WINDOW_CLOSED);
+    const verdict = evaluateMetaWindow(window, actor);
+    if (!verdict.allowed) {
+      throw new ConflictException(
+        verdict.reason === HUMAN_AGENT_TAG_REQUIRES_HUMAN
+          ? HUMAN_AGENT_TAG_REQUIRES_HUMAN
+          : FACEBOOK_MESSENGER_WINDOW_CLOSED,
+      );
     }
+    return verdict.tag;
   }
 
   private assertActorCanSend(
@@ -594,6 +696,15 @@ export class FacebookMessengerOutboundService {
         'AI send blocked by current conversation ownership.',
       );
     }
+    if (
+      actor.type === 'automation' &&
+      (conversation.ownershipState !== 'ai_active' || !conversation.aiEnabled)
+    ) {
+      throw new ConflictException(
+        'Automatic message blocked by current conversation ownership.',
+      );
+    }
+    if (actor.type === 'followup') assertFollowUpSendable(conversation, actor);
   }
 
   private async assertGovernedReply(
@@ -772,9 +883,10 @@ export class FacebookMessengerOutboundService {
         workspaceId: input.channel.workspaceId,
         conversationId: input.conversation.id,
         eventType: 'message_sent',
-        actorType: input.actor.type === 'agent' ? 'agent' : 'user',
-        actorUserId:
-          input.actor.type === 'user' ? input.message.senderUserId : null,
+        actorType: metaActorAuthorType(input.actor),
+        actorUserId: isHumanActor(input.actor)
+          ? input.message.senderUserId
+          : null,
         payload: {
           messageId: input.message.id,
           externalMessageId: input.externalMessageId,
@@ -796,7 +908,8 @@ export class FacebookMessengerOutboundService {
           contactId: input.conversation.contactId,
           messageId: input.message.id,
           messageType: input.message.messageType,
-          authorType: input.actor.type,
+          authorType: metaActorAuthorType(input.actor),
+          ...metaActorOutboxFields(input.actor),
         },
         publishedAt: null,
       });
@@ -900,4 +1013,16 @@ export class FacebookMessengerOutboundService {
   ) {
     return inboxEntityMatchesScope(ctx, channel);
   }
+}
+
+/**
+ * Messenger always states why it is writing: `RESPONSE` inside the window,
+ * `MESSAGE_TAG` + `HUMAN_AGENT` when a person answers past it.
+ */
+function messagingTypeFields(
+  tag: 'HUMAN_AGENT' | null,
+): Record<string, string> {
+  return tag
+    ? { messaging_type: 'MESSAGE_TAG', tag }
+    : { messaging_type: 'RESPONSE' };
 }

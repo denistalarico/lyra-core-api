@@ -108,6 +108,10 @@ import { FacebookMessengerChannelHealthService } from './channels/facebook-messe
 import { FacebookMessengerContactEnrichmentService } from './channels/facebook-messenger/services/facebook-messenger-contact-enrichment.service';
 import { InstagramContactEnrichmentService } from './channels/instagram/services/instagram-contact-enrichment.service';
 import { AgencyClientCompanyContext } from '../clients/entities/agency-client-company-context.entity';
+import { InboxFollowupTemplateEntity } from './entities/inbox-followup-template.entity';
+import { InboxFollowupController } from './followup/inbox-followup.controller';
+import { InboxFollowupService } from './followup/inbox-followup.service';
+import { InboxFollowupTemplatesService } from './followup/inbox-followup-templates.service';
 
 @Module({
   imports: [
@@ -124,6 +128,7 @@ import { AgencyClientCompanyContext } from '../clients/entities/agency-client-co
         InboxConversationEntity,
         InboxMessageEntity,
         InboxSettingsEntity,
+        InboxFollowupTemplateEntity,
         InboxConversationParticipantEntity,
         InboxConversationEventEntity,
         InboxAttributionObservationEntity,
@@ -168,6 +173,7 @@ import { AgencyClientCompanyContext } from '../clients/entities/agency-client-co
     InstagramOutboundController,
     FacebookMessengerOutboundController,
     FacebookMessengerChannelHealthController,
+    InboxFollowupController,
   ],
   providers: [
     InboxService,
@@ -224,6 +230,8 @@ import { AgencyClientCompanyContext } from '../clients/entities/agency-client-co
     FacebookMessengerChannelHealthService,
     FacebookMessengerContactEnrichmentService,
     InstagramContactEnrichmentService,
+    InboxFollowupTemplatesService,
+    InboxFollowupService,
   ],
   exports: [
     InboxChannelLifecycleService,

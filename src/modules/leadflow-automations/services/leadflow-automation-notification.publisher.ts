@@ -60,15 +60,21 @@ export interface HotLeadChannelResult {
  * the catalog event the recipient's preferences are keyed by, the WhatsApp
  * template, and the sentence each carries.
  */
-export type AutomationAlertKind = 'hot_lead' | 'lead_distributed';
+export type AutomationAlertKind =
+  | 'hot_lead'
+  | 'lead_distributed'
+  | 'followup_manual_pending';
 
 interface AutomationAlertDefinition {
   eventType: string;
-  templateKey: string;
+  /** Null for an alert with no approved WhatsApp template: in-app only. */
+  templateKey: string | null;
   /** The line the in-app/e-mail notification carries, per alert. */
   body: (facts: AutomationAlertFacts) => string;
   /** The three approved template variables, in the catalog's semantic order. */
-  variables: (facts: AutomationAlertFacts) => PlatformWhatsAppTemplateVariables;
+  variables: (
+    facts: AutomationAlertFacts,
+  ) => PlatformWhatsAppTemplateVariables | null;
 }
 
 interface AutomationAlertFacts {
@@ -76,6 +82,9 @@ interface AutomationAlertFacts {
   leadDisplayName: string;
   leadScore: string;
   leadSource: string;
+  /** Only the follow-up reminder: "D+3" and the deadline, already formatted. */
+  stepLabel: string;
+  dueLabel: string;
 }
 
 const ALERTS: Record<AutomationAlertKind, AutomationAlertDefinition> = {
@@ -101,6 +110,13 @@ const ALERTS: Record<AutomationAlertKind, AutomationAlertDefinition> = {
       leadSource: facts.leadSource,
     }),
   },
+  followup_manual_pending: {
+    eventType: 'leadflow.followup.manual_pending',
+    templateKey: null,
+    body: (facts) =>
+      `Follow-up ${facts.stepLabel} pendente para ${facts.leadDisplayName}; envie até ${facts.dueLabel}.`,
+    variables: () => null,
+  },
 };
 
 export interface AutomationNotificationInput {
@@ -122,6 +138,8 @@ export interface AutomationNotificationInput {
   actionUrl: string;
   /** Defaults to the hot-lead alert, the only one until lead distribution. */
   alert?: AutomationAlertKind;
+  /** The follow-up reminder's facts; ignored by the other alerts. */
+  followUp?: { stepLabel: string; dueLabel: string };
 }
 
 export type AutomationNotificationOutcome =
@@ -222,6 +240,8 @@ export class LeadFlowAutomationNotificationPublisher {
       leadDisplayName,
       leadScore,
       leadSource: leadSourceLabel(opportunity.source),
+      stepLabel: input.followUp?.stepLabel ?? '',
+      dueLabel: input.followUp?.dueLabel ?? '',
     };
 
     const channelResults: HotLeadChannelResult[] = [];
@@ -419,9 +439,18 @@ export class LeadFlowAutomationNotificationPublisher {
       ]),
     );
     const variables = alert.variables(facts);
+    const templateKey = alert.templateKey;
 
     const results: HotLeadChannelResult[] = [];
     for (const recipientUserId of recipientUserIds) {
+      if (!templateKey || !variables) {
+        results.push({
+          recipientUserId,
+          channel: 'platform_whatsapp',
+          status: 'skipped_whatsapp_template_unavailable',
+        });
+        continue;
+      }
       if (whatsappPreferenceByUser.get(recipientUserId) !== true) {
         results.push({
           recipientUserId,
@@ -447,7 +476,7 @@ export class LeadFlowAutomationNotificationPublisher {
           subjectId: input.opportunityId,
           handoffCycleId: `${input.policyVersion}:${input.cycleId}`,
           recipientUserId,
-          templateKey: alert.templateKey,
+          templateKey,
           businessModeKey: opportunity.businessMode,
           toPhoneE164: phone,
           variables,
@@ -573,9 +602,7 @@ function acceptsWhatsApp(
   preferences: Array<Record<string, unknown>>,
   eventType: string,
 ): boolean {
-  const exact = preferences.find(
-    (preference) => preference.key === eventType,
-  );
+  const exact = preferences.find((preference) => preference.key === eventType);
   if (!exact) return false;
   if (typeof exact.whatsapp === 'boolean') return exact.whatsapp;
   const channels = exact.channels;

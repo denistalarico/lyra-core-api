@@ -249,6 +249,14 @@ export type LeadFlowFollowupChannelResult =
   | 'skipped_contact_opt_out'
   /** A manual card whose text for this attempt was never written. */
   | 'skipped_message_unavailable'
+  /**
+   * Instagram/Messenger D+3/D+7: outside the 24h window only a person may
+   * write (D-IX-3), so the attempt waits for one click from the lead's owner.
+   * Becomes `sent` when that person sends it.
+   */
+  | 'manual_pending'
+  /** The same attempt, when even the 7-day human window has closed. */
+  | 'skipped_outside_human_window'
   | 'failed_provider';
 
 /**

@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { IsNull, MoreThan, Repository } from 'typeorm';
@@ -15,12 +15,15 @@ import { InboxDomainOutboxEntity } from '../../inbox/entities/inbox-domain-outbo
 import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../../inbox/entities/inbox-settings.entity';
 import { hasLeadFlowOutboundOptOut } from '../../inbox/services/leadflow-contact-opt-out';
+import { ConversationOwnershipService } from '../../inbox/services/conversation-ownership.service';
+import { loadMetaMessagingWindow } from '../../inbox/channels/meta/meta-messaging-window';
 import { FOLLOWUP_IDLE_LEAD_RECIPE_KEY } from '../catalog/automation-recipes.catalog';
 import {
   enabledFollowupSteps,
   FOLLOWUP_STEP_KEYS,
   isFollowupStepKey,
   isInConversationStep,
+  isManualAssistedStep,
   type FollowupPlanStep,
   type FollowupStepKey,
 } from '../catalog/followup-plan.catalog';
@@ -42,6 +45,7 @@ import {
   type TimerFireEnvelope,
 } from '../scheduler';
 import { LeadFlowAutomationExecutionGate } from './leadflow-automation-execution-gate.service';
+import { LeadFlowAutomationNotificationPublisher } from './leadflow-automation-notification.publisher';
 import { evaluateBusinessHours } from './leadflow-automation-context-loader.service';
 
 export const LEADFLOW_FOLLOWUP_TIMER_CONSUMER =
@@ -53,12 +57,17 @@ export const LEADFLOW_FOLLOWUP_TIMER_CONSUMER =
  *   `conversation.idle` event;
  * - `followup_delivery`: revalidates reply/handoff/stage/autonomy, requests the
  *   Inbox message effect, and schedules the next D+N attempt only after success.
+ *
+ * On Instagram/Messenger d3/d7 are never sent from here (D-IX-9): the attempt
+ * becomes `manual_pending` and the lead's owner is reminded to send it with one
+ * click, as a person, before the 7-day human window closes.
  */
 @Injectable()
 export class LeadFlowFollowupTimerConsumer
   implements ScheduledTimerConsumer, OnModuleInit
 {
   readonly consumerKey = LEADFLOW_FOLLOWUP_TIMER_CONSUMER;
+  private readonly logger = new Logger(LeadFlowFollowupTimerConsumer.name);
 
   constructor(
     private readonly registry: ScheduledTimerConsumerRegistry,
@@ -79,6 +88,8 @@ export class LeadFlowFollowupTimerConsumer
     private readonly inboxSettings: Repository<InboxSettingsEntity>,
     @InjectRepository(InboxChannelEntity, 'agency')
     private readonly inboxChannels: Repository<InboxChannelEntity>,
+    private readonly notifications: LeadFlowAutomationNotificationPublisher,
+    private readonly ownership: ConversationOwnershipService,
   ) {}
 
   onModuleInit(): void {
@@ -355,26 +366,28 @@ export class LeadFlowFollowupTimerConsumer
     });
     if (!gate.allowed) return;
 
-    const channelConfigs = await this.resolveChannelConfigs({
+    const conversationChannel = await this.conversationChannel(
       envelope,
-      canonical,
-      step,
       conversation,
-    });
-    const lastInbound = await this.messages.findOne({
-      where: {
-        tenantId: envelope.tenantId,
-        workspaceId: envelope.workspaceId,
-        conversationId,
-        direction: 'inbound',
-      },
-      select: { id: true, occurredAt: true },
-      order: { occurredAt: 'DESC' },
-    });
-    const insideMessagingWindow =
-      lastInbound !== null &&
-      new Date(envelope.firedAt).getTime() - lastInbound.occurredAt.getTime() <
-        24 * 60 * 60 * 1_000;
+    );
+    const manualStep = Boolean(
+      canonical &&
+      step &&
+      isManualAssistedStep(step.stepKey, conversationChannel?.channel ?? null),
+    );
+    const channelConfigs = manualStep
+      ? []
+      : this.resolveChannelConfigs({
+          canonical,
+          step,
+          conversationChannel,
+          payload: envelope.payload,
+        });
+    const insideMessagingWindow = await this.insideStandardWindow(
+      envelope,
+      conversationId,
+      conversationChannel?.channel ?? null,
+    );
     let failedProviders = 0;
 
     // What this attempt says. Inside the conversation it is the agent's
@@ -392,6 +405,19 @@ export class LeadFlowFollowupTimerConsumer
     // was retired, and applying it to the whole plan is the reading of consent
     // that does not need a rule about which attempt counts.
     const optedOut = hasLeadFlowOutboundOptOut(conversation);
+
+    if (manualStep && step && conversationChannel) {
+      await this.recordManualStep({
+        envelope,
+        automationId,
+        conversation,
+        opportunityId,
+        stepKey: step.stepKey,
+        channel: conversationChannel.channel,
+        optedOut,
+        proposedText: text,
+      });
+    }
 
     for (const channelConfig of channelConfigs) {
       let channelResult: LeadFlowFollowupChannelResult;
@@ -682,20 +708,38 @@ export class LeadFlowFollowupTimerConsumer
    * and need a transport that can start a conversation, which is the channel
    * list the operator configured.
    */
-  private async resolveChannelConfigs(input: {
-    envelope: TimerFireEnvelope;
+  private resolveChannelConfigs(input: {
     canonical: boolean;
     step: { stepKey: string; channels: LeadFlowFollowupChannelConfig[] } | null;
-    conversation: InboxConversationEntity;
-  }): Promise<LeadFlowFollowupChannelConfig[]> {
-    const { envelope, canonical, step, conversation } = input;
+    conversationChannel: ConversationChannel | null;
+    payload?: Record<string, unknown>;
+  }): LeadFlowFollowupChannelConfig[] {
+    const { canonical, step, conversationChannel } = input;
     // No step in a named cadence means this attempt was switched off after the
     // timer was armed: nothing goes out, and the chain moves on to the next.
-    if (!step) return canonical ? [] : [legacyWhatsappConfig(envelope.payload)];
+    if (!step) {
+      return canonical ? [] : [legacyWhatsappConfig(input.payload ?? {})];
+    }
     if (!canonical || !isInConversationStep(step.stepKey)) {
       return step.channels.filter((item) => item.enabled);
     }
-    if (!conversation.channelId) return [];
+    if (!conversationChannel) return [];
+    return [
+      {
+        channel: conversationChannel.channel,
+        enabled: true,
+        outsideWindowEnabled: false,
+        connectionRef: conversationChannel.id,
+      },
+    ];
+  }
+
+  /** The connection the lead wrote on, as a follow-up channel. */
+  private async conversationChannel(
+    envelope: TimerFireEnvelope,
+    conversation: InboxConversationEntity,
+  ): Promise<ConversationChannel | null> {
+    if (!conversation.channelId) return null;
     const channel = await this.inboxChannels.findOne({
       where: {
         id: conversation.channelId,
@@ -705,15 +749,188 @@ export class LeadFlowFollowupTimerConsumer
       select: { id: true, type: true },
     });
     const mapped = channel ? mapInboxChannelType(channel.type) : null;
-    if (!mapped) return [];
-    return [
-      {
-        channel: mapped,
-        enabled: true,
-        outsideWindowEnabled: false,
-        connectionRef: channel!.id,
+    return channel && mapped ? { id: channel.id, channel: mapped } : null;
+  }
+
+  /**
+   * Whether free text may still reach the lead when this timer fires.
+   *
+   * Instagram and Messenger read the shared window (D-IX-4: an ad click may
+   * extend it to 7 days); every other channel keeps the plain 24 hours.
+   */
+  private async insideStandardWindow(
+    envelope: TimerFireEnvelope,
+    conversationId: string,
+    channel: LeadFlowFollowupChannel | null,
+  ): Promise<boolean> {
+    const firedAt = new Date(envelope.firedAt).getTime();
+    if (channel && isMetaSocialChannel(channel)) {
+      const window = await loadMetaMessagingWindow({
+        messages: this.messages,
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+        conversationId,
+      });
+      return Boolean(
+        window.standardExpiresAt &&
+        firedAt < window.standardExpiresAt.getTime(),
+      );
+    }
+    const lastInbound = await this.messages.findOne({
+      where: {
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+        conversationId,
+        direction: 'inbound',
       },
-    ];
+      select: { id: true, occurredAt: true },
+      order: { occurredAt: 'DESC' },
+    });
+    return (
+      lastInbound !== null &&
+      firedAt - lastInbound.occurredAt.getTime() < 24 * 60 * 60 * 1_000
+    );
+  }
+
+  /**
+   * d3/d7 on Instagram/Messenger: record the attempt as waiting for a person
+   * and remind the lead's owner. Nothing is sent from here — the platform may
+   * not write past 24 hours, and the person who will is the one reminded.
+   */
+  private async recordManualStep(input: {
+    envelope: TimerFireEnvelope;
+    automationId: string;
+    conversation: InboxConversationEntity;
+    opportunityId: string | null;
+    stepKey: string;
+    channel: LeadFlowFollowupChannel;
+    optedOut: boolean;
+    proposedText: string | null;
+  }): Promise<void> {
+    const { envelope, conversation } = input;
+    const firedAt = new Date(envelope.firedAt);
+    let result: LeadFlowFollowupChannelResult;
+    let expiresAt: Date | null = null;
+    if (input.optedOut) {
+      result = 'skipped_contact_opt_out';
+    } else {
+      const window = await loadMetaMessagingWindow({
+        messages: this.messages,
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+        conversationId: conversation.id,
+      });
+      // Whichever lasts longer: the human-agent extension, or an ad window
+      // that is still open (inside it the person needs no tag at all).
+      const deadline = [window.humanAgentExpiresAt, window.standardExpiresAt]
+        .filter((value): value is Date => value !== null)
+        .sort((a, b) => b.getTime() - a.getTime())[0];
+      expiresAt =
+        deadline && deadline.getTime() > firedAt.getTime() ? deadline : null;
+      result = expiresAt ? 'manual_pending' : 'skipped_outside_human_window';
+    }
+
+    await this.recordChannelResult({
+      envelope,
+      automationId: input.automationId,
+      conversationId: conversation.id,
+      stepKey: input.stepKey,
+      channel: input.channel,
+      result,
+      reference: null,
+    });
+    if (!input.opportunityId) return;
+    await this.recordAttemptOnCard({
+      envelope,
+      opportunityId: input.opportunityId,
+      attempt: {
+        stepKey: input.stepKey,
+        result,
+        channel: input.channel,
+        at: envelope.firedAt,
+        runId: envelope.timerId,
+        ...(result === 'manual_pending'
+          ? {
+              automationId: input.automationId,
+              expiresAt: expiresAt!.toISOString(),
+              proposedText: input.proposedText,
+            }
+          : {}),
+      },
+    });
+    if (result === 'manual_pending') {
+      await this.remindOwner({
+        envelope,
+        conversation,
+        opportunityId: input.opportunityId,
+        stepKey: input.stepKey,
+        expiresAt: expiresAt!,
+      });
+    }
+  }
+
+  /**
+   * The reminder goes to the opportunity's owner and, when the card has none,
+   * along the handoff route — the people a handoff of this conversation would
+   * reach. A reminder that reached nobody is logged, never swallowed.
+   */
+  private async remindOwner(input: {
+    envelope: TimerFireEnvelope;
+    conversation: InboxConversationEntity;
+    opportunityId: string;
+    stepKey: string;
+    expiresAt: Date;
+  }): Promise<void> {
+    const { envelope } = input;
+    const owner = await this.opportunities.findOne({
+      where: {
+        id: input.opportunityId,
+        tenantId: envelope.tenantId,
+        workspaceId: envelope.workspaceId,
+      },
+      select: { id: true, assignedUserId: true },
+    });
+    const routed = owner?.assignedUserId
+      ? []
+      : await this.ownership.resolveHandoffRecipients(input.conversation);
+    const outcome = await this.notifications.publish({
+      tenantId: envelope.tenantId,
+      workspaceId: envelope.workspaceId,
+      idempotencyKey: `followup.manual:${envelope.timerId}:${input.stepKey}`,
+      opportunityId: input.opportunityId,
+      targetUserId: null,
+      notifyOpportunityOwner: true,
+      notifyPipelineOwner: false,
+      notifyPipelineParticipants: false,
+      specificRecipientUserIds: routed,
+      channels: ['in_app', 'push'],
+      cycleId: envelope.timerId,
+      policyVersion: 'followup-manual-v1',
+      currentScore: null,
+      title: 'Follow-up pendente',
+      body: '',
+      actionUrl: `/leadflow/inbox?conversationId=${input.conversation.id}`,
+      alert: 'followup_manual_pending',
+      followUp: {
+        stepLabel: stepLabel(input.stepKey),
+        dueLabel: formatDue(
+          input.expiresAt,
+          await this.resolveTimeZone(envelope),
+        ),
+      },
+    });
+    if (outcome.status === 'no_recipient') {
+      this.logger.warn(
+        `Manual follow-up reminder reached no recipient (step=${input.stepKey}, timer=${envelope.timerId})`,
+      );
+    } else if (
+      outcome.channelResults.length > 0 &&
+      outcome.channelResults.every((item) => item.status === 'failed')
+    ) {
+      this.logger.warn(
+        `Manual follow-up reminder failed on every channel (step=${input.stepKey}, timer=${envelope.timerId})`,
+      );
+    }
   }
 
   private async recordChannelResult(input: {
@@ -854,6 +1071,33 @@ function resolveAttemptText(input: {
   return proposed ?? fallback;
 }
 
+type ConversationChannel = { id: string; channel: LeadFlowFollowupChannel };
+
+function isMetaSocialChannel(channel: LeadFlowFollowupChannel): boolean {
+  return channel === 'instagram_direct' || channel === 'facebook_messenger';
+}
+
+/** "d3" → "D+3", as the operator reads the cadence. */
+function stepLabel(stepKey: string): string {
+  const match = /^d(\d+)$/.exec(stepKey);
+  return match ? `D+${match[1]}` : stepKey;
+}
+
+/** "25/10 14:30", in the workspace's zone. */
+function formatDue(value: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(value);
+  const part = (type: string) =>
+    parts.find((item) => item.type === type)?.value ?? '';
+  return `${part('day')}/${part('month')} ${part('hour')}:${part('minute')}`;
+}
+
 function mapInboxChannelType(type: string): LeadFlowFollowupChannel | null {
   if (type === 'instagram') return 'instagram_direct';
   return ['whatsapp', 'email', 'sms', 'facebook_messenger', 'webchat'].includes(
@@ -947,6 +1191,8 @@ function mapChannelResult(result: {
       return 'skipped_template_invalid';
     case 'message_conversation_not_found':
       return 'skipped_recipient_unavailable';
+    case 'message_outside_messaging_window':
+      return 'skipped_outside_messaging_window';
     default:
       return 'skipped_channel_unavailable';
   }

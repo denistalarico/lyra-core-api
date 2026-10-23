@@ -6,6 +6,15 @@ import {
 } from '@nestjs/common';
 import { WhatsAppOutboundService } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
 import { WhatsAppAutomationTemplateError } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
+import {
+  INSTAGRAM_MESSAGING_WINDOW_CLOSED,
+  InstagramOutboundService,
+} from '../../inbox/channels/instagram/services/instagram-outbound.service';
+import {
+  FACEBOOK_MESSENGER_WINDOW_CLOSED,
+  FacebookMessengerOutboundService,
+} from '../../inbox/channels/facebook-messenger/services/facebook-messenger-outbound.service';
+import { HUMAN_AGENT_TAG_REQUIRES_HUMAN } from '../../inbox/channels/meta/meta-messaging-window';
 import { LeadFlowAutomationErrorClass } from '../enums/leadflow-automation-run.enums';
 import {
   LeadFlowAppointmentMessageService,
@@ -27,6 +36,10 @@ import type {
  * resolved at this point and nowhere else. Resolving here also means resolving
  * at send time: a reminder scheduled days in advance quotes the commitment as it
  * is when the message leaves, not as it was when it was booked.
+ *
+ * Dispatch is explicit per channel. Instagram and Messenger carry text only and
+ * only inside their window — past it the extension is for people (D-IX-3), so
+ * the refusal says "outside the window" and the follow-up records exactly that.
  */
 @Injectable()
 export class SendMessageExecutor implements AutomationExecutor {
@@ -35,6 +48,8 @@ export class SendMessageExecutor implements AutomationExecutor {
   constructor(
     private readonly outbound: WhatsAppOutboundService,
     private readonly appointmentMessage: LeadFlowAppointmentMessageService,
+    private readonly instagram: InstagramOutboundService,
+    private readonly messenger: FacebookMessengerOutboundService,
   ) {}
 
   availability(): AutomationExecutorAvailability {
@@ -52,6 +67,9 @@ export class SendMessageExecutor implements AutomationExecutor {
       return refused('message_content_required');
     }
     const channel = nullableString(request.payload.channel) ?? 'whatsapp';
+    if (channel === 'instagram_direct' || channel === 'facebook_messenger') {
+      return this.executeMetaSocial(request, channel, conversationId);
+    }
     if (channel !== 'whatsapp') {
       return refused('followup_channel_transport_unavailable');
     }
@@ -141,6 +159,55 @@ export class SendMessageExecutor implements AutomationExecutor {
       };
     }
   }
+
+  /**
+   * Instagram/Messenger: free text inside the conversation the lead opened.
+   * No templates exist on these channels, and an appointment message (the
+   * only one with variables) is a WhatsApp recipe, so neither is attempted.
+   */
+  private async executeMetaSocial(
+    request: AutomationEffectRequest,
+    channel: 'instagram_direct' | 'facebook_messenger',
+    conversationId: string,
+  ): Promise<AutomationEffectResult> {
+    const text = nullableString(request.payload.text);
+    if (!text) return refused('message_content_required');
+    const service =
+      channel === 'instagram_direct' ? this.instagram : this.messenger;
+    try {
+      const result = await service.sendAutomationMessage({
+        tenantId: request.tenantId,
+        workspaceId: request.workspaceId,
+        conversationId,
+        automationId: request.automationId,
+        idempotencyKey: request.idempotencyKey,
+        text,
+        connectionRef: nullableString(request.payload.connectionRef),
+      });
+      return {
+        status: 'confirmed',
+        effectConfirmed: true,
+        reference: result.message.id,
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        return refused('message_conversation_not_found');
+      }
+      if (error instanceof ConflictException)
+        return refused(conflictCode(error));
+      if (error instanceof BadRequestException) {
+        return refused('message_channel_unavailable');
+      }
+      return {
+        status: 'failed',
+        effectConfirmed: false,
+        errorClass: LeadFlowAutomationErrorClass.Transient,
+        errorCode: 'message_send_failed',
+        errorMessage: 'O envio falhou por um erro transitório.',
+        reference: null,
+      };
+    }
+  }
 }
 
 function refused(errorCode: string): AutomationEffectResult {
@@ -170,8 +237,14 @@ function conflictCode(error: ConflictException): string {
       : typeof response === 'object' && response !== null
         ? (response as Record<string, unknown>).message
         : null;
-  return message ===
-    'whatsapp_template_required_outside_customer_service_window'
-    ? 'whatsapp_template_required'
+  if (
+    message === 'whatsapp_template_required_outside_customer_service_window'
+  ) {
+    return 'whatsapp_template_required';
+  }
+  return message === INSTAGRAM_MESSAGING_WINDOW_CLOSED ||
+    message === FACEBOOK_MESSENGER_WINDOW_CLOSED ||
+    message === HUMAN_AGENT_TAG_REQUIRES_HUMAN
+    ? 'message_outside_messaging_window'
     : 'message_send_blocked';
 }

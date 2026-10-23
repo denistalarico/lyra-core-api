@@ -52,6 +52,12 @@ export interface CrmOpportunityFollowUpAttempt {
   at: string;
   /** The timer that produced it, so one run's channels do not fight. */
   runId: string;
+  /** `manual_pending` only: the cadence it belongs to, kept by the send. */
+  automationId?: string | null;
+  /** `manual_pending` only: the last instant a person may still send it. */
+  expiresAt?: string | null;
+  /** `manual_pending` only: the recipe's own words, offered as a start. */
+  proposedText?: string | null;
 }
 
 export interface CrmOpportunityFollowUpState {

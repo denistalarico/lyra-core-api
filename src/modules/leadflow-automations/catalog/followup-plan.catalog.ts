@@ -65,6 +65,29 @@ export const FOLLOWUP_OUTBOUND_CHANNELS: readonly LeadFlowFollowupChannel[] = [
 export const FOLLOWUP_OUTBOUND_CHANNELS_AVAILABLE: readonly LeadFlowFollowupChannel[] =
   ['whatsapp'];
 
+/**
+ * Conversations where d3 and d7 are not sent by the platform at all (D-IX-9).
+ * Instagram and Messenger allow no automated message after 24 hours; between
+ * 24 hours and 7 days only a person may answer, with the `HUMAN_AGENT` tag.
+ * So the attempt becomes a reminder to the lead's owner, who sends it with one
+ * click — the "follow-up manual assistido".
+ */
+export const FOLLOWUP_MANUAL_ASSISTED_CHANNELS: readonly LeadFlowFollowupChannel[] =
+  ['instagram_direct', 'facebook_messenger'];
+
+export function isManualAssistedStep(
+  stepKey: string,
+  conversationChannel: string | null,
+): boolean {
+  return (
+    !isInConversationStep(stepKey) &&
+    conversationChannel !== null &&
+    (FOLLOWUP_MANUAL_ASSISTED_CHANNELS as readonly string[]).includes(
+      conversationChannel,
+    )
+  );
+}
+
 /** Quiet-hours envelope: nothing reaches a lead outside it when the toggle is on. */
 export const FOLLOWUP_QUIET_HOURS = { startHour: 7, endHour: 20 } as const;
 
@@ -76,7 +99,9 @@ export function isFollowupStepKey(value: unknown): value is FollowupStepKey {
 }
 
 export function isInConversationStep(stepKey: string): boolean {
-  return (FOLLOWUP_IN_CONVERSATION_STEPS as readonly string[]).includes(stepKey);
+  return (FOLLOWUP_IN_CONVERSATION_STEPS as readonly string[]).includes(
+    stepKey,
+  );
 }
 
 /** Whether the step is one this phase can actually deliver on the given channel. */

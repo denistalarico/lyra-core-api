@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { SendMessageExecutor } from './send-message.executor';
 import { WhatsAppAutomationTemplateError } from '../../inbox/channels/whatsapp/services/whatsapp-outbound.service';
 import type { AutomationEffectRequest } from './automation-executor.types';
@@ -6,16 +6,22 @@ import type { AutomationEffectRequest } from './automation-executor.types';
 describe('SendMessageExecutor', () => {
   const sendAutomationMessage = jest.fn();
   const render = jest.fn();
+  const instagramSend = jest.fn();
+  const messengerSend = jest.fn();
   const executor = new SendMessageExecutor(
     { sendAutomationMessage } as never,
     {
       render,
     } as never,
+    { sendAutomationMessage: instagramSend } as never,
+    { sendAutomationMessage: messengerSend } as never,
   );
 
   beforeEach(() => {
     sendAutomationMessage.mockReset();
     render.mockReset();
+    instagramSend.mockReset();
+    messengerSend.mockReset();
   });
 
   it('delegates to the canonical Inbox command', async () => {
@@ -85,6 +91,79 @@ describe('SendMessageExecutor', () => {
       errorCode: 'followup_channel_transport_unavailable',
     });
     expect(sendAutomationMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['instagram_direct', instagramSend],
+    ['facebook_messenger', messengerSend],
+  ] as const)(
+    'dispatches %s to its own channel service, never to WhatsApp',
+    async (channel, channelSend) => {
+      channelSend.mockResolvedValue({ message: { id: 'message-ig' } });
+
+      const result = await executor.execute(
+        request({ channel, templateRef: null, connectionRef: 'channel-9' }),
+      );
+
+      expect(result).toMatchObject({
+        status: 'confirmed',
+        reference: 'message-ig',
+      });
+      expect(channelSend).toHaveBeenCalledWith({
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+        automationId: 'automation-1',
+        idempotencyKey: 'followup-effect-1',
+        text: 'Podemos continuar?',
+        connectionRef: 'channel-9',
+      });
+      expect(sendAutomationMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    'instagram_outside_standard_messaging_window',
+    'facebook_messenger_outside_standard_messaging_window',
+    'human_agent_tag_requires_human',
+  ])('maps the %s refusal to the window code', async (code) => {
+    instagramSend.mockRejectedValue(new ConflictException(code));
+
+    const result = await executor.execute(
+      request({ channel: 'instagram_direct' }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'refused',
+      errorCode: 'message_outside_messaging_window',
+    });
+  });
+
+  it('refuses a social follow-up without text instead of sending a template', async () => {
+    const result = await executor.execute(
+      request({ channel: 'facebook_messenger', text: null }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'refused',
+      errorCode: 'message_content_required',
+    });
+    expect(messengerSend).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unconfirmed social send transient so the timer retries', async () => {
+    messengerSend.mockRejectedValue(
+      new ServiceUnavailableException('not confirmed'),
+    );
+
+    const result = await executor.execute(
+      request({ channel: 'facebook_messenger' }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      errorCode: 'message_send_failed',
+    });
   });
 
   it('resolves the commitment variables when the send is about one', async () => {

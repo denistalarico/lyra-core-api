@@ -21,14 +21,30 @@ import { InboxDomainOutboxEntity } from '../../../entities/inbox-domain-outbox.e
 import { InboxMessageEntity } from '../../../entities/inbox-message.entity';
 import { InboxMetaOperationLedgerService } from '../../whatsapp/services/inbox-meta-operation-ledger.service';
 import { InstagramAudioNormalizerService } from './instagram-audio-normalizer.service';
+import {
+  HUMAN_AGENT_TAG_REQUIRES_HUMAN,
+  evaluateMetaWindow,
+  loadMetaMessagingWindow,
+  type MetaWindowActor,
+} from '../../meta/meta-messaging-window';
+import {
+  assertAutomationSendConfirmed,
+  inboxScopeRequestContext,
+  isHumanActor,
+  metaActorAuthorType,
+  metaActorMessageMetadata,
+  metaActorOutboxFields,
+  assertFollowUpSendable,
+  type MetaTextActor,
+  type SendMetaAutomationMessageInput,
+  type SendMetaFollowUpTextInput,
+} from '../../meta/meta-outbound-commands';
 
 /**
- * Instagram's standard messaging window. Self-messaging is a provider-side
- * exception; normal contact conversations may only receive replies for 24h
- * after the latest inbound message.
+ * Refusal for a send outside Instagram's messaging window. The window itself
+ * (24h, the ad extension and the human-agent tag) is resolved in
+ * `meta-messaging-window.ts`, the single source shared with the follow-up.
  */
-const STANDARD_INSTAGRAM_MESSAGING_WINDOW_MS = 24 * 60 * 60 * 1_000;
-
 export const INSTAGRAM_MESSAGING_WINDOW_CLOSED =
   'instagram_outside_standard_messaging_window';
 
@@ -50,15 +66,7 @@ type SendInstagramAgentTextInput = SendInstagramTextInput & {
   policyVersion: string;
 };
 
-type InstagramTextActor =
-  | { type: 'user' }
-  | {
-      type: 'agent';
-      agentId: string;
-      ownershipVersion: number;
-      decisionId: string;
-      policyVersion: string;
-    };
+type InstagramTextActor = MetaTextActor;
 
 type InstagramMediaType = 'audio' | 'image' | 'video';
 
@@ -112,6 +120,86 @@ export class InstagramOutboundService {
     });
   }
 
+  /**
+   * Canonical Instagram command for a governed automation (the D+0/D+1
+   * follow-up). Text only, inside the standard window only: past it the
+   * `HUMAN_AGENT` extension belongs to people, so the refusal names that.
+   */
+  async sendAutomationMessage(input: SendMetaAutomationMessageInput) {
+    const conversation = await this.conversationsRepository.findOne({
+      where: {
+        id: input.conversationId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+      },
+    });
+    if (
+      !conversation ||
+      !conversation.channelId ||
+      !conversation.externalThreadId
+    ) {
+      throw new NotFoundException(
+        'Instagram conversation not found for automation.',
+      );
+    }
+    if (input.connectionRef && conversation.channelId !== input.connectionRef) {
+      throw new NotFoundException(
+        'Configured Instagram connection is not the conversation channel.',
+      );
+    }
+    const text = input.text?.trim() ?? '';
+    if (!text) {
+      throw new BadRequestException('Instagram automation text is required.');
+    }
+    const result = await this.sendTextForActor(
+      {
+        ctx: inboxScopeRequestContext(conversation),
+        channelId: conversation.channelId,
+        conversationId: conversation.id,
+        to: conversation.externalThreadId,
+        text,
+        idempotencyKey: input.idempotencyKey,
+      },
+      { type: 'automation', automationId: input.automationId },
+    );
+    assertAutomationSendConfirmed(result.message);
+    return result;
+  }
+
+  /** A person answering a pending follow-up, without taking the conversation. */
+  async sendFollowUpText(input: SendMetaFollowUpTextInput) {
+    const conversation = await this.conversationsRepository.findOne({
+      where: {
+        id: input.conversationId,
+        tenantId: input.ctx.tenantId,
+        workspaceId: this.requireWorkspaceId(input.ctx),
+      },
+    });
+    if (
+      !conversation ||
+      !conversation.channelId ||
+      !conversation.externalThreadId
+    ) {
+      throw new NotFoundException('Inbox conversation not found.');
+    }
+    return this.sendTextForActor(
+      {
+        ctx: input.ctx,
+        channelId: conversation.channelId,
+        conversationId: conversation.id,
+        to: conversation.externalThreadId,
+        text: input.text,
+        idempotencyKey: input.idempotencyKey,
+      },
+      {
+        type: 'followup',
+        automationId: input.automationId,
+        stepKey: input.stepKey,
+        userId: input.ctx.userId ?? null,
+      },
+    );
+  }
+
   private async sendTextForActor(
     input: SendInstagramTextInput,
     actor: InstagramTextActor,
@@ -122,7 +210,11 @@ export class InstagramOutboundService {
     if (actor.type === 'agent') {
       await this.assertGovernedReply(channel, conversation, input, actor);
     }
-    await this.assertStandardMessagingWindow(channel, conversation);
+    const tag = await this.resolveWindowTag(
+      channel,
+      conversation,
+      isHumanActor(actor) ? 'human' : 'automated',
+    );
 
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.findIdempotentMessage(
@@ -163,8 +255,13 @@ export class InstagramOutboundService {
         channelId: channel.id,
         contactId: conversation.contactId ?? null,
         direction: 'outbound',
-        senderType: actor.type === 'agent' ? 'agent' : 'user',
-        senderUserId: actor.type === 'user' ? (input.ctx.userId ?? null) : null,
+        senderType:
+          actor.type === 'automation'
+            ? 'system'
+            : actor.type === 'agent'
+              ? 'agent'
+              : 'user',
+        senderUserId: isHumanActor(actor) ? (input.ctx.userId ?? null) : null,
         senderAgentId: actor.type === 'agent' ? actor.agentId : null,
         externalMessageId: null,
         idempotencyKey,
@@ -189,6 +286,7 @@ export class InstagramOutboundService {
                 ownershipVersion: actor.ownershipVersion,
               }
             : {}),
+          ...metaActorMessageMetadata(actor, tag),
         },
         sentAt: null,
         deliveredAt: null,
@@ -220,6 +318,7 @@ export class InstagramOutboundService {
       await this.metaLedger.started(ledger);
       response = await this.sendToMeta(channel, accessToken, {
         recipient: { id: recipient },
+        ...messageTagFields(tag),
         message: { text: input.text.trim() },
       });
       await this.metaLedger.succeeded(ledger, startedMs, response.message_id);
@@ -247,7 +346,7 @@ export class InstagramOutboundService {
     const { channel, conversation, accessToken, recipient } =
       await this.resolveSendContext(input);
     this.assertActorCanSend(conversation, { type: 'user' });
-    await this.assertStandardMessagingWindow(channel, conversation);
+    const tag = await this.resolveWindowTag(channel, conversation, 'human');
 
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
     const existing = await this.findIdempotentMessage(
@@ -317,6 +416,7 @@ export class InstagramOutboundService {
           mimeType: mediaFile.mimetype,
           fileName: mediaFile.originalname,
           fileSize: mediaFile.size,
+          ...(tag ? { messageTag: tag } : {}),
         },
         sentAt: null,
         deliveredAt: null,
@@ -348,6 +448,7 @@ export class InstagramOutboundService {
       await this.metaLedger.started(ledger);
       response = await this.sendToMeta(channel, accessToken, {
         recipient: { id: recipient },
+        ...messageTagFields(tag),
         message: {
           attachment: { type: mediaType, payload: { url: mediaUrl } },
         },
@@ -393,7 +494,8 @@ export class InstagramOutboundService {
       },
     });
     if (!channel) return false;
-    await this.assertStandardMessagingWindow(channel, input.conversation);
+    // A reaction is not a reply a person can tag: standard window only.
+    await this.resolveWindowTag(channel, input.conversation, 'automated');
     const accessToken = this.cryptoService.decrypt(
       channel.accessTokenEncrypted,
     );
@@ -518,30 +620,41 @@ export class InstagramOutboundService {
         'AI send blocked by current conversation ownership.',
       );
     }
+    if (
+      actor.type === 'automation' &&
+      (conversation.ownershipState !== 'ai_active' || !conversation.aiEnabled)
+    ) {
+      throw new ConflictException(
+        'Automatic message blocked by current conversation ownership.',
+      );
+    }
+    if (actor.type === 'followup') assertFollowUpSendable(conversation, actor);
   }
 
-  private async assertStandardMessagingWindow(
+  /**
+   * Applies the shared window: no tag inside it, `HUMAN_AGENT` for a person
+   * past it, and a refusal that names the reason otherwise.
+   */
+  private async resolveWindowTag(
     channel: InboxChannelEntity,
     conversation: InboxConversationEntity,
-  ) {
-    const lastInbound = await this.messagesRepository.findOne({
-      where: {
-        tenantId: channel.tenantId,
-        workspaceId: channel.workspaceId,
-        conversationId: conversation.id,
-        direction: 'inbound',
-      },
-      select: { id: true, occurredAt: true },
-      order: { occurredAt: 'DESC' },
+    actor: MetaWindowActor,
+  ): Promise<'HUMAN_AGENT' | null> {
+    const window = await loadMetaMessagingWindow({
+      messages: this.messagesRepository,
+      tenantId: channel.tenantId,
+      workspaceId: channel.workspaceId,
+      conversationId: conversation.id,
     });
-    const insideWindow =
-      lastInbound !== null &&
-      Date.now() - lastInbound.occurredAt.getTime() <
-        STANDARD_INSTAGRAM_MESSAGING_WINDOW_MS;
-
-    if (!insideWindow) {
-      throw new ConflictException(INSTAGRAM_MESSAGING_WINDOW_CLOSED);
+    const verdict = evaluateMetaWindow(window, actor);
+    if (!verdict.allowed) {
+      throw new ConflictException(
+        verdict.reason === HUMAN_AGENT_TAG_REQUIRES_HUMAN
+          ? HUMAN_AGENT_TAG_REQUIRES_HUMAN
+          : INSTAGRAM_MESSAGING_WINDOW_CLOSED,
+      );
     }
+    return verdict.tag;
   }
 
   private async assertGovernedReply(
@@ -725,9 +838,10 @@ export class InstagramOutboundService {
         workspaceId: input.channel.workspaceId,
         conversationId: input.conversation.id,
         eventType: 'message_sent',
-        actorType: input.actor.type === 'agent' ? 'agent' : 'user',
-        actorUserId:
-          input.actor.type === 'user' ? input.message.senderUserId : null,
+        actorType: metaActorAuthorType(input.actor),
+        actorUserId: isHumanActor(input.actor)
+          ? input.message.senderUserId
+          : null,
         payload: {
           messageId: input.message.id,
           externalMessageId: input.externalMessageId,
@@ -749,7 +863,8 @@ export class InstagramOutboundService {
           contactId: input.conversation.contactId,
           messageId: input.message.id,
           messageType: input.message.messageType,
-          authorType: input.actor.type,
+          authorType: metaActorAuthorType(input.actor),
+          ...metaActorOutboxFields(input.actor),
         },
         publishedAt: null,
       });
@@ -855,4 +970,9 @@ export class InstagramOutboundService {
   ) {
     return inboxEntityMatchesScope(ctx, channel);
   }
+}
+
+/** Meta's tag fields: absent inside the window, `MESSAGE_TAG` outside it. */
+function messageTagFields(tag: 'HUMAN_AGENT' | null): Record<string, string> {
+  return tag ? { messaging_type: 'MESSAGE_TAG', tag } : {};
 }

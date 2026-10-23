@@ -83,6 +83,7 @@ import { InboxChannelLifecycleRequestEntity } from '../modules/inbox/entities/in
 import { InboxConversationEntity } from '../modules/inbox/entities/inbox-conversation.entity';
 import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../modules/inbox/entities/inbox-settings.entity';
+import { InboxFollowupTemplateEntity } from '../modules/inbox/entities/inbox-followup-template.entity';
 import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
 import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
 import { InboxAttributionObservationEntity } from '../modules/inbox/entities/inbox-attribution-observation.entity';
@@ -561,6 +562,7 @@ export const agencyEntities = [
   InboxConversationEntity,
   InboxMessageEntity,
   InboxSettingsEntity,
+  InboxFollowupTemplateEntity,
   InboxConversationParticipantEntity,
   InboxConversationEventEntity,
   InboxAttributionObservationEntity,

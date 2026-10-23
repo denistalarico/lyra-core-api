@@ -32,9 +32,12 @@ export class LeadFlowFollowupIdleDetectorService {
     }
     // Follow-ups schedule their own next D+N attempt after a confirmed send.
     // Observing that same system message would start a second recursive chain.
+    // A person sending a pending manual step (IX2) is part of the same chain:
+    // it carries the cadence's id and must not arm a new one either.
     if (
-      delivery.payload?.authorType === 'system' &&
-      typeof delivery.payload.automationId === 'string'
+      typeof delivery.payload?.automationId === 'string' &&
+      (delivery.payload.authorType === 'system' ||
+        typeof delivery.payload.followUpStepKey === 'string')
     ) {
       return 0;
     }

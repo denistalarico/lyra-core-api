@@ -19,6 +19,8 @@ describe('LeadFlowFollowupTimerConsumer', () => {
   const opportunitiesUpdate = jest.fn();
   const inboxSettingsFindOne = jest.fn();
   const inboxChannelsFindOne = jest.fn();
+  const publish = jest.fn();
+  const resolveHandoffRecipients = jest.fn();
 
   const consumer = new LeadFlowFollowupTimerConsumer(
     { register } as never,
@@ -32,6 +34,8 @@ describe('LeadFlowFollowupTimerConsumer', () => {
     { findOne: opportunitiesFindOne, update: opportunitiesUpdate } as never,
     { findOne: inboxSettingsFindOne } as never,
     { findOne: inboxChannelsFindOne } as never,
+    { publish } as never,
+    { resolveHandoffRecipients } as never,
   );
 
   beforeEach(() => {
@@ -71,6 +75,13 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       reference: 'message-2',
     });
     schedule.mockResolvedValue({ timerId: 'timer-2' });
+    publish.mockResolvedValue({
+      status: 'processed',
+      notificationId: 'notification-1',
+      recipientUserIds: ['user-owner'],
+      channelResults: [],
+    });
+    resolveHandoffRecipients.mockResolvedValue(['user-route']);
   });
 
   it('registers itself as the named timer consumer', () => {
@@ -85,13 +96,15 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       occurredAt: new Date('2026-07-26T12:00:00.000Z'),
     });
     await consumer.handleTimer(idleEnvelope());
-    expect(conversationsFindOne).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        agencyClientId: 'client-1',
-        companyContextId: 'company-a',
-        scopeKind: 'company',
+    expect(conversationsFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          agencyClientId: 'client-1',
+          companyContextId: 'company-a',
+          scopeKind: 'company',
+        }),
       }),
-    }));
+    );
     expect(outboxInsert).toHaveBeenCalledWith(
       expect.objectContaining({
         eventName: 'leadflow.inbox.conversation.idle',
@@ -150,13 +163,15 @@ describe('LeadFlowFollowupTimerConsumer', () => {
     envelope.payload.opportunityId = 'opportunity-1';
 
     await consumer.handleTimer(envelope as never);
-    expect(opportunitiesFindOne).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
-        agencyClientId: 'client-1',
-        companyContextId: 'company-a',
-        scopeKind: 'company',
+    expect(opportunitiesFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          agencyClientId: 'client-1',
+          companyContextId: 'company-a',
+          scopeKind: 'company',
+        }),
       }),
-    }));
+    );
     expect(send).not.toHaveBeenCalled();
     expect(schedule).not.toHaveBeenCalled();
   });
@@ -391,12 +406,16 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       // messaging window is still open — which is what D+0 and D+1 assume.
       // Answering by query rather than by call order: a queued `once` that a
       // test does not consume leaks into the next one.
-      messagesFindOne.mockImplementation((query: { where?: { direction?: string } }) =>
-        Promise.resolve(
-          query?.where?.direction === 'inbound'
-            ? { id: 'inbound-1', occurredAt: new Date('2026-07-27T09:00:00.000Z') }
-            : null,
-        ),
+      messagesFindOne.mockImplementation(
+        (query: { where?: { direction?: string } }) =>
+          Promise.resolve(
+            query?.where?.direction === 'inbound'
+              ? {
+                  id: 'inbound-1',
+                  occurredAt: new Date('2026-07-27T09:00:00.000Z'),
+                }
+              : null,
+          ),
       );
       const envelope = deliveryEnvelope();
       envelope.payload.baselineAt = '2026-07-27T09:00:00.000Z';
@@ -654,6 +673,261 @@ describe('LeadFlowFollowupTimerConsumer', () => {
       expect(schedule).toHaveBeenCalledWith(
         expect.objectContaining({
           payload: expect.objectContaining({ stepKey: 'd7' }),
+        }),
+      );
+    });
+  });
+
+  describe('Instagram and Messenger (IX2)', () => {
+    const previousTag = process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED;
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-07-27T12:00:00.000Z'));
+      process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED = 'true';
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+      if (previousTag === undefined) {
+        delete process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED;
+      } else {
+        process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED = previousTag;
+      }
+    });
+
+    function socialEnvelope(input: {
+      channelType: 'instagram' | 'facebook_messenger';
+      stepKey: 'd0' | 'd3';
+      lastInboundAt: string;
+      assignedUserId?: string | null;
+    }) {
+      opportunitiesFindOne.mockResolvedValue({
+        id: 'opportunity-1',
+        status: 'open',
+        autonomyMode: 'automatic',
+        stageId: 'stage-1',
+        inboxConversationId: 'conversation-1',
+        rowVersion: 4,
+        followMode: 'automatic',
+        followMessage: 'Oi! Conseguiu ver a proposta?',
+        assignedUserId:
+          input.assignedUserId === undefined
+            ? 'user-owner'
+            : input.assignedUserId,
+        metadata: {},
+      });
+      conversationsFindOne.mockResolvedValue({
+        id: 'conversation-1',
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        opportunityId: 'opportunity-1',
+        channelId: 'channel-ig',
+        status: 'open',
+        ownershipState: 'ai_active',
+        ownershipVersion: 3,
+        aiEnabled: true,
+      });
+      inboxChannelsFindOne.mockResolvedValue({
+        id: 'channel-ig',
+        type: input.channelType,
+      });
+      messagesFindOne.mockImplementation(
+        (query: { where?: { direction?: string } }) =>
+          Promise.resolve(
+            query?.where?.direction === 'inbound'
+              ? { id: 'inbound-1', occurredAt: new Date(input.lastInboundAt) }
+              : null,
+          ),
+      );
+      const envelope = deliveryEnvelope();
+      envelope.payload.baselineAt = input.lastInboundAt;
+      envelope.payload.templateRef = null;
+      envelope.payload.text = 'Ainda tem interesse?';
+      envelope.payload.automationRecipeKey = 'followup_idle_lead';
+      envelope.payload.opportunityId = 'opportunity-1';
+      envelope.payload.respectBusinessHours = false;
+      envelope.payload.stepKey = input.stepKey;
+      envelope.payload.followupSteps = [
+        { stepKey: 'd0', enabled: true, delayMinutes: 180, channels: [] },
+        {
+          stepKey: 'd3',
+          enabled: true,
+          delayMinutes: 4320,
+          channels: [{ channel: 'whatsapp', enabled: true }],
+        },
+        {
+          stepKey: 'd7',
+          enabled: true,
+          delayMinutes: 10080,
+          channels: [{ channel: 'whatsapp', enabled: true }],
+        },
+      ];
+      return envelope;
+    }
+
+    it('sends D+0 automatically through the Instagram conversation', async () => {
+      await consumer.handleTimer(
+        socialEnvelope({
+          channelType: 'instagram',
+          stepKey: 'd0',
+          lastInboundAt: '2026-07-27T09:00:00.000Z',
+        }),
+      );
+
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            channel: 'instagram_direct',
+            connectionRef: 'channel-ig',
+            text: 'Oi! Conseguiu ver a proposta?',
+          }),
+        }),
+      );
+    });
+
+    it('records D+0 past the window without trying the channel', async () => {
+      await consumer.handleTimer(
+        socialEnvelope({
+          channelType: 'facebook_messenger',
+          stepKey: 'd0',
+          lastInboundAt: '2026-07-25T09:00:00.000Z',
+        }),
+      );
+
+      expect(send).not.toHaveBeenCalled();
+      expect(outboxInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            channel: 'facebook_messenger',
+            result: 'skipped_outside_messaging_window',
+          }),
+        }),
+      );
+    });
+
+    it('turns D+3 into a pending manual step, reminds the owner and keeps the chain', async () => {
+      await consumer.handleTimer(
+        socialEnvelope({
+          channelType: 'instagram',
+          stepKey: 'd3',
+          lastInboundAt: '2026-07-24T09:00:00.000Z',
+        }),
+      );
+
+      // Never through the WhatsApp the step was configured with, never by the
+      // platform at all: past 24h only a person may write.
+      expect(send).not.toHaveBeenCalled();
+      expect(opportunitiesUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'opportunity-1' }),
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            followUp: expect.objectContaining({
+              attempts: [
+                expect.objectContaining({
+                  stepKey: 'd3',
+                  result: 'manual_pending',
+                  channel: 'instagram_direct',
+                  automationId: 'automation-1',
+                  expiresAt: '2026-07-31T09:00:00.000Z',
+                  proposedText: 'Ainda tem interesse?',
+                }),
+              ],
+            }),
+          }),
+        }),
+      );
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          alert: 'followup_manual_pending',
+          opportunityId: 'opportunity-1',
+          notifyOpportunityOwner: true,
+          specificRecipientUserIds: [],
+          idempotencyKey: 'followup.manual:timer-delivery:d3',
+          followUp: { stepLabel: 'D+3', dueLabel: '31/07 06:00' },
+        }),
+      );
+      expect(schedule).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ stepKey: 'd7' }),
+        }),
+      );
+    });
+
+    it('routes the reminder along the handoff route when the card has no owner', async () => {
+      await consumer.handleTimer(
+        socialEnvelope({
+          channelType: 'facebook_messenger',
+          stepKey: 'd3',
+          lastInboundAt: '2026-07-24T09:00:00.000Z',
+          assignedUserId: null,
+        }),
+      );
+
+      expect(resolveHandoffRecipients).toHaveBeenCalled();
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({ specificRecipientUserIds: ['user-route'] }),
+      );
+    });
+
+    it('records the step as lost once even the 7-day human window closed', async () => {
+      await consumer.handleTimer(
+        socialEnvelope({
+          channelType: 'instagram',
+          stepKey: 'd3',
+          lastInboundAt: '2026-07-19T09:00:00.000Z',
+        }),
+      );
+
+      expect(publish).not.toHaveBeenCalled();
+      expect(outboxInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            stepKey: 'd3',
+            result: 'skipped_outside_human_window',
+          }),
+        }),
+      );
+    });
+
+    it('offers no human window when the HUMAN_AGENT tag is switched off', async () => {
+      process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED = 'false';
+
+      await consumer.handleTimer(
+        socialEnvelope({
+          channelType: 'instagram',
+          stepKey: 'd3',
+          lastInboundAt: '2026-07-24T09:00:00.000Z',
+        }),
+      );
+
+      expect(publish).not.toHaveBeenCalled();
+      expect(outboxInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            result: 'skipped_outside_human_window',
+          }),
+        }),
+      );
+    });
+
+    it('maps a channel window refusal to the window result', async () => {
+      send.mockResolvedValue({
+        status: 'refused',
+        effectConfirmed: false,
+        errorCode: 'message_outside_messaging_window',
+      });
+
+      await consumer.handleTimer(
+        socialEnvelope({
+          channelType: 'instagram',
+          stepKey: 'd0',
+          lastInboundAt: '2026-07-27T09:00:00.000Z',
+        }),
+      );
+
+      expect(outboxInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            result: 'skipped_outside_messaging_window',
+          }),
         }),
       );
     });

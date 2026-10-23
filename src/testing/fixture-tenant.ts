@@ -56,6 +56,8 @@ export const FIXTURE_DELETE_ORDER: readonly string[] = [
   'leadflow_agent_channel_bindings',
   'leadflow_agent_operational_state',
   'inbox_channels',
+  // IX2: no foreign keys; scoped by tenant like inbox_settings.
+  'inbox_followup_templates',
   'leadflow_automation_run_attempts',
   'leadflow_automation_runs',
   'leadflow_automations',

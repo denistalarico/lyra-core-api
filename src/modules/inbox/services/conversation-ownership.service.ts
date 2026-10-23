@@ -512,6 +512,22 @@ export class ConversationOwnershipService {
       .execute();
   }
 
+  /**
+   * Who answers for this conversation when the platform needs a person: the
+   * handoff route, read outside any transition. The pending manual follow-up
+   * reminder (IX2) uses it so that the reminder reaches whoever a handoff
+   * would have reached, instead of a second routing rule.
+   */
+  async resolveHandoffRecipients(
+    conversation: InboxConversationEntity,
+  ): Promise<string[]> {
+    const route = await this.resolveHandoffNotificationRoute(
+      this.dataSource.manager,
+      conversation,
+    );
+    return route.recipientUserIds;
+  }
+
   private async resolveHandoffNotificationRoute(
     manager: EntityManager,
     conversation: InboxConversationEntity,

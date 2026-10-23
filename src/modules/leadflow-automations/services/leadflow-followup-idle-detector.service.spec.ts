@@ -59,6 +59,29 @@ describe('LeadFlowFollowupIdleDetectorService', () => {
     expect(schedule).not.toHaveBeenCalled();
   });
 
+  it('does not arm a second cadence from a manual follow-up a person sent', async () => {
+    const count = await service.observeDelivery(
+      delivery({
+        payload: {
+          messageId: 'message-3',
+          authorType: 'user',
+          automationId: 'automation-1',
+          followUpStepKey: 'd3',
+        },
+      }),
+    );
+    expect(count).toBe(0);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it('still arms from an ordinary human reply that names no cadence', async () => {
+    findMatchingTrigger.mockResolvedValue([]);
+    await service.observeDelivery(
+      delivery({ payload: { messageId: 'message-4', authorType: 'user' } }),
+    );
+    expect(findMatchingTrigger).toHaveBeenCalled();
+  });
+
   it('ignores paused automations', async () => {
     findMatchingTrigger.mockResolvedValue([
       {
