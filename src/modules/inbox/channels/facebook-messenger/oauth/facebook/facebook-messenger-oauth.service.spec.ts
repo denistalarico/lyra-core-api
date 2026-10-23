@@ -490,6 +490,7 @@ describe('FacebookMessengerOAuthService', () => {
             'message_reads',
             'message_reactions',
             'message_echoes',
+            'feed',
           ],
           connectionSessionId: 'session-id',
         }),

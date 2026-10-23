@@ -292,15 +292,22 @@ export class PermissionsGuard implements CanActivate {
       ANY_PERMISSION_KEYS_METADATA,
       targets,
     );
+    const dangerous = Boolean(
+      this.reflector.getAllAndOverride<boolean>(
+        DANGEROUS_ACTION_METADATA,
+        targets,
+      ),
+    );
+    // A Danger Zone action reaches the Client Area only for the company's
+    // Owner (decision of 2026-10-23, IX3), with the same audit as the Agency
+    // path; every other account role is refused before any grant is read.
+    // Which dangerous routes are exposed at all is pinned by CA7.
     if (
       !context ||
       !module ||
       !this.clientAreaScopes ||
       !context.memberAccess?.[module]?.available ||
-      this.reflector.getAllAndOverride<boolean>(
-        DANGEROUS_ACTION_METADATA,
-        targets,
-      ) ||
+      (dangerous && context.accountRole !== 'client_owner') ||
       (!required && !any?.length)
     )
       throw new ForbiddenException('Client Area action is not allowed.');
@@ -369,6 +376,17 @@ export class PermissionsGuard implements CanActivate {
     };
     if (required) await check([required]);
     if (any?.length) await check(any);
+    if (dangerous) {
+      await this.permissionService.auditPermissionDecision({
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        actorUserId: context.userId,
+        action: 'dangerous_action_executed',
+        permissionKey: required ?? any?.join('|') ?? null,
+        riskLevel: 'critical',
+        resourceType: route?.path,
+      });
+    }
     return true;
   }
 }

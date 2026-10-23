@@ -10,7 +10,8 @@ import { IsNull, Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../../../../common/crypto/settings-crypto.service';
 import { InboxChannelEntity } from '../../../entities/inbox-channel.entity';
 import {
-  FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS,
+  FACEBOOK_PAGE_COMMENT_WEBHOOK_FIELDS,
+  FACEBOOK_PAGE_MESSAGING_WEBHOOK_FIELDS,
   MetaGraphService,
 } from '../../meta/services/meta-graph.service';
 import type { InboxScopeKind } from '../../../inbox-company-scope';
@@ -113,9 +114,15 @@ export class FacebookMessengerChannelHealthService {
       );
     }
 
-    const missingWebhookFields = FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS.filter(
+    // Messaging fields decide health; the comment field (IX3) is reported on
+    // its own so a pre-IX3 Page is not flagged as "reconnect required".
+    const missingWebhookFields = FACEBOOK_PAGE_MESSAGING_WEBHOOK_FIELDS.filter(
       (field) => !subscriptions.subscribedFields.includes(field),
     );
+    const missingCommentWebhookFields =
+      FACEBOOK_PAGE_COMMENT_WEBHOOK_FIELDS.filter(
+        (field) => !subscriptions.subscribedFields.includes(field),
+      );
     const webhookSubscriptionHealthy =
       subscriptions.appSubscribed && missingWebhookFields.length === 0;
 
@@ -135,6 +142,9 @@ export class FacebookMessengerChannelHealthService {
           : ('webhook_subscription_missing' as const),
       requiresReconnect: !webhookSubscriptionHealthy,
       missingWebhookFields,
+      commentsWebhookSubscribed:
+        subscriptions.appSubscribed && missingCommentWebhookFields.length === 0,
+      missingCommentWebhookFields,
       pageName: identity.pageName,
       checkedAt: new Date().toISOString(),
     };

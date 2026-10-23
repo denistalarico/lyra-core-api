@@ -28,7 +28,13 @@ export type ActivationReasonCode =
   | 'conversation_human_or_closed'
   | 'disqualified_contact'
   | 'audience_mismatch'
-  | 'contact_opt_out';
+  | 'contact_opt_out'
+  | 'comment_trigger_refused'
+  | 'own_account_comment'
+  | 'ad_comment_missing';
+
+/** IX3: the comment evaluator's own version, recorded on each agent action. */
+export const COMMENT_ACTIVATION_POLICY_VERSION = 'comment-activation-v1';
 
 @Injectable()
 export class AgentActivationPolicyService {
@@ -148,8 +154,7 @@ export class AgentActivationPolicyService {
     const channelPolicies = asRecord(
       agent?.channelPolicy?.channelActivationPolicies,
     );
-    const policy =
-      asRecord(channelPolicies?.[input.channelId]) ??
+    const policy = asRecord(channelPolicies?.[input.channelId]) ??
       asRecord(agent?.channelPolicy?.activationPolicy) ?? { trigger: 'manual' };
     const trigger =
       typeof policy.trigger === 'string' ? policy.trigger : 'manual';
@@ -160,21 +165,7 @@ export class AgentActivationPolicyService {
       reason = 'eligible_channel';
     }
     if (trigger === 'keywords') {
-      const text = normalize(input.messageText ?? '');
-      const keywords = Array.isArray(policy.keywords)
-        ? policy.keywords.filter(
-            (item): item is string => typeof item === 'string',
-          )
-        : [];
-      const mode =
-        policy.keywordMode === 'phrase_contains' ? 'phrase_contains' : 'word';
-      const words = text.split(/[^\p{L}\p{N}_]+/u).filter(Boolean);
-      matched = keywords.some((keyword) => {
-        const target = normalize(keyword);
-        return mode === 'phrase_contains'
-          ? text.includes(target)
-          : words.includes(target);
-      });
+      matched = matchesActivationKeywords(policy, input.messageText ?? '');
       reason = matched ? 'keyword_match' : 'keyword_missing';
     }
     if (trigger === 'ad_referral') {
@@ -202,6 +193,117 @@ export class AgentActivationPolicyService {
             : undefined,
       },
     );
+  }
+
+  /**
+   * IX3 (D-IX-6): should the channel's agent answer this post/ad comment?
+   *
+   * The agent's own comment rule (`channelPolicy.commentActivationPolicy`),
+   * never the conversation rules: a channel that takes every DM does not
+   * answer every comment. `every_eligible` is refused even if it reached the
+   * database some other way. The agent, its publication and its binding to
+   * the channel are proved exactly like a conversation's.
+   */
+  async evaluateComment(input: {
+    tenantId: string;
+    workspaceId: string;
+    channelId: string;
+    text: string | null;
+    adId: string | null;
+    fromOwnAccount: boolean;
+    internalContact?: boolean;
+    contactOptOut?: boolean;
+  }) {
+    const exclusions: ActivationReasonCode[] = [];
+    const channel = await this.dataSource
+      .getRepository(InboxChannelEntity)
+      .findOneBy({
+        id: input.channelId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+      });
+    if (
+      !channel ||
+      channel.connectionStatus !== 'connected' ||
+      channel.status !== 'active'
+    )
+      exclusions.push('channel_unavailable');
+    if (!channel?.aiEnabled) exclusions.push('channel_ai_disabled');
+    if (input.fromOwnAccount) exclusions.push('own_account_comment');
+    if (input.internalContact) exclusions.push('internal_contact');
+    if (input.contactOptOut) exclusions.push('contact_opt_out');
+
+    const agent = channel?.defaultAgentId
+      ? await this.dataSource.getRepository(LeadFlowAgentEntity).findOneBy({
+          id: channel.defaultAgentId,
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+        })
+      : null;
+    if (
+      !agent ||
+      agent.status !== LeadFlowAgentStatus.Active ||
+      !agent.publishedVersionId
+    )
+      exclusions.push('agent_unpublished');
+    const binding = agent
+      ? await this.dataSource
+          .getRepository(LeadFlowAgentChannelBindingEntity)
+          .createQueryBuilder('binding')
+          .where(
+            'binding.tenant_id = :tenantId AND binding.workspace_id = :workspaceId AND binding.agent_id = :agentId',
+            {
+              tenantId: input.tenantId,
+              workspaceId: input.workspaceId,
+              agentId: agent.id,
+            },
+          )
+          .andWhere("binding.status = 'active'")
+          .andWhere(
+            "(binding.external_ref = :channelId OR binding.config->>'channelId' = :channelId)",
+            { channelId: input.channelId },
+          )
+          .getOne()
+      : null;
+    if (!binding) exclusions.push('binding_ineligible');
+
+    const policy = asRecord(agent?.channelPolicy?.commentActivationPolicy) ?? {
+      trigger: 'manual',
+    };
+    const trigger =
+      typeof policy.trigger === 'string' ? policy.trigger : 'manual';
+    let matched = false;
+    let reason: ActivationReasonCode = 'manual_required';
+    if (trigger === 'every_eligible') {
+      reason = 'comment_trigger_refused';
+    } else if (trigger === 'keywords') {
+      matched = matchesActivationKeywords(policy, input.text ?? '');
+      reason = matched ? 'keyword_match' : 'keyword_missing';
+    } else if (trigger === 'ad_referral') {
+      matched = Boolean(
+        input.adId && this.matchesReferralFilters(policy, { adId: input.adId }),
+      );
+      reason = matched ? 'trusted_ad_referral' : 'ad_comment_missing';
+    }
+    const publicReplyText =
+      typeof policy.publicReplyText === 'string' &&
+      policy.publicReplyText.trim()
+        ? policy.publicReplyText.trim().slice(0, 280)
+        : null;
+    return {
+      wouldActivate: matched && exclusions.length === 0,
+      policyVersion: COMMENT_ACTIVATION_POLICY_VERSION,
+      trigger,
+      reasonCode: reason,
+      exclusions: [...new Set(exclusions)],
+      resolved: {
+        channelId: channel?.id ?? null,
+        bindingId: binding?.id ?? null,
+        agentId: agent?.id ?? null,
+        agentVersionId: agent?.publishedVersionId ?? null,
+      },
+      publicReplyText,
+    };
   }
 
   private matchesReferralFilters(
@@ -258,6 +360,26 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+/** Whole-word (default) or phrase match of the policy keywords; no regex. */
+function matchesActivationKeywords(
+  policy: Record<string, unknown>,
+  value: string,
+): boolean {
+  const text = normalize(value);
+  const keywords = Array.isArray(policy.keywords)
+    ? policy.keywords.filter((item): item is string => typeof item === 'string')
+    : [];
+  const mode =
+    policy.keywordMode === 'phrase_contains' ? 'phrase_contains' : 'word';
+  const words = text.split(/[^\p{L}\p{N}_]+/u).filter(Boolean);
+  return keywords.some((keyword) => {
+    const target = normalize(keyword);
+    return mode === 'phrase_contains'
+      ? text.includes(target)
+      : words.includes(target);
+  });
 }
 
 export function normalize(value: string) {

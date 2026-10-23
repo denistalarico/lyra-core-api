@@ -57,10 +57,15 @@ const ADSET_FIELDS =
  * signs with a five-day expiry is not a thing this pipeline should be holding
  * at all. The id is what makes the real image addressable later, from the
  * creative node, where the size parameters are honoured.
+ *
+ * `effective_object_story_id` / `effective_instagram_media_id` ride along for
+ * the LeadFlow Inbox (IX3): they name the Page post / IG media an ad renders,
+ * which is how a comment on that post is attributed to the ad. Ids only,
+ * read through `SocialAdStoryLookupAdapter`; no Social token reaches the Inbox.
  */
 const AD_FIELDS =
   'id,name,adset_id,campaign_id,status,effective_status,created_time,' +
-  'updated_time,creative{id}';
+  'updated_time,creative{id,effective_object_story_id,effective_instagram_media_id}';
 
 /**
  * Rows per page and pages per level.

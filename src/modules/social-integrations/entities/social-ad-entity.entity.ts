@@ -272,6 +272,26 @@ export class SocialAdEntity {
   creativeId!: string | null;
 
   /**
+   * IX3: the Page post / IG media this ad renders (`creative{…}` subfield),
+   * so the LeadFlow Inbox can name the ad behind a comment. Ad level only.
+   */
+  @Column({
+    name: 'effective_object_story_id',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  effectiveObjectStoryId!: string | null;
+
+  @Column({
+    name: 'effective_instagram_media_id',
+    type: 'varchar',
+    length: 180,
+    nullable: true,
+  })
+  effectiveInstagramMediaId!: string | null;
+
+  /**
    * Budgets in the currency's minor unit (cents), which is how Meta reports
    * them. Stored as given rather than converted: a float division here would
    * be a rounding error that then propagates into every derived KPI.

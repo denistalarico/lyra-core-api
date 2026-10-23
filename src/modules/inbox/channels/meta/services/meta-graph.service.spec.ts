@@ -509,7 +509,9 @@ describe('MetaGraphService Facebook assets', () => {
   );
 
   it('resolves the Page identity behind a Page Access Token via /me', async () => {
-    fetchMock.mockResolvedValue(response({ id: 'page-1', name: 'Loja Centro' }));
+    fetchMock.mockResolvedValue(
+      response({ id: 'page-1', name: 'Loja Centro' }),
+    );
 
     await expect(
       service.getFacebookPageIdentity({ pageAccessToken: 'page-secret-1' }),
@@ -582,7 +584,8 @@ describe('MetaGraphService Facebook assets', () => {
       'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
     );
     expect(url.searchParams.get('subscribed_fields')).toBe(
-      'messages,message_deliveries,message_reads,message_reactions,message_echoes',
+      // IX3: `feed` carries the Page's post/ad comments.
+      'messages,message_deliveries,message_reads,message_reactions,message_echoes,feed',
     );
     expect(url.searchParams.get('subscribed_fields')).not.toContain(
       'messaging_postbacks',

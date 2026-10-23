@@ -63,6 +63,13 @@ export type NormalizedAdEntity = {
    */
   creativeId: string | null;
   /**
+   * IX3: the Page post (`<page>_<post>`) and the IG media the ad renders, from
+   * the same `creative{…}` subfield. `null` everywhere except ad, like the
+   * creative id; the Inbox reads them through the story lookup port.
+   */
+  effectiveObjectStoryId: string | null;
+  effectiveInstagramMediaId: string | null;
+  /**
    * Budgets in the currency's minor unit, as decimal strings.
    *
    * Strings rather than numbers on purpose: the column is `bigint`, TypeORM

@@ -282,6 +282,113 @@ export class InboxProviderService
     );
   }
 
+  /**
+   * IX3 (D-IX-6): the short private reply the comment agent sends. A
+   * `decision` operation on the same model, budget and kill switch as the
+   * conversation decision — only the schema is smaller (one text, or none).
+   */
+  async composeCommentReply(input: {
+    tenantId: string;
+    workspaceId: string;
+    idempotencyKey: string;
+    correlationId?: string;
+    systemPolicy: string;
+    untrustedData: string;
+  }): Promise<{
+    reply: string | null;
+    provider: string;
+    model: string;
+    usage: AgentDecisionResult['usage'];
+    latencyMs: number;
+    attempts?: number;
+  }> {
+    if (this.config.decisionMode === 'disabled')
+      throw new InboxProviderError('decision_provider_disabled', false);
+    const started = Date.now();
+    if (this.config.decisionMode === 'mock') {
+      return {
+        reply: 'Oi! Vi seu comentário e te chamei por aqui para ajudar.',
+        provider: 'mock',
+        model: 'mock-decision-v1',
+        usage: { inputTokens: 0, outputTokens: 0, images: 0 },
+        latencyMs: Date.now() - started,
+      };
+    }
+    return this.withBudget(
+      'decision',
+      input,
+      this.config.decisionModel,
+      0,
+      async () => {
+        const { response, attempts } = await this.request(
+          '/chat/completions',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: this.config.decisionModel,
+              ...chatGenerationControls(this.config.decisionModel),
+              messages: [
+                { role: 'system', content: input.systemPolicy },
+                { role: 'user', content: input.untrustedData },
+              ],
+              response_format: {
+                type: 'json_schema',
+                json_schema: {
+                  name: 'comment_private_reply_v1',
+                  strict: true,
+                  schema: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['reply'],
+                    properties: {
+                      reply: { type: ['string', 'null'], maxLength: 640 },
+                    },
+                  },
+                },
+              },
+            }),
+          },
+          input.idempotencyKey,
+        );
+        const body = (await response.json()) as Record<string, unknown>;
+        const choice = firstChoice(body);
+        const message = messageRecord(choice);
+        const usage = providerUsage(body, 0);
+        assertNotRefused(message, choice, attempts, usage);
+        let parsed: unknown;
+        try {
+          parsed =
+            typeof message?.content === 'string'
+              ? JSON.parse(message.content)
+              : null;
+        } catch {
+          parsed = null;
+        }
+        const reply =
+          parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>).reply
+            : undefined;
+        if (reply !== null && typeof reply !== 'string')
+          throw new InboxProviderError(
+            'decision_schema_invalid',
+            false,
+            attempts,
+            usage,
+          );
+        return {
+          reply:
+            typeof reply === 'string' && reply.trim() ? reply.trim() : null,
+          provider: 'openai-compatible',
+          model: this.config.decisionModel,
+          usage,
+          latencyMs: Date.now() - started,
+          attempts,
+        };
+      },
+    );
+  }
+
   private async withBudget<
     T extends {
       usage: AgentDecisionResult['usage'];

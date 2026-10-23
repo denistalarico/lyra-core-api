@@ -136,7 +136,9 @@ describe('MetaAdsEntityReaderService', () => {
 
       const [campaigns, adSets, ads] = harness.edgeRequests;
 
-      expect(String(ads.fields)).toContain('creative{id}');
+      expect(String(ads.fields)).toContain(
+        'creative{id,effective_object_story_id,effective_instagram_media_id}',
+      );
       // A campaign and an ad set have no creative of their own, so asking would
       // be quota spent on a field that cannot answer.
       expect(String(campaigns.fields)).not.toContain('creative');
@@ -157,7 +159,7 @@ describe('MetaAdsEntityReaderService', () => {
       // The real picture comes from the creative node at read time.
       const fields = String(harness.edgeRequests[0].fields);
 
-      expect(fields).toContain('creative{id}');
+      expect(fields).toContain('creative{id,');
       expect(fields).not.toContain('thumbnail');
     });
   });

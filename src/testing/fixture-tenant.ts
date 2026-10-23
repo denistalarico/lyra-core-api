@@ -36,6 +36,11 @@ import { assertSafePostgresTarget } from './postgres-integration-guard';
  */
 export const FIXTURE_DELETE_ORDER: readonly string[] = [
   'inbox_governed_actions',
+  // IX3: agent actions reference comments; both reference inbox_channels.
+  'inbox_comment_agent_actions',
+  'inbox_comments',
+  'inbox_comment_contents',
+  'inbox_autonomy_controls',
   'inbox_meta_operations',
   'inbox_channel_lifecycle_requests',
   'inbox_channel_contact_identities',

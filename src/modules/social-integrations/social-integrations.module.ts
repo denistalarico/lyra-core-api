@@ -33,6 +33,7 @@ import { SocialAdDestinationBreakdownReadService } from './services/social-ad-de
 import { SocialAdHierarchyLookupReadService } from './services/social-ad-hierarchy-lookup.read.service';
 import { SocialAdDestinationHistoryReadService } from './services/social-ad-destination-history.read.service';
 import { SocialAdDestinationObserverService } from './services/social-ad-destination-observer.service';
+import { SocialAdStoryLookupAdapter } from './services/social-ad-story-lookup.adapter';
 import { SocialAdEntityWriterService } from './services/social-ad-entity-writer.service';
 import { SocialBoostRequestEntity } from '../social-campaigns/entities/social-boost-request.entity';
 import { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
@@ -102,6 +103,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdHierarchyLookupReadService,
     SocialAdEntityWriterService,
     SocialAdHierarchySyncService,
+    SocialAdStoryLookupAdapter,
     MetaAdsInsightsReaderService,
     SocialAdMetricsWriterService,
     SocialAdInsightsSyncService,
@@ -175,6 +177,8 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdDestinationHistoryReadService,
     SocialAdDestinationBreakdownReadService,
     SocialAdHierarchyLookupReadService,
+    // IX3: read by the Inbox through InboxSocialAdLookupModule.
+    SocialAdStoryLookupAdapter,
   ],
 })
 export class SocialIntegrationsModule {}

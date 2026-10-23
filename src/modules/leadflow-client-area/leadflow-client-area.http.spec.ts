@@ -40,6 +40,7 @@ import { AgencyClient } from '../clients/entities/agency-client.entity';
 import { InboxController } from '../inbox/inbox.controller';
 import { InboxSettingsController } from '../inbox/inbox-settings.controller';
 import { InboxFollowupController } from '../inbox/followup/inbox-followup.controller';
+import { InboxCommentsController } from '../inbox/comments/inbox-comments.controller';
 import { InboxMediaController } from '../inbox/inbox-media.controller';
 import { InboxChannelsController } from '../inbox/channels/inbox-channels.controller';
 import { WhatsAppOutboundController } from '../inbox/channels/whatsapp/whatsapp-outbound.controller';
@@ -83,6 +84,7 @@ const controllers = [
   InboxController,
   InboxSettingsController,
   InboxFollowupController,
+  InboxCommentsController,
   InboxMediaController,
   InboxChannelsController,
   WhatsAppOutboundController,
@@ -95,6 +97,7 @@ const controllers = [
 ];
 describe('CA11 actual product controllers through the real HTTP bridge', () => {
   let app: INestApplication, jwt: JwtService, level: ClientAreaAccessLevel;
+  let accountRole: 'client_owner' | 'client_member';
   const saved = { ...process.env },
     calls: unknown[][] = [];
   const fakeService = new Proxy(
@@ -237,6 +240,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
                 sessionId: session,
                 membershipId: randomUUID(),
                 role: 'client_member',
+                accountRole,
                 modules,
                 permissions: new Set(),
                 memberAccess: resolveMemberAccess('client_member', modules, {
@@ -251,7 +255,10 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
         },
         {
           provide: PlatformPermissionService,
-          useValue: { assertCan: jest.fn() },
+          useValue: {
+            assertCan: jest.fn(),
+            auditPermissionDecision: jest.fn().mockResolvedValue(undefined),
+          },
         },
         {
           provide: OperationalContextResolver,
@@ -283,6 +290,8 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
   });
   beforeEach(() => {
     level = 'manager';
+    // Owner: the only account role a Danger Zone route admits (IX3).
+    accountRole = 'client_owner';
     calls.length = 0;
     process.env.CLIENT_AREA_BRIDGE_ENABLED = 'true';
   });
@@ -408,6 +417,36 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     calls.length = 0;
     await call(reconcile).expect(403);
     expect(calls).toHaveLength(0);
+  });
+  it('IX3: comments are answered by every level; deleting is the company Owner only', async () => {
+    const route = (method: string, path: string) =>
+      LEADFLOW_CLIENT_AREA_ROUTES.find(
+        (item) => item.method === method && item.path === path,
+      )!;
+    const reply = route('POST', '/inbox/comments/:commentId/reply');
+    const hide = route('POST', '/inbox/comments/:commentId/hide');
+    const remove = route('DELETE', '/inbox/comments/:commentId');
+    const list = route('GET', '/inbox/comments');
+
+    // An operator answers and hides any comment of the company: a comment has
+    // no assignment, so authorship is not required (otherCreator below).
+    level = 'operator';
+    accountRole = 'client_member';
+    await call(reply, company, otherCreator, { text: 'oi' }).expect(201);
+    await call(hide, company, otherCreator).expect(200);
+    // A Danger Zone route is refused to anyone but the company's Owner.
+    calls.length = 0;
+    await call(remove).expect(403);
+    expect(calls).toHaveLength(0);
+
+    accountRole = 'client_owner';
+    await call(remove).expect(200);
+
+    level = 'viewer';
+    calls.length = 0;
+    await call(list).expect(200);
+    await call(reply).expect(403);
+    await call(remove).expect(403);
   });
   it('IX2: follow-up templates are Manager configuration; reading and the window are for every level', async () => {
     const route = (method: string, path: string) =>

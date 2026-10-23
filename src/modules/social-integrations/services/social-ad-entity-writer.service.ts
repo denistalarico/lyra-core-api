@@ -90,6 +90,9 @@ export const REFRESHED_COLUMNS = [
    * changes nothing.
    */
   'creative_id',
+  // IX3: refreshed with the creative — a replaced creative renders a new story.
+  'effective_object_story_id',
+  'effective_instagram_media_id',
   'daily_budget_minor',
   'lifetime_budget_minor',
   'budget_remaining_minor',
@@ -175,6 +178,8 @@ export class SocialAdEntityWriterService {
             destinationRaw: row.destinationRaw,
             destinationObservedAt: row.destinationObservedAt,
             creativeId: row.creativeId,
+            effectiveObjectStoryId: row.effectiveObjectStoryId,
+            effectiveInstagramMediaId: row.effectiveInstagramMediaId,
             dailyBudgetMinor: row.dailyBudgetMinor,
             lifetimeBudgetMinor: row.lifetimeBudgetMinor,
             budgetRemainingMinor: row.budgetRemainingMinor,

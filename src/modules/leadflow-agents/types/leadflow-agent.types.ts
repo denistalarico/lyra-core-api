@@ -96,6 +96,25 @@ export type LeadFlowAgentActivationPolicy = {
   automaticEffects?: { reply: false; crm: false; followUp: false };
 };
 
+/**
+ * IX3 (D-IX-6): when the agent answers a post/ad comment. Only a specific
+ * rule — keywords or a comment on an ad — and never `every_eligible`, which the
+ * PATCH and the evaluator both refuse. The action is the private reply; the
+ * optional public reply is this fixed text, never generated.
+ */
+export type LeadFlowAgentCommentActivationPolicy = {
+  version: 1;
+  trigger: 'manual' | 'keywords' | 'ad_referral';
+  keywords?: string[];
+  keywordMode?: 'word' | 'phrase_contains';
+  adFilters?: {
+    accountId?: string[];
+    campaignId?: string[];
+    adId?: string[];
+  };
+  publicReplyText?: string | null;
+};
+
 export interface LeadFlowAgentChannelPolicy {
   allowedChannels?: string[];
   defaultChannel?: string | null;
@@ -110,6 +129,8 @@ export interface LeadFlowAgentChannelPolicy {
    * canal sem entrada aqui cai em `activationPolicy`.
    */
   channelActivationPolicies?: Record<string, LeadFlowAgentActivationPolicy>;
+  /** Comments on posts/ads (IX3); absent means `manual` (off). */
+  commentActivationPolicy?: LeadFlowAgentCommentActivationPolicy;
   [key: string]: LeadFlowJsonValue | undefined;
 }
 

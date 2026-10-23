@@ -65,6 +65,8 @@ run('Paid media destination against PostgreSQL', () => {
       destinationObservedAt: OBSERVED_AT,
       destinationObserved: false,
       creativeId: null,
+      effectiveObjectStoryId: null,
+      effectiveInstagramMediaId: null,
       dailyBudgetMinor: '5000',
       lifetimeBudgetMinor: null,
       budgetRemainingMinor: null,

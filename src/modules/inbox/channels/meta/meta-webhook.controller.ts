@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   HttpCode,
+  Optional,
   Post,
   Query,
   Req,
@@ -26,6 +27,11 @@ import type { NormalizedInboundMessage } from '../types/normalized-inbound-messa
 import { WebhookLogService } from '../services/webhook-log.service';
 import { MessageStatusSyncService } from '../services/message-status-sync.service';
 import { MetaChannelUnavailableError } from './services/meta-channel-resolver.service';
+import {
+  hasMetaChanges,
+  hasMetaMessaging,
+  InboxCommentIngestionService,
+} from '../../comments/inbox-comment-ingestion.service';
 
 type MetaWebhookPayload =
   | MetaWhatsAppWebhookPayload
@@ -43,6 +49,10 @@ export class MetaWebhookController {
     private readonly inboundIngestionService: InboundMessageIngestionService,
     private readonly webhookLogService: WebhookLogService,
     private readonly messageStatusSyncService: MessageStatusSyncService,
+    // IX3: the `changes[]` branch (post/ad comments). Optional so the
+    // messaging path stands on its own when the comments module is absent.
+    @Optional()
+    private readonly commentIngestion?: InboxCommentIngestionService,
   ) {}
 
   @Get()
@@ -93,6 +103,22 @@ export class MetaWebhookController {
         metadata: { reason: 'unsupported_meta_payload' },
       });
       return { ok: true, ignored: true, reason: 'unsupported_meta_payload' };
+    }
+
+    // IX3: comments arrive as `entry[].changes[]` (Page `feed`, Instagram
+    // `comments`). They get their own log row; a body that also carries
+    // messaging events continues down the unchanged messaging path.
+    if (
+      this.commentIngestion &&
+      (workload === 'instagram' || workload === 'messenger') &&
+      hasMetaChanges(payload)
+    ) {
+      const comments = await this.commentIngestion.processWebhook({
+        workload,
+        payload,
+        signatureReceived: Boolean(signature),
+      });
+      if (!hasMetaMessaging(payload)) return comments;
     }
 
     try {
@@ -207,7 +233,9 @@ export class MetaWebhookController {
         externalAccountId: accountId,
         externalPhoneNumberId: phoneNumberId,
         externalMessageId:
-          results[0]?.externalMessageId ?? echoResults[0]?.externalMessageId ?? null,
+          results[0]?.externalMessageId ??
+          echoResults[0]?.externalMessageId ??
+          null,
         signatureReceived: Boolean(signature),
         messagesProcessed: results.length + echoResults.length,
         statusesProcessed: statusResults.length + statusWatermarkResults.length,
@@ -379,9 +407,7 @@ export class MetaWebhookController {
             statusWatermarks: [] as NormalizedMessageStatusWatermarkUpdate[],
           },
           normalizedReactions:
-            await this.whatsappMetaAdapter.normalizeReactions(
-              whatsappPayload,
-            ),
+            await this.whatsappMetaAdapter.normalizeReactions(whatsappPayload),
           normalizedEchoes: { messages: [] as NormalizedInboundMessage[] },
         };
       }
@@ -409,9 +435,7 @@ export class MetaWebhookController {
           normalized:
             await this.messengerMetaAdapter.normalize(messengerPayload),
           normalizedStatuses:
-            await this.messengerMetaAdapter.normalizeStatuses(
-              messengerPayload,
-            ),
+            await this.messengerMetaAdapter.normalizeStatuses(messengerPayload),
           normalizedReactions:
             await this.messengerMetaAdapter.normalizeReactions(
               messengerPayload,

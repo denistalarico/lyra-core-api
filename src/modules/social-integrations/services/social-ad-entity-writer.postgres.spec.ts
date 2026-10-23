@@ -64,6 +64,8 @@ run('SocialAdEntityWriterService against PostgreSQL', () => {
       destinationObservedAt: null,
       destinationObserved: false,
       creativeId: null,
+      effectiveObjectStoryId: null,
+      effectiveInstagramMediaId: null,
       dailyBudgetMinor: '5000',
       lifetimeBudgetMinor: null,
       budgetRemainingMinor: '0',

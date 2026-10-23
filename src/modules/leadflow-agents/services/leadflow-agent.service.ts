@@ -63,6 +63,7 @@ import type {
   LeadFlowAgentActivationPolicy,
   LeadFlowAgentBehaviorConfig,
   LeadFlowAgentChannelPolicy,
+  LeadFlowAgentCommentActivationPolicy,
   LeadFlowAgentReadiness,
   LeadFlowJsonObject,
 } from '../types/leadflow-agent.types';
@@ -366,6 +367,16 @@ export class LeadFlowAgentService {
         channelActivationPolicies: this.validateChannelActivationPolicies(
           dto.channelPolicy.channelActivationPolicies,
         ),
+        // Omitted = kept: a screen that does not know about comments must not
+        // switch the comment rule off by saving the channel rules.
+        commentActivationPolicy:
+          dto.channelPolicy.commentActivationPolicy === undefined
+            ? this.validateCommentActivationPolicy(
+                agent.channelPolicy?.commentActivationPolicy,
+              )
+            : this.validateCommentActivationPolicy(
+                dto.channelPolicy.commentActivationPolicy,
+              ),
       };
     }
     if (dto.avatarConfig !== undefined) agent.avatarConfig = dto.avatarConfig;
@@ -1152,6 +1163,94 @@ export class LeadFlowAgentService {
         followUp: false as const,
       },
       afterHandoff: 'require_explicit_return' as const,
+    };
+  }
+
+  /**
+   * IX3 (D-IX-6): comments answer only to a specific rule. `every_eligible`
+   * is refused here and in the evaluator — an agent answering every comment
+   * is spam in Meta's eyes (RK-IX-9).
+   */
+  private validateCommentActivationPolicy(
+    value: LeadFlowAgentCommentActivationPolicy | null | undefined,
+  ): LeadFlowAgentCommentActivationPolicy {
+    const off: LeadFlowAgentCommentActivationPolicy = {
+      version: 1,
+      trigger: 'manual',
+      keywords: [],
+      keywordMode: 'word',
+      adFilters: {},
+      publicReplyText: null,
+    };
+    if (value === undefined || value === null) return off;
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      throw new BadRequestException('Comment activation policy is invalid.');
+    }
+    if ((value.trigger as string) === 'every_eligible') {
+      throw new BadRequestException(
+        'Comment activation cannot answer every comment.',
+      );
+    }
+    if (!['manual', 'keywords', 'ad_referral'].includes(value.trigger)) {
+      throw new BadRequestException('Comment activation trigger is invalid.');
+    }
+    const keywords = value.keywords ?? [];
+    if (
+      !Array.isArray(keywords) ||
+      keywords.length > 50 ||
+      keywords.some(
+        (item) => typeof item !== 'string' || !item.trim() || item.length > 80,
+      )
+    ) {
+      throw new BadRequestException('Comment activation keywords are invalid.');
+    }
+    if (keywords.some((item) => /[.*+?^${}()|[\]\\]/.test(item))) {
+      throw new BadRequestException(
+        'Regular expressions are not allowed in activation keywords.',
+      );
+    }
+    if (value.trigger === 'keywords' && keywords.length === 0) {
+      throw new BadRequestException('Comment activation keywords are invalid.');
+    }
+    const adFilters: NonNullable<
+      LeadFlowAgentCommentActivationPolicy['adFilters']
+    > = {};
+    const rawFilters =
+      value.adFilters && typeof value.adFilters === 'object'
+        ? value.adFilters
+        : {};
+    for (const key of ['accountId', 'campaignId', 'adId'] as const) {
+      const list = rawFilters[key];
+      if (list === undefined) continue;
+      if (
+        !Array.isArray(list) ||
+        list.length > 50 ||
+        list.some(
+          (item) =>
+            typeof item !== 'string' || !/^[A-Za-z0-9_.:-]{1,180}$/.test(item),
+        )
+      ) {
+        throw new BadRequestException(
+          'Comment activation ad filters are invalid.',
+        );
+      }
+      adFilters[key] = list;
+    }
+    const publicReplyText =
+      typeof value.publicReplyText === 'string'
+        ? value.publicReplyText.trim()
+        : '';
+    if (publicReplyText.length > 280) {
+      throw new BadRequestException('Comment public reply text is too long.');
+    }
+    return {
+      version: 1,
+      trigger: value.trigger,
+      keywords: keywords.map((item) => item.trim()),
+      keywordMode:
+        value.keywordMode === 'phrase_contains' ? 'phrase_contains' : 'word',
+      adFilters,
+      publicReplyText: publicReplyText || null,
     };
   }
 

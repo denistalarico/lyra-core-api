@@ -277,6 +277,12 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.inbox.conversation.close.client', MANAGER_UP],
   ['leadflow.inbox.conversation.export.admin', ADMIN_UP],
   ['leadflow.inbox.conversation.delete.owner_only', OWNER_ONLY, true],
+  // IX3 — post/ad comments: no assignment exists, so every role that works
+  // the Inbox sees and answers them; deleting is irreversible on Meta and stays
+  // with Owner/Admin (D-IX-11).
+  ['leadflow.inbox.comment.view.client', ALL_ROLES],
+  ['leadflow.inbox.comment.reply.client', ALL_ROLES],
+  ['leadflow.inbox.comment.delete.admin', ADMIN_UP, true],
 
   // 10.5 LeadFlow - Channels
   ['leadflow.channels.channel.view.client', MANAGER_UP],

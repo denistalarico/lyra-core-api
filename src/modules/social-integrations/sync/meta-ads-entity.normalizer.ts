@@ -118,6 +118,8 @@ function base(
     // overrides it — a campaign and an ad set have no creative of their own,
     // and the ads beneath one ad set routinely render different ones.
     creativeId: null,
+    effectiveObjectStoryId: null,
+    effectiveInstagramMediaId: null,
     dailyBudgetMinor: parseMinorUnits(payload.daily_budget),
     lifetimeBudgetMinor: parseMinorUnits(payload.lifetime_budget),
     budgetRemainingMinor: parseMinorUnits(payload.budget_remaining),
@@ -313,6 +315,27 @@ export function normalizeAd(
     parentExternalId: adSetExternalId,
     campaignExternalId,
     creativeId: readCreativeId(payload.creative),
+    ...readCreativeStory(payload.creative),
+  };
+}
+
+/**
+ * The story/media ids an ad renders (IX3). Compared and joined on only —
+ * never a Graph path — so the shape check is the story id's own:
+ * `<page>_<post>` digits, and digits for the IG media.
+ */
+function readCreativeStory(value: unknown): {
+  effectiveObjectStoryId: string | null;
+  effectiveInstagramMediaId: string | null;
+} {
+  if (!isRecord(value)) {
+    return { effectiveObjectStoryId: null, effectiveInstagramMediaId: null };
+  }
+  const story = parseExternalId(value.effective_object_story_id);
+  const media = parseExternalId(value.effective_instagram_media_id);
+  return {
+    effectiveObjectStoryId: story && /^\d+_\d+$/.test(story) ? story : null,
+    effectiveInstagramMediaId: media && /^\d+$/.test(media) ? media : null,
   };
 }
 

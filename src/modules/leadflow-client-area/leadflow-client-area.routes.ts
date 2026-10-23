@@ -8,6 +8,7 @@ export type LeadFlowClientKind =
   | 'outbound'
   | 'settings'
   | 'followup-template'
+  | 'comment'
   | 'contact'
   | 'contact-list'
   | 'pipeline'
@@ -75,6 +76,14 @@ inbox('followup-template', 'PATCH', '/followup-templates/:id');
 inbox('followup-template', 'DELETE', '/followup-templates/:id');
 inbox('conversation', 'GET', '/conversations/:id/messaging-window');
 inbox('conversation', 'POST', '/conversations/:id/followup/send');
+// IX3: post/ad comments — every Inbox level reads, answers and hides (no
+// assignment exists). Deleting is a Danger Zone action (irreversible on Meta):
+// the guard admits it only for the company's Owner (`client_owner`).
+inbox('comment', 'GET', '/comments');
+inbox('comment', 'GET', '/comments/:commentId');
+for (const action of ['reply', 'hide', 'unhide', 'status'])
+  inbox('comment', 'POST', `/comments/:commentId/${action}`);
+inbox('comment', 'DELETE', '/comments/:commentId');
 for (const channel of ['whatsapp', 'instagram', 'facebook-messenger']) {
   inbox('outbound', 'POST', `/channels/${channel}/send-text`);
   inbox('outbound', 'POST', `/channels/${channel}/send-media`);

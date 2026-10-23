@@ -196,12 +196,29 @@ export const FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS = [
  * subscription request will succeed — the field list here does not grant
  * the capability by itself.
  */
-export const FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS = [
+export const FACEBOOK_PAGE_MESSAGING_WEBHOOK_FIELDS = [
   'messages',
   'message_deliveries',
   'message_reads',
   'message_reactions',
   'message_echoes',
+] as const;
+
+/**
+ * IX3: post/ad comments of the Page (`feed`, filtered to `item: 'comment'` by
+ * the Inbox). Requested on connect, but optional for the channel's health:
+ * messaging works without it, so a Page subscribed before IX3 must not show
+ * up as "reconnect required" — it is reported as comments-not-subscribed.
+ *
+ * Instagram `comments` is NOT listed anywhere on the Page edge: like
+ * `messaging_seen`, it is an Instagram-object field that lives in the app's
+ * webhook configuration, and the Page edge answers `(#100)` to it.
+ */
+export const FACEBOOK_PAGE_COMMENT_WEBHOOK_FIELDS = ['feed'] as const;
+
+export const FACEBOOK_PAGE_MESSENGER_WEBHOOK_FIELDS = [
+  ...FACEBOOK_PAGE_MESSAGING_WEBHOOK_FIELDS,
+  ...FACEBOOK_PAGE_COMMENT_WEBHOOK_FIELDS,
 ] as const;
 
 export type InstagramLoginWebhookField =
@@ -609,8 +626,7 @@ export class MetaGraphService {
 
     return {
       pageId: data.id.trim(),
-      pageName:
-        typeof data.name === 'string' ? data.name.trim() || null : null,
+      pageName: typeof data.name === 'string' ? data.name.trim() || null : null,
     };
   }
 

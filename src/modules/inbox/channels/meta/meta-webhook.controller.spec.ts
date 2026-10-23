@@ -682,3 +682,162 @@ describe('MetaWebhookController', () => {
     );
   });
 });
+
+describe('MetaWebhookController — IX3 changes[] branch', () => {
+  const previousSecret = process.env.META_APP_SECRET;
+  const previousInstagramSecret = process.env.META_INSTAGRAM_APP_SECRET;
+  const adapter = () => ({
+    normalize: jest.fn().mockResolvedValue({ messages: [] }),
+    normalizeStatuses: jest
+      .fn()
+      .mockResolvedValue({ statuses: [], statusWatermarks: [] }),
+    normalizeReactions: jest.fn().mockResolvedValue({ reactions: [] }),
+    normalizeEchoes: jest.fn().mockResolvedValue({ messages: [] }),
+  });
+  const instagramAdapter = adapter();
+  const messengerAdapter = adapter();
+  const webhookLog = { create: jest.fn().mockResolvedValue(undefined) };
+  const commentIngestion = {
+    processWebhook: jest
+      .fn()
+      .mockResolvedValue({ ok: true, commentsProcessed: 1 }),
+  };
+  const build = (withComments: boolean) =>
+    new MetaWebhookController(
+      adapter() as never,
+      instagramAdapter as never,
+      messengerAdapter as never,
+      { ingest: jest.fn(), ingestEcho: jest.fn() } as never,
+      webhookLog as never,
+      {} as never,
+      (withComments ? commentIngestion : undefined) as never,
+    );
+  const signed = (payload: { object: string }) => {
+    const rawBody = Buffer.from(JSON.stringify(payload));
+    const secret =
+      payload.object === 'instagram' ? 'instagram-secret' : 'whatsapp-secret';
+    return {
+      rawBody,
+      signature: `sha256=${createHmac('sha256', secret).update(rawBody).digest('hex')}`,
+    };
+  };
+  const feedPayload = {
+    object: 'page',
+    entry: [
+      {
+        id: 'page-1',
+        changes: [
+          {
+            field: 'feed',
+            value: {
+              item: 'comment',
+              verb: 'add',
+              comment_id: 'c_1',
+              post_id: 'p_1',
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    process.env.META_APP_SECRET = 'whatsapp-secret';
+    process.env.META_INSTAGRAM_APP_SECRET = 'instagram-secret';
+    jest.clearAllMocks();
+  });
+
+  afterAll(() => {
+    if (previousSecret === undefined) delete process.env.META_APP_SECRET;
+    else process.env.META_APP_SECRET = previousSecret;
+    if (previousInstagramSecret === undefined) {
+      delete process.env.META_INSTAGRAM_APP_SECRET;
+    } else {
+      process.env.META_INSTAGRAM_APP_SECRET = previousInstagramSecret;
+    }
+  });
+
+  it('a Page feed body goes to the comment branch and never to the messaging adapters', async () => {
+    const request = signed(feedPayload);
+    await expect(
+      build(true).receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        feedPayload as never,
+      ),
+    ).resolves.toEqual({ ok: true, commentsProcessed: 1 });
+    expect(commentIngestion.processWebhook).toHaveBeenCalledWith({
+      workload: 'messenger',
+      payload: feedPayload,
+      signatureReceived: true,
+    });
+    expect(messengerAdapter.normalize).not.toHaveBeenCalled();
+    expect(webhookLog.create).not.toHaveBeenCalled();
+  });
+
+  it('an Instagram comments body is signed with the Instagram secret and routed as instagram', async () => {
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig-1',
+          changes: [
+            { field: 'comments', value: { comment_id: 'c', text: 'oi' } },
+          ],
+        },
+      ],
+    };
+    const request = signed(payload);
+    await build(true).receiveWebhook(
+      request.signature,
+      { rawBody: request.rawBody } as never,
+      payload as never,
+    );
+    expect(commentIngestion.processWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ workload: 'instagram' }),
+    );
+    expect(instagramAdapter.normalize).not.toHaveBeenCalled();
+  });
+
+  it('a body with messaging and changes runs both paths', async () => {
+    const payload = {
+      object: 'page',
+      entry: [
+        ...feedPayload.entry,
+        { id: 'page-1', messaging: [{ message: { mid: 'm', text: 'oi' } }] },
+      ],
+    };
+    const request = signed(payload);
+    await expect(
+      build(true).receiveWebhook(
+        request.signature,
+        { rawBody: request.rawBody } as never,
+        payload as never,
+      ),
+    ).resolves.toMatchObject({ ok: true, provider: 'meta' });
+    expect(commentIngestion.processWebhook).toHaveBeenCalledTimes(1);
+    expect(messengerAdapter.normalize).toHaveBeenCalledWith(payload);
+  });
+
+  it('an invalid signature is refused before the comment branch', async () => {
+    const request = signed(feedPayload);
+    await expect(
+      build(true).receiveWebhook(
+        'sha256=deadbeef',
+        { rawBody: request.rawBody } as never,
+        feedPayload as never,
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(commentIngestion.processWebhook).not.toHaveBeenCalled();
+  });
+
+  it('without the comments module the messaging path behaves as before', async () => {
+    const request = signed(feedPayload);
+    await build(false).receiveWebhook(
+      request.signature,
+      { rawBody: request.rawBody } as never,
+      feedPayload as never,
+    );
+    expect(messengerAdapter.normalize).toHaveBeenCalledWith(feedPayload);
+  });
+});

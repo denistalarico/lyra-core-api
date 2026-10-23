@@ -28,6 +28,7 @@ function projectLeadFlowPermissions(
     const reads = [
       grant('leadflow.channels.channel.view.client', read),
       grant('leadflow.inbox.conversation.view.client', read),
+      grant('leadflow.inbox.comment.view.client', read),
     ];
     if (level === 'viewer') return reads;
     return [
@@ -40,6 +41,11 @@ function projectLeadFlowPermissions(
       ),
       grant('leadflow.inbox.conversation.close.client', ['POST'], own),
       grant('leadflow.inbox.conversation.view.client', ['POST'], own),
+      // IX3: comments have no assignment, so the operator's grant is
+      // company-wide. Deleting is a Danger Zone route: the guard lets it
+      // through only for the company's Owner (`client_owner`), at any level.
+      grant('leadflow.inbox.comment.reply.client', ['POST']),
+      grant('leadflow.inbox.comment.delete.admin', ['DELETE']),
       ...(level === 'manager'
         ? [
             // PATCH: quick replies (`/inbox/settings`); POST/DELETE as well

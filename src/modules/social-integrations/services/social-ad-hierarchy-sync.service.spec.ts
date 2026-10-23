@@ -37,6 +37,8 @@ function entity(
     destinationObservedAt: null,
     destinationObserved: false,
     creativeId: null,
+    effectiveObjectStoryId: null,
+    effectiveInstagramMediaId: null,
     dailyBudgetMinor: null,
     lifetimeBudgetMinor: null,
     budgetRemainingMinor: null,

@@ -84,6 +84,9 @@ import { InboxConversationEntity } from '../modules/inbox/entities/inbox-convers
 import { InboxMessageEntity } from '../modules/inbox/entities/inbox-message.entity';
 import { InboxSettingsEntity } from '../modules/inbox/entities/inbox-settings.entity';
 import { InboxFollowupTemplateEntity } from '../modules/inbox/entities/inbox-followup-template.entity';
+import { InboxCommentEntity } from '../modules/inbox/entities/inbox-comment.entity';
+import { InboxCommentContentEntity } from '../modules/inbox/entities/inbox-comment-content.entity';
+import { InboxCommentAgentActionEntity } from '../modules/inbox/entities/inbox-comment-agent-action.entity';
 import { InboxConversationParticipantEntity } from '../modules/inbox/entities/inbox-conversation-participant.entity';
 import { InboxConversationEventEntity } from '../modules/inbox/entities/inbox-conversation-event.entity';
 import { InboxAttributionObservationEntity } from '../modules/inbox/entities/inbox-attribution-observation.entity';
@@ -563,6 +566,9 @@ export const agencyEntities = [
   InboxMessageEntity,
   InboxSettingsEntity,
   InboxFollowupTemplateEntity,
+  InboxCommentEntity,
+  InboxCommentContentEntity,
+  InboxCommentAgentActionEntity,
   InboxConversationParticipantEntity,
   InboxConversationEventEntity,
   InboxAttributionObservationEntity,

@@ -29,9 +29,12 @@ describe('FacebookMessengerChannelHealthService', () => {
     expect(harness.meta.getFacebookPageIdentity).toHaveBeenCalledWith({
       pageAccessToken: 'decrypted-secret',
     });
-    expect(harness.meta.getFacebookPageWebhookSubscriptions).toHaveBeenCalledWith(
-      { pageId: 'facebook-page-id', pageAccessToken: 'decrypted-secret' },
-    );
+    expect(
+      harness.meta.getFacebookPageWebhookSubscriptions,
+    ).toHaveBeenCalledWith({
+      pageId: 'facebook-page-id',
+      pageAccessToken: 'decrypted-secret',
+    });
     expect(result).toMatchObject({
       ok: true,
       channelId: 'messenger-channel-id',
@@ -72,6 +75,31 @@ describe('FacebookMessengerChannelHealthService', () => {
     },
   );
 
+  it('IX3: a Page subscribed before `feed` stays healthy and reports comments as not subscribed', async () => {
+    const harness = createHarness();
+
+    const before = await harness.service.runHealthCheck(scopedInput);
+    expect(before).toMatchObject({
+      ok: true,
+      requiresReconnect: false,
+      missingWebhookFields: [],
+      commentsWebhookSubscribed: false,
+      missingCommentWebhookFields: ['feed'],
+    });
+
+    harness.meta.getFacebookPageWebhookSubscriptions.mockResolvedValue({
+      appSubscribed: true,
+      subscribedFields: [...REQUIRED_WEBHOOK_FIELDS, 'feed'],
+    });
+    await expect(
+      harness.service.runHealthCheck(scopedInput),
+    ).resolves.toMatchObject({
+      ok: true,
+      commentsWebhookSubscribed: true,
+      missingCommentWebhookFields: [],
+    });
+  });
+
   it('returns an unhealthy reconnect diagnosis when the app is not subscribed', async () => {
     const harness = createHarness();
     harness.meta.getFacebookPageWebhookSubscriptions.mockResolvedValue({
@@ -104,9 +132,7 @@ describe('FacebookMessengerChannelHealthService', () => {
     const harness = createHarness({ externalPageId: null });
 
     await expect(harness.service.runHealthCheck(scopedInput)).rejects.toThrow(
-      new BadRequestException(
-        'Messenger channel Page identity is missing.',
-      ),
+      new BadRequestException('Messenger channel Page identity is missing.'),
     );
     expect(harness.meta.getFacebookPageIdentity).not.toHaveBeenCalled();
   });
@@ -139,9 +165,7 @@ describe('FacebookMessengerChannelHealthService', () => {
       .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ConflictException);
-    expect(String((error as Error).message)).not.toContain(
-      'different-page-id',
-    );
+    expect(String((error as Error).message)).not.toContain('different-page-id');
     expect(String((error as Error).message)).not.toContain('decrypted-secret');
   });
 

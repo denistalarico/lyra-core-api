@@ -112,6 +112,16 @@ import { InboxFollowupTemplateEntity } from './entities/inbox-followup-template.
 import { InboxFollowupController } from './followup/inbox-followup.controller';
 import { InboxFollowupService } from './followup/inbox-followup.service';
 import { InboxFollowupTemplatesService } from './followup/inbox-followup-templates.service';
+import { InboxCommentEntity } from './entities/inbox-comment.entity';
+import { InboxCommentContentEntity } from './entities/inbox-comment-content.entity';
+import { InboxCommentAgentActionEntity } from './entities/inbox-comment-agent-action.entity';
+import { InboxCommentsController } from './comments/inbox-comments.controller';
+import { InboxCommentService } from './comments/inbox-comment.service';
+import { InboxCommentGraphClient } from './comments/inbox-comment-graph.client';
+import { InboxCommentAgentService } from './comments/inbox-comment-agent.service';
+import { InboxCommentIngestionService } from './comments/inbox-comment-ingestion.service';
+import { InboxCommentReconcileWorker } from './comments/inbox-comment-reconcile.worker';
+import { SocialAdStoryLookupRegistry } from './comments/social-ad-story-lookup.port';
 
 @Module({
   imports: [
@@ -129,6 +139,9 @@ import { InboxFollowupTemplatesService } from './followup/inbox-followup-templat
         InboxMessageEntity,
         InboxSettingsEntity,
         InboxFollowupTemplateEntity,
+        InboxCommentEntity,
+        InboxCommentContentEntity,
+        InboxCommentAgentActionEntity,
         InboxConversationParticipantEntity,
         InboxConversationEventEntity,
         InboxAttributionObservationEntity,
@@ -174,6 +187,7 @@ import { InboxFollowupTemplatesService } from './followup/inbox-followup-templat
     FacebookMessengerOutboundController,
     FacebookMessengerChannelHealthController,
     InboxFollowupController,
+    InboxCommentsController,
   ],
   providers: [
     InboxService,
@@ -232,6 +246,12 @@ import { InboxFollowupTemplatesService } from './followup/inbox-followup-templat
     InstagramContactEnrichmentService,
     InboxFollowupTemplatesService,
     InboxFollowupService,
+    InboxCommentGraphClient,
+    InboxCommentService,
+    InboxCommentAgentService,
+    InboxCommentIngestionService,
+    InboxCommentReconcileWorker,
+    SocialAdStoryLookupRegistry,
   ],
   exports: [
     InboxChannelLifecycleService,
@@ -251,6 +271,8 @@ import { InboxFollowupTemplatesService } from './followup/inbox-followup-templat
     MetaAssetDiscoveryService,
     WhatsAppChannelHealthService,
     ConversationOwnershipService,
+    // IX3: filled by InboxSocialAdLookupModule (Social side of the port).
+    SocialAdStoryLookupRegistry,
   ],
 })
 export class InboxModule {}

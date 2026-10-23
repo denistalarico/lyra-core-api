@@ -8,6 +8,12 @@ import { projectAgencyPermissions } from './client-area-agency-permission-projec
 
 const digest = (value: string) =>
   createHash('sha256').update(value.trim()).digest('hex');
+/** Exposed `@DangerousAction` routes; only the company's Owner passes the guard. */
+const OWNER_DANGEROUS_ROUTES = [
+  'inbox/comments/inbox-comments.controller.ts:remove',
+];
+const OWNER_DANGEROUS_KEYS = ['leadflow.inbox.comment.delete.admin'];
+
 describe('CA7 production route boundaries and Agency preservation', () => {
   it('keeps the Agency PermissionsGuard body byte-for-byte after the isolated dispatch', () => {
     const source = readFileSync(
@@ -44,7 +50,9 @@ describe('CA7 production route boundaries and Agency preservation', () => {
       for (const level of ['viewer', 'operator', 'manager'] as const)
         for (const entry of projectAgencyPermissions(module, level)) {
           expect(getPermissionDefinition(entry.key)).toBeDefined();
-          expect(getPermissionDefinition(entry.key)?.isDangerous).toBe(false);
+          // Dangerous keys only for the Owner-gated routes pinned below.
+          if (!OWNER_DANGEROUS_KEYS.includes(entry.key))
+            expect(getPermissionDefinition(entry.key)?.isDangerous).toBe(false);
           expect(entry.key).not.toMatch(
             /owner_only|danger_zone|settings.users|automations|stages.manage/,
           );
@@ -87,9 +95,14 @@ describe('CA7 production route boundaries and Agency preservation', () => {
                   ['RequirePermission', 'RequireAnyPermission'].includes(n),
                 ),
               ).toBe(true);
-              expect(effective).not.toContain('DangerousAction');
+              const route = `${relative}:${method.name?.getText()}`;
+              // Danger Zone routes stay out of the Client Area, except the
+              // ones listed here: the guard admits those only for the
+              // company's Owner (`client_owner`), audited (IX3, 2026-10-23).
+              if (!OWNER_DANGEROUS_ROUTES.includes(route))
+                expect(effective).not.toContain('DangerousAction');
               expect(relative).not.toMatch(/automations/);
-              exposed.push(`${relative}:${method.name?.getText()}`);
+              exposed.push(route);
             }
         }
     }
@@ -145,6 +158,13 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "inbox/channels/instagram/instagram-outbound.controller.ts:sendText",
        "inbox/channels/whatsapp/whatsapp-outbound.controller.ts:sendMedia",
        "inbox/channels/whatsapp/whatsapp-outbound.controller.ts:sendText",
+       "inbox/comments/inbox-comments.controller.ts:get",
+       "inbox/comments/inbox-comments.controller.ts:hide",
+       "inbox/comments/inbox-comments.controller.ts:list",
+       "inbox/comments/inbox-comments.controller.ts:remove",
+       "inbox/comments/inbox-comments.controller.ts:reply",
+       "inbox/comments/inbox-comments.controller.ts:setStatus",
+       "inbox/comments/inbox-comments.controller.ts:unhide",
        "inbox/followup/inbox-followup.controller.ts:createTemplate",
        "inbox/followup/inbox-followup.controller.ts:listTemplates",
        "inbox/followup/inbox-followup.controller.ts:messagingWindow",

@@ -206,6 +206,39 @@ describe('ad normalization', () => {
       expect(ad?.creativeId).toBe('1606435724534548');
     });
 
+    it('IX3: keeps the story and IG media the ad renders, shape-checked', () => {
+      const ad = normalizeAd(
+        {
+          id: '999',
+          adset_id: ADSET_ID,
+          creative: {
+            id: '1606435724534548',
+            effective_object_story_id: '100000000000001_200000000000001',
+            effective_instagram_media_id: '18000000000000001',
+          },
+        },
+        context,
+      );
+      expect(ad?.effectiveObjectStoryId).toBe(
+        '100000000000001_200000000000001',
+      );
+      expect(ad?.effectiveInstagramMediaId).toBe('18000000000000001');
+
+      const hostile = normalizeAd(
+        {
+          id: '999',
+          adset_id: ADSET_ID,
+          creative: {
+            effective_object_story_id: '1/../me',
+            effective_instagram_media_id: 'abc',
+          },
+        },
+        context,
+      );
+      expect(hostile?.effectiveObjectStoryId).toBeNull();
+      expect(hostile?.effectiveInstagramMediaId).toBeNull();
+    });
+
     it('drops the thumbnail URL that arrives beside it', () => {
       // The whole reason the id is what gets stored: Meta signs these with an
       // `oe` parameter that expires in about five days, so a persisted URL
