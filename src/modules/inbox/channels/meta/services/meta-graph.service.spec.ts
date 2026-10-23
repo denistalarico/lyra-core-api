@@ -554,8 +554,10 @@ describe('MetaGraphService Facebook assets', () => {
     expect(`${url.origin}${url.pathname}`).toBe(
       'https://graph.facebook.com/v26.0/page-1/subscribed_apps',
     );
+    // The Page edge rejects Instagram-object fields such as messaging_seen
+    // with (#100) and fails the whole reconnect.
     expect(url.searchParams.get('subscribed_fields')).toBe(
-      'messages,messaging_postbacks,message_reactions,messaging_seen',
+      'messages,messaging_postbacks,message_reactions',
     );
     expect(url.searchParams.has('access_token')).toBe(false);
     expect(fetchMock.mock.calls[0][1]).toEqual({

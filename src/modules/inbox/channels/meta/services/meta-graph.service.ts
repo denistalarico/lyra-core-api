@@ -174,11 +174,17 @@ export const INSTAGRAM_LOGIN_WEBHOOK_FIELDS = [
   'messaging_seen',
 ] as const;
 
+/**
+ * Fields a Facebook Page can subscribe for its linked Instagram account.
+ * `messaging_seen` is an Instagram-object field: it belongs to the app's
+ * Instagram webhook configuration, and the Page edge rejects the whole request
+ * with `(#100) Param subscribed_fields[3] must be one of …` when it is listed
+ * here (re-added in 7082a47, which broke every Facebook Login reconnect).
+ */
 export const FACEBOOK_PAGE_INSTAGRAM_WEBHOOK_FIELDS = [
   'messages',
   'messaging_postbacks',
   'message_reactions',
-  'messaging_seen',
 ] as const;
 
 /**
