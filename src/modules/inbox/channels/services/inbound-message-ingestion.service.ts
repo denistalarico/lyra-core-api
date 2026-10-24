@@ -132,6 +132,11 @@ export class InboundMessageIngestionService {
       ) {
         throw new Error('inbox_channel_conversation_company_scope_mismatch');
       }
+      const terminalConversationStatus =
+        conversation &&
+        (conversation.status === 'closed' || conversation.status === 'archived')
+          ? conversation.status
+          : null;
       const contactRelationship = this.contactRelationshipResolver
         ? await this.contactRelationshipResolver.resolve(manager, {
             tenantId: input.tenantId,
@@ -147,7 +152,12 @@ export class InboundMessageIngestionService {
             workspaceId: input.workspaceId,
             channelId: input.channelId,
             messageText: input.content,
-            conversationState: conversation?.ownershipState,
+            // A terminal conversation starts a fresh service cycle. Its prior
+            // human/paused/closed ownership must not block the current message;
+            // all other safety and channel policy exclusions still apply.
+            conversationState: terminalConversationStatus
+              ? undefined
+              : conversation?.ownershipState,
             internalContact: Boolean(internalContact),
             duplicate: false,
             qualificationStatus: qualification.status,
@@ -235,7 +245,10 @@ export class InboundMessageIngestionService {
         });
         conversation.qualificationStatus = 'internal';
         conversation.qualificationReason = 'workspace_internal_contact';
-        if (conversation.ownershipState === 'ai_active') {
+        if (
+          !terminalConversationStatus &&
+          conversation.ownershipState === 'ai_active'
+        ) {
           conversation.ownershipState = 'paused';
           conversation.ownershipVersion += 1;
           conversation.ownershipChangedAt = new Date();
@@ -257,6 +270,7 @@ export class InboundMessageIngestionService {
         conversation.qualificationReason = qualification.reason;
         if (
           activation.wouldActivate &&
+          !terminalConversationStatus &&
           conversation.ownershipState === 'paused'
         ) {
           conversation.ownershipState = 'ai_active';
@@ -265,6 +279,25 @@ export class InboundMessageIngestionService {
           conversation.aiEnabled = true;
           conversation.assignedAgentId = channel.defaultAgentId;
         }
+      }
+
+      if (terminalConversationStatus) {
+        const aiActive =
+          !internalContact &&
+          !explicitOptOut &&
+          qualification.status === 'qualified' &&
+          activation.wouldActivate;
+        conversation.ownershipState = aiActive ? 'ai_active' : 'paused';
+        conversation.ownershipVersion += 1;
+        conversation.ownershipChangedAt = occurredAt;
+        conversation.ownershipReason = internalContact
+          ? qualification.reason
+          : explicitOptOut
+            ? 'contact_opt_out'
+            : activation.reasonCode;
+        conversation.aiEnabled = aiActive;
+        conversation.assignedUserId = null;
+        conversation.assignedAgentId = aiActive ? channel.defaultAgentId : null;
       }
 
       const enrichedIdentity = this.createConversationIdentityMetadata(input);
@@ -520,11 +553,13 @@ export class InboundMessageIngestionService {
           },
         });
       if (!conversation) return null;
-      const channel = await manager.getRepository(InboxChannelEntity).findOneBy({
-        id: input.channelId,
-        tenantId: input.tenantId,
-        workspaceId: input.workspaceId,
-      });
+      const channel = await manager
+        .getRepository(InboxChannelEntity)
+        .findOneBy({
+          id: input.channelId,
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+        });
       if (
         !channel ||
         conversation.agencyClientId !== channel.agencyClientId ||

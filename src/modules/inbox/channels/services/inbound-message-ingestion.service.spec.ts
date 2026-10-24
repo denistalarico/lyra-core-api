@@ -10,7 +10,10 @@ import { InboxSettingsEntity } from '../../entities/inbox-settings.entity';
 import { InboundMessageIngestionService } from './inbound-message-ingestion.service';
 import type { NormalizedInboundMessage } from '../types/normalized-inbound-message';
 
-function createHarness(internalContact = false) {
+function createHarness(
+  internalContact = false,
+  activationPolicy?: { evaluate: jest.Mock },
+) {
   const state: {
     conversation: Record<string, any> | null;
     messages: Array<Record<string, any>>;
@@ -125,8 +128,10 @@ function createHarness(internalContact = false) {
     service: new InboundMessageIngestionService(
       dataSource as never,
       notification as never,
+      activationPolicy as never,
     ),
     notification,
+    activationPolicy,
   };
 }
 
@@ -194,6 +199,123 @@ describe('InboundMessageIngestionService durable invariants', () => {
     await harness.service.ingest(message('wamid.window-2'));
     expect(harness.state.batches).toHaveLength(2);
     expect(harness.state.batches[1].generation).toBe(2);
+  });
+
+  it.each([
+    ['closed', 'closed'],
+    ['archived', 'paused'],
+  ])(
+    'starts a fresh AI cycle for an existing contact when the conversation was %s',
+    async (status, ownershipState) => {
+      const activationPolicy = {
+        evaluate: jest.fn().mockResolvedValue({
+          wouldActivate: true,
+          policyVersion: 1,
+          reasonCode: 'eligible_channel',
+          exclusions: [],
+        }),
+      };
+      const harness = createHarness(false, activationPolicy);
+      await harness.service.ingest(message('wamid.first-cycle'));
+      harness.state.batches[0].status = 'completed';
+      Object.assign(harness.state.conversation!, {
+        contactId: 'existing-contact',
+        status,
+        ownershipState,
+        aiEnabled: false,
+        assignedAgentId: null,
+        closedAt: status === 'closed' ? new Date() : null,
+        archivedAt: status === 'archived' ? new Date() : null,
+      });
+
+      const result = await harness.service.ingest(
+        message(`wamid.returning-${status}`),
+      );
+
+      expect(result.conversation).toMatchObject({
+        contactId: 'existing-contact',
+        status: 'new',
+        ownershipState: 'ai_active',
+        aiEnabled: true,
+        assignedAgentId: 'agent',
+        assignedUserId: null,
+        closedAt: null,
+        archivedAt: null,
+      });
+      expect(activationPolicy.evaluate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ conversationState: undefined }),
+      );
+      expect(harness.state.batches).toHaveLength(2);
+    },
+  );
+
+  it('keeps an open paused conversation under human control', async () => {
+    const activationPolicy = {
+      evaluate: jest
+        .fn()
+        .mockResolvedValueOnce({
+          wouldActivate: true,
+          policyVersion: 1,
+          reasonCode: 'eligible_channel',
+          exclusions: [],
+        })
+        .mockResolvedValue({
+          wouldActivate: false,
+          policyVersion: 1,
+          reasonCode: 'conversation_human_or_closed',
+          exclusions: ['conversation_human_or_closed'],
+        }),
+    };
+    const harness = createHarness(false, activationPolicy);
+    await harness.service.ingest(message('wamid.open-first'));
+    harness.state.batches[0].status = 'completed';
+    Object.assign(harness.state.conversation!, {
+      contactId: 'existing-contact',
+      status: 'open',
+      ownershipState: 'paused',
+      aiEnabled: false,
+      assignedAgentId: null,
+    });
+
+    const result = await harness.service.ingest(message('wamid.open-return'));
+
+    expect(result.conversation).toMatchObject({
+      status: 'open',
+      ownershipState: 'paused',
+      aiEnabled: false,
+      assignedAgentId: null,
+    });
+    expect(activationPolicy.evaluate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ conversationState: 'paused' }),
+    );
+    expect(harness.state.batches).toHaveLength(1);
+  });
+
+  it('reopens an archived opt-out conversation without reactivating AI', async () => {
+    const harness = createHarness();
+    await harness.service.ingest(message('wamid.opt-out-first'));
+    harness.state.batches[0].status = 'completed';
+    Object.assign(harness.state.conversation!, {
+      status: 'archived',
+      ownershipState: 'ai_active',
+      aiEnabled: true,
+      assignedAgentId: 'agent',
+      archivedAt: new Date(),
+    });
+    const optOut = message('wamid.opt-out-return');
+    optOut.content = 'parar';
+
+    const result = await harness.service.ingest(optOut);
+
+    expect(result.conversation).toMatchObject({
+      status: 'new',
+      ownershipState: 'paused',
+      ownershipReason: 'contact_opt_out',
+      aiEnabled: false,
+      assignedAgentId: null,
+      archivedAt: null,
+    });
+    expect(harness.state.batches).toHaveLength(1);
   });
 });
 
