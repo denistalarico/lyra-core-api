@@ -40,6 +40,9 @@ export async function resolveRoutedCrmTarget(
     channelId: string | null;
     businessMode: string;
   },
+  // A lead form answered on the Webchat is a real opportunity even when the
+  // channel has no AI attendant; every other caller is AI-driven.
+  options: { requireAiEnabled?: boolean } = {},
 ): Promise<InboxCrmRoutingResult> {
   if (!input.channelId) return { ok: false, errorCode: 'channel_unavailable' };
 
@@ -55,7 +58,7 @@ export async function resolveRoutedCrmTarget(
     !channel ||
     channel.status !== 'active' ||
     channel.connectionStatus !== 'connected' ||
-    !channel.aiEnabled
+    (options.requireAiEnabled !== false && !channel.aiEnabled)
   ) {
     return { ok: false, errorCode: 'channel_unavailable' };
   }

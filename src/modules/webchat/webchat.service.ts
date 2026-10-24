@@ -2,13 +2,15 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Raw, Repository } from 'typeorm';
+import { FindOptionsWhere, In, Not, Raw, Repository } from 'typeorm';
 import { FilesService } from '../../common/files/files.service';
 import { InboxService } from '../inbox/inbox.service';
 import { InboxSettingsService } from '../inbox/inbox-settings.service';
+import { InboxWebchatLeadService } from '../inbox/services/inbox-webchat-lead.service';
 import type { InboxCompanyScope } from '../inbox/inbox-company-scope';
 import { ContactsService } from '../contacts/contacts.service';
 import type { RequestContext } from '../../common/context/request-context.interface';
@@ -48,7 +50,10 @@ export class WebchatService {
     private readonly filesService: FilesService,
     private readonly inboxSettingsService: InboxSettingsService,
     private readonly contactsService: ContactsService,
+    private readonly webchatLeads: InboxWebchatLeadService,
   ) {}
+
+  private readonly logger = new Logger(WebchatService.name);
 
   async listWidgets(ctx: RequestContext) {
     const workspaceId = this.requireWorkspaceId(ctx);
@@ -412,6 +417,20 @@ export class WebchatService {
 
     const savedVisitor = await this.visitorsRepository.save(visitor);
 
+    // The lead form can be answered mid-conversation; link what is open now.
+    if (savedVisitor.name && savedVisitor.phone) {
+      const openConversations = await this.conversationsRepository.find({
+        where: {
+          widgetId: widget.id,
+          visitorId: savedVisitor.id,
+          status: Not(In(['closed', 'archived'])),
+        },
+      });
+      for (const conversation of openConversations) {
+        await this.captureLeadQuietly(widget, conversation.id, savedVisitor);
+      }
+    }
+
     return this.toPublicVisitor(savedVisitor);
   }
 
@@ -478,6 +497,7 @@ export class WebchatService {
         visitorIpHash: visitor.ipHash,
       },
     });
+    await this.captureLeadQuietly(widget, savedConversation.id, visitor);
 
     if (widget.initialMessage) {
       const systemMessage = this.messagesRepository.create({
@@ -679,6 +699,7 @@ export class WebchatService {
       conversationMetadata,
       createdAt: savedMessage.createdAt,
     });
+    await this.captureLeadQuietly(widget, conversation.id, visitor);
 
     return this.toPublicMessage(savedMessage);
   }
@@ -1003,6 +1024,34 @@ export class WebchatService {
     }
 
     return next;
+  }
+
+  /**
+   * A visitor who left name and phone becomes a LeadFlow contact and a CRM
+   * opportunity in the Agency. Never fails the visitor's request: the chat must
+   * keep working even when the CRM side refuses (ambiguous phone, no pipeline).
+   */
+  private async captureLeadQuietly(
+    widget: WebchatWidgetEntity,
+    conversationId: string,
+    visitor: WebchatVisitorEntity | null,
+  ) {
+    if (!visitor?.name || !visitor.phone) return;
+    try {
+      const outcome = await this.webchatLeads.captureLead(
+        { tenantId: widget.tenantId, workspaceId: widget.workspaceId },
+        conversationId,
+        { name: visitor.name, phone: visitor.phone, email: visitor.email },
+      );
+      if (outcome.status === 'skipped') {
+        this.logger.debug({ event: 'webchat_lead_skipped', reason: outcome.reason });
+      }
+    } catch (error) {
+      this.logger.warn({
+        event: 'webchat_lead_capture_failed',
+        error: error instanceof Error ? error.message : 'unknown',
+      });
+    }
   }
 
   private inboxScopeFromWidget(widget: WebchatWidgetEntity): InboxCompanyScope {

@@ -82,6 +82,7 @@ import { LeadFlowAgentsModule } from '../leadflow-agents/leadflow-agents.module'
 import { InboxOutboxAdminController } from './inbox-outbox-admin.controller';
 import { InboxGovernedAutonomyPolicyService } from './runtime/inbox-governed-autonomy-policy.service';
 import { InboxGovernedActionWorker } from './services/inbox-governed-action.worker';
+import { InboxWebchatLeadService } from './services/inbox-webchat-lead.service';
 import { InboxAutonomyAdminService } from './services/inbox-autonomy-admin.service';
 import { InboxAutonomyAdminController } from './inbox-autonomy-admin.controller';
 import { ConversationPlaybookStateService } from './runtime/conversation-playbook-state.service';
@@ -241,6 +242,7 @@ import { TelnyxSmsProvider } from './channels/sms/telnyx/telnyx-sms.provider';
     InboxMetaOperationLedgerService,
     InboxGovernedAutonomyPolicyService,
     InboxGovernedActionWorker,
+    InboxWebchatLeadService,
     InboxAutonomyAdminService,
     ConversationPlaybookStateService,
     InstagramOAuthService,
@@ -290,6 +292,7 @@ import { TelnyxSmsProvider } from './channels/sms/telnyx/telnyx-sms.provider';
     MetaAssetDiscoveryService,
     WhatsAppChannelHealthService,
     ConversationOwnershipService,
+    InboxWebchatLeadService,
     // IX3: filled by InboxSocialAdLookupModule (Social side of the port).
     SocialAdStoryLookupRegistry,
   ],

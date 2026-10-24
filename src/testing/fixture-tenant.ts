@@ -94,6 +94,9 @@ export const FIXTURE_DELETE_ORDER: readonly string[] = [
   'leadflow_telemetry_audit_events',
   'leadflow_telemetry_identity_links',
   'platform_permission_audit_events',
+  // No foreign keys to contacts or opportunities; children (participants,
+  // reminders) are not written by any fixture yet.
+  'scheduled_items',
   'crm_opportunity_tags',
   'crm_opportunity_events',
   'crm_opportunities',

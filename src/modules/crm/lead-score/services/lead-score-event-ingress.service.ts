@@ -7,6 +7,7 @@ import type { RequestContext } from '../../../../common/context/request-context.
 import { LeadFlowEventDeliveryEntity } from '../../../leadflow-events/entities';
 import { CrmOpportunityEntity } from '../../entities/crm-opportunity.entity';
 import { LeadScoreEngineService } from './lead-score-engine.service';
+import { findOpportunityIdsForAppointment } from './lead-score-appointments';
 
 /** This consumer's own key in the shared delivery table. */
 export const LEAD_SCORE_EVENT_CONSUMER = 'leadflow.crm.lead_score' as const;
@@ -27,8 +28,23 @@ const RECALCULATION_EVENTS = new Set<string>([
   'leadflow.inbox.conversation.message.received',
 ]);
 
+/**
+ * Agenda events move the meeting rules (confirmed/attended vs no-show). Every
+ * lifecycle change of an appointment arrives as one of these; `updated` covers
+ * reschedules and contact changes. Delivered by the fan-out since migration
+ * 1800600000000.
+ */
+const APPOINTMENT_EVENTS = new Set<string>([
+  'leadflow.calendar.appointment.created',
+  'leadflow.calendar.appointment.updated',
+  'leadflow.calendar.appointment.confirmed',
+  'leadflow.calendar.appointment.completed',
+  'leadflow.calendar.appointment.no_show',
+  'leadflow.calendar.appointment.cancelled',
+]);
+
 type IngressDecision =
-  | { status: 'recalculate'; conversationId: string }
+  | { status: 'recalculate'; conversationId?: string; appointmentId?: string }
   | { status: 'skipped'; reason: string };
 
 /**
@@ -211,6 +227,9 @@ export class LeadScoreEventIngressService implements OnApplicationShutdown {
   private async handle(
     delivery: LeadFlowEventDeliveryEntity,
   ): Promise<IngressDecision> {
+    if (APPOINTMENT_EVENTS.has(delivery.eventName)) {
+      return this.handleAppointment(delivery);
+    }
     if (!RECALCULATION_EVENTS.has(delivery.eventName)) {
       return { status: 'skipped', reason: 'event_not_scored' };
     }
@@ -260,6 +279,41 @@ export class LeadScoreEventIngressService implements OnApplicationShutdown {
     });
 
     return { status: 'recalculate', conversationId };
+  }
+
+  /**
+   * An appointment can belong to more than one open cycle of the same contact,
+   * so every linked opportunity is rescored. Each recalculation carries the
+   * source event id, which keeps a redelivery from writing a second snapshot.
+   */
+  private async handleAppointment(
+    delivery: LeadFlowEventDeliveryEntity,
+  ): Promise<IngressDecision> {
+    if (delivery.aggregateType !== 'scheduled_item' || !delivery.aggregateId) {
+      return { status: 'skipped', reason: 'no_appointment_in_envelope' };
+    }
+    const scope = {
+      tenantId: delivery.tenantId,
+      workspaceId: delivery.workspaceId,
+    };
+    const opportunityIds = await findOpportunityIdsForAppointment(
+      this.dataSource.manager,
+      scope,
+      delivery.aggregateId,
+    );
+    if (opportunityIds.length === 0) {
+      return { status: 'skipped', reason: 'no_linked_opportunity' };
+    }
+    for (const opportunityId of opportunityIds) {
+      await this.engine.recalculate(scope as RequestContext, {
+        opportunityId,
+        reason: 'appointment_changed',
+        sourceEventId: delivery.sourceEventId,
+        sourceEventName: delivery.eventName,
+        correlationId: null,
+      });
+    }
+    return { status: 'recalculate', appointmentId: delivery.aggregateId };
   }
 
   async pruneExpired(limit = 100): Promise<number> {

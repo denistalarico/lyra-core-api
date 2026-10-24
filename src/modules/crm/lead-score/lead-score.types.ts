@@ -76,7 +76,20 @@ export enum LeadScoreFeatureKey {
   EssentialFieldsPresent = 'essential_fields_present',
   LifecycleStatus = 'lifecycle_status',
   StageIsLost = 'stage_is_lost',
+  /** Outcome of the opportunity's latest non-cancelled appointment. */
+  LatestAppointmentOutcome = 'latest_appointment_outcome',
 }
+
+/** Value of `LatestAppointmentOutcome`. */
+export type LeadScoreAppointmentOutcome =
+  /** No appointment linked to this opportunity cycle. */
+  | 'none'
+  /** Scheduled but not confirmed yet (pending or rescheduled). */
+  | 'pending'
+  /** The lead confirmed the meeting or attended it. */
+  | 'accepted'
+  /** The lead did not show up. */
+  | 'no_show';
 
 /**
  * A loaded feature, or the reason it could not be loaded.
@@ -195,6 +208,7 @@ export type LeadScoreCalculationReason =
   | 'lifecycle_changed'
   | 'conversation_linked'
   | 'inbound_message'
+  | 'appointment_changed'
   | 'manual_recalculation'
   | 'backfill';
 

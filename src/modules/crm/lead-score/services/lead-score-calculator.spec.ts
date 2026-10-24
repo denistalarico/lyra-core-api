@@ -3,6 +3,10 @@ import {
   LEAD_SCORE_POLICY_VERSION_V1,
 } from '../policy/lead-score-rules-v1.policy';
 import {
+  LEAD_SCORE_POLICY_V2,
+  LEAD_SCORE_POLICY_VERSION_V2,
+} from '../policy/lead-score-rules-v2.policy';
+import {
   LeadScoreFeatureKey,
   LeadScoreRuleId,
   maxAchievableScore,
@@ -342,6 +346,64 @@ describe('LEAD_SCORE_POLICY_V1', () => {
       if (rule.availability === 'active' && rule.kind === 'contribution') {
         expect(rule.features.length).toBeGreaterThan(0);
       }
+    }
+  });
+});
+
+describe('LEAD_SCORE_POLICY_V2 meeting rules', () => {
+  const policy = LEAD_SCORE_POLICY_V2;
+  const withMeeting = (outcome: string) =>
+    baseFeatures({
+      [LeadScoreFeatureKey.LatestAppointmentOutcome]: value(outcome),
+      [LeadScoreFeatureKey.EssentialFieldsPresent]: value(2),
+    });
+
+  it('activates only the two Agenda rules on top of V1', () => {
+    const activated = policy.rules
+      .filter((rule) => rule.availability === 'active')
+      .map((rule) => rule.id);
+    expect(activated).toEqual(
+      expect.arrayContaining([
+        LeadScoreRuleId.MeetingAccepted,
+        LeadScoreRuleId.MeetingNoShow,
+      ]),
+    );
+    expect(activated).toHaveLength(
+      LEAD_SCORE_POLICY_V1.rules.filter((rule) => rule.availability === 'active')
+        .length + 2,
+    );
+    expect(maxAchievableScore(policy)).toBe(65);
+  });
+
+  it('awards a confirmed or attended meeting', () => {
+    const result = calculateLeadScore(policy, withMeeting('accepted'), AT);
+
+    expect(result.policyVersion).toBe(LEAD_SCORE_POLICY_VERSION_V2);
+    expect(entryFor(result, LeadScoreRuleId.MeetingAccepted)?.outcome).toBe(
+      'contributed',
+    );
+    expect(entryFor(result, LeadScoreRuleId.MeetingNoShow)?.outcome).toBe(
+      'not_met',
+    );
+    expect(result.score).toBe(15 + 20);
+  });
+
+  it('penalises a no-show instead of awarding the meeting', () => {
+    const result = calculateLeadScore(policy, withMeeting('no_show'), AT);
+
+    expect(entryFor(result, LeadScoreRuleId.MeetingAccepted)?.outcome).toBe(
+      'not_met',
+    );
+    expect(entryFor(result, LeadScoreRuleId.MeetingNoShow)?.appliedPoints).toBe(
+      -20,
+    );
+    expect(result.score).toBe(0);
+  });
+
+  it('scores nothing for a pending meeting or none at all', () => {
+    for (const outcome of ['pending', 'none']) {
+      const result = calculateLeadScore(policy, withMeeting(outcome), AT);
+      expect(result.score).toBe(15);
     }
   });
 });

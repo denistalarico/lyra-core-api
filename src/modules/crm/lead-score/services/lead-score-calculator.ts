@@ -168,6 +168,25 @@ function evaluateRule(
       });
     }
 
+    // Both read the latest appointment, so at most one of them applies.
+    case LeadScoreRuleId.MeetingAccepted: {
+      const outcome = stringOf(
+        features[LeadScoreFeatureKey.LatestAppointmentOutcome],
+      );
+      return decide(base, outcome === 'accepted', {
+        latestAppointmentOutcome: outcome,
+      });
+    }
+
+    case LeadScoreRuleId.MeetingNoShow: {
+      const outcome = stringOf(
+        features[LeadScoreFeatureKey.LatestAppointmentOutcome],
+      );
+      return decide(base, outcome === 'no_show', {
+        latestAppointmentOutcome: outcome,
+      });
+    }
+
     case LeadScoreRuleId.LostOrDiscarded: {
       const status = stringOf(features[LeadScoreFeatureKey.LifecycleStatus]);
       const stageIsLost = boolOf(features[LeadScoreFeatureKey.StageIsLost]);

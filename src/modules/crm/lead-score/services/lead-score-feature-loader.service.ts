@@ -11,6 +11,7 @@ import {
   type LeadScoreFeatureSet,
   type LeadScorePolicy,
 } from '../lead-score.types';
+import { loadLatestAppointmentOutcome } from './lead-score-appointments';
 
 export interface LeadScoreFeatureLoadResult {
   features: LeadScoreFeatureSet;
@@ -163,6 +164,15 @@ export class LeadScoreFeatureLoaderService {
           observedAt,
         });
       }
+    }
+
+    if (wanted.has(LeadScoreFeatureKey.LatestAppointmentOutcome)) {
+      queryCount += 1;
+      set(LeadScoreFeatureKey.LatestAppointmentOutcome, {
+        available: true,
+        value: await loadLatestAppointmentOutcome(manager, opportunity),
+        observedAt,
+      });
     }
 
     return { features, queryCount, durationMs: Date.now() - startedAt };

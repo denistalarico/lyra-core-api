@@ -3,7 +3,7 @@ import type {
   LeadScorePolicy,
   LeadScorePolicyProvider,
 } from '../lead-score.types';
-import { LEAD_SCORE_POLICY_V1 } from './lead-score-rules-v1.policy';
+import { LEAD_SCORE_POLICY_V2 } from './lead-score-rules-v2.policy';
 
 /**
  * Serves the policy compiled into the backend.
@@ -20,6 +20,6 @@ import { LEAD_SCORE_POLICY_V1 } from './lead-score-rules-v1.policy';
 @Injectable()
 export class StaticLeadScorePolicyProvider implements LeadScorePolicyProvider {
   getActivePolicy(): Promise<LeadScorePolicy> {
-    return Promise.resolve(LEAD_SCORE_POLICY_V1);
+    return Promise.resolve(LEAD_SCORE_POLICY_V2);
   }
 }
