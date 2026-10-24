@@ -454,9 +454,13 @@ export class InboxService {
 
     this.applyContextualConversationScope(qb, ctx);
 
-    if (filters.status) {
+    if (filters.status && filters.status !== 'all') {
       qb.andWhere('conversation.status = :status', {
         status: filters.status,
+      });
+    } else {
+      qb.andWhere('conversation.status != :archivedStatus', {
+        archivedStatus: 'archived',
       });
     }
 
