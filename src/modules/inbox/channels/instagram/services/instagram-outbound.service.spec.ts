@@ -10,9 +10,15 @@ import {
 
 describe('InstagramOutboundService', () => {
   const originalFetch = global.fetch;
+  const originalHumanAgentFlag = process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED;
 
   afterEach(() => {
     global.fetch = originalFetch;
+    if (originalHumanAgentFlag === undefined) {
+      delete process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED;
+    } else {
+      process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED = originalHumanAgentFlag;
+    }
     jest.restoreAllMocks();
   });
 
@@ -294,6 +300,7 @@ describe('InstagramOutboundService', () => {
 
   describe('standard messaging window', () => {
     it('blocks text when the latest inbound message is older than 24 hours', async () => {
+      process.env.INBOX_META_HUMAN_AGENT_TAG_ENABLED = 'false';
       const harness = createHarness();
       harness.messagesRepository.findOne.mockImplementation(
         ({ where }: { where: Record<string, unknown> }) =>

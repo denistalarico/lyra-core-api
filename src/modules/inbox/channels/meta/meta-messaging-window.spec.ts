@@ -2,6 +2,7 @@
 import {
   evaluateMetaWindow,
   loadMetaMessagingWindow,
+  metaHumanAgentTagEnabled,
   resolveMetaMessagingWindow,
 } from './meta-messaging-window';
 
@@ -11,6 +12,16 @@ const at = (iso: string) => new Date(iso);
 describe('Meta messaging window (D-IX-4)', () => {
   const lastInbound = { occurredAt: at('2026-10-20T12:00:00.000Z') };
   const on = { adWindow7dEnabled: true, humanAgentTagEnabled: true };
+
+  it('keeps the human reply extension on unless an operator explicitly disables it', () => {
+    expect(metaHumanAgentTagEnabled({})).toBe(true);
+    expect(
+      metaHumanAgentTagEnabled({ INBOX_META_HUMAN_AGENT_TAG_ENABLED: 'true' }),
+    ).toBe(true);
+    expect(
+      metaHumanAgentTagEnabled({ INBOX_META_HUMAN_AGENT_TAG_ENABLED: 'false' }),
+    ).toBe(false);
+  });
 
   it('is closed when the lead never wrote', () => {
     const window = resolveMetaMessagingWindow(null, null, on);

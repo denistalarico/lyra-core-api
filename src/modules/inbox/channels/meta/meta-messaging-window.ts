@@ -54,7 +54,7 @@ export function metaAdWindow7dEnabled(
 export function metaHumanAgentTagEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return env.INBOX_META_HUMAN_AGENT_TAG_ENABLED === 'true';
+  return env.INBOX_META_HUMAN_AGENT_TAG_ENABLED !== 'false';
 }
 
 /**
