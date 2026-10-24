@@ -99,26 +99,33 @@ run('AgencyContactsService permanent deletion PostgreSQL', () => {
     ).rejects.toThrow('Contact not found.');
   });
 
-  it('refuses contacts linked to an Inbox conversation', async () => {
+  it('detaches an Inbox conversation and deletes the contact', async () => {
     const contactId = await insertContact();
-    await AgencyDataSource.query(
+    const [conversation] = await AgencyDataSource.query<Array<{ id: string }>>(
       `INSERT INTO inbox_conversations
         (tenant_id,workspace_id,contact_id,status,source,business_mode,
          ai_enabled,ownership_state,ownership_version,qualification_status,scope_kind)
-       VALUES ($1,$2,$3,'open','whatsapp','general',false,'paused',1,'unknown','agency')`,
+       VALUES ($1,$2,$3,'open','whatsapp','general',false,'paused',1,'unknown','agency')
+       RETURNING id`,
       [tenantId, workspaceId, contactId],
     );
     await expect(
       service.permanentlyDeleteContact(ctx, contactId),
-    ).rejects.toThrow('conversas ou mensagens vinculadas');
+    ).resolves.toEqual({ deleted: true });
+    const [row] = await AgencyDataSource.query<
+      Array<{ contact_id: string | null }>
+    >('SELECT contact_id FROM inbox_conversations WHERE id=$1', [
+      conversation.id,
+    ]);
+    expect(row.contact_id).toBeNull();
     expect(
       await AgencyDataSource.getRepository(ContactEntity).existsBy({
         id: contactId,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('refuses contacts linked to a CRM opportunity', async () => {
+  it('detaches a CRM opportunity and clears its contact snapshot', async () => {
     const contactId = await insertContact();
     const pipelineId = randomUUID();
     const stageId = randomUUID();
@@ -134,13 +141,33 @@ run('AgencyContactsService permanent deletion PostgreSQL', () => {
     );
     await AgencyDataSource.query(
       `INSERT INTO crm_opportunities
-        (tenant_id,workspace_id,pipeline_id,stage_id,contact_id,title,scope_kind)
-       VALUES ($1,$2,$3,$4,$5,'Opportunity','agency')`,
+        (tenant_id,workspace_id,pipeline_id,stage_id,contact_id,contact_name,
+         contact_email,title,scope_kind)
+       VALUES ($1,$2,$3,$4,$5,'Disposable contact','lead@example.com',
+               'Opportunity','agency')`,
       [tenantId, workspaceId, pipelineId, stageId, contactId],
     );
     await expect(
       service.permanentlyDeleteContact(ctx, contactId),
-    ).rejects.toThrow('oportunidades ou atividades de CRM vinculadas');
+    ).resolves.toEqual({ deleted: true });
+    const [row] = await AgencyDataSource.query<
+      Array<{
+        title: string;
+        contact_id: string | null;
+        contact_name: string | null;
+        contact_email: string | null;
+      }>
+    >(
+      `SELECT title, contact_id, contact_name, contact_email
+         FROM crm_opportunities WHERE tenant_id=$1`,
+      [tenantId],
+    );
+    expect(row).toEqual({
+      title: 'Opportunity',
+      contact_id: null,
+      contact_name: null,
+      contact_email: null,
+    });
   });
 
   it('does not expose or delete a contact from another workspace', async () => {

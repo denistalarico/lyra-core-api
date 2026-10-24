@@ -1267,6 +1267,7 @@ export class AgencyContactsService {
         });
         if (!contact) throw new NotFoundException('Contact not found.');
 
+        await this.detachLeadFlowContactReferences(manager, ctx, contact.id);
         const references = await this.findRetainedContactReferences(
           manager,
           ctx,
@@ -1323,6 +1324,48 @@ export class AgencyContactsService {
     }
   }
 
+  /**
+   * LeadFlow records (conversations, opportunities, appointments, CSAT) survive
+   * the contact: they lose the link and go back to "no contact", offering
+   * "add contact" again. The opportunity's contact snapshot is cleared with
+   * it, since it is a copy of the deleted person's data. Commercial,
+   * contractual and financial history still blocks the deletion.
+   */
+  private async detachLeadFlowContactReferences(
+    manager: import('typeorm').EntityManager,
+    ctx: RequestContext,
+    contactId: string,
+  ) {
+    const params = [contactId, ctx.tenantId, this.requireWorkspaceId(ctx)];
+    const scope = 'contact_id = $1 AND tenant_id = $2 AND workspace_id = $3';
+
+    await manager.query(
+      `UPDATE crm_opportunities
+          SET contact_id = NULL, contact_name = NULL, contact_email = NULL,
+              contact_phone = NULL, row_version = row_version + 1,
+              updated_at = now()
+        WHERE ${scope}`,
+      params,
+    );
+    for (const table of [
+      'inbox_conversations',
+      'leadflow_csat_responses',
+      'scheduled_items',
+      'scheduled_item_participants',
+    ]) {
+      await manager.query(
+        `UPDATE ${table} SET contact_id = NULL, updated_at = now() WHERE ${scope}`,
+        params,
+      );
+    }
+    for (const table of ['inbox_conversation_participants', 'inbox_messages']) {
+      await manager.query(
+        `UPDATE ${table} SET contact_id = NULL WHERE ${scope}`,
+        params,
+      );
+    }
+  }
+
   private async findRetainedContactReferences(
     manager: import('typeorm').EntityManager,
     ctx: RequestContext,
@@ -1340,6 +1383,8 @@ export class AgencyContactsService {
       'agency_contact_bank_accounts',
       'contact_company_links',
       'leadflow_contact_companies',
+      // Channel identity (CASCADE): the next inbound message starts unlinked.
+      'inbox_channel_contact_identities',
     ]);
     const columns = await manager.query<
       Array<{ table_name: string; columns: string[] }>
