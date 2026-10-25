@@ -85,6 +85,8 @@ import { LeadFlowOperationsActionService } from './services/leadflow-operations-
     LeadFlowAgentRuntimeConfigService,
     OperationsRoomStateService,
     OperationsRoomRealtimeHealthService,
+    // OR3: the Client Area Operations Room gateway shares the same bus.
+    OperationsRoomEventBusService,
   ],
 })
 export class LeadFlowAgentsModule {}

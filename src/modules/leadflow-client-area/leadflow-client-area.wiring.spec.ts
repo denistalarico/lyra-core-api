@@ -9,12 +9,18 @@ import { ClientAreaAuthorizationService } from '../client-area/services/client-a
 import type { ClientAreaContext } from '../client-area/client-area.types';
 import { InboxModule } from '../inbox/inbox.module';
 import { InboxRealtimeEventBusService } from '../inbox/realtime/inbox-realtime-event-bus.service';
+import { LeadFlowAgentsModule } from '../leadflow-agents/leadflow-agents.module';
+import { OperationsRoomEventBusService } from '../leadflow-agents/realtime/operations-room-event-bus.service';
 import { LeadFlowClientAreaModule } from './leadflow-client-area.module';
 import { LEADFLOW_CLIENT_AREA_ROUTES } from './leadflow-client-area.routes';
 
 jest.mock('otplib', () => ({ verify: jest.fn() }));
 const off = jest.fn();
 const bus = { onEvent: jest.fn(() => off), onResync: jest.fn(() => off) };
+const roomBus = {
+  onEvent: jest.fn(() => off),
+  onResyncRequired: jest.fn(() => off),
+};
 @Global()
 @Module({
   providers: [
@@ -39,6 +45,11 @@ class FixtureClientAuth {}
   exports: [InboxRealtimeEventBusService],
 })
 class FixtureInboxBus {}
+@Module({
+  providers: [{ provide: OperationsRoomEventBusService, useValue: roomBus }],
+  exports: [OperationsRoomEventBusService],
+})
+class FixtureRoomBus {}
 describe('CA11 production module init wiring', () => {
   it('registers four adapters and subscribes/unsubscribes through actual Nest lifecycle without booting products', async () => {
     const mod = await Test.createTestingModule({
@@ -52,6 +63,8 @@ describe('CA11 production module init wiring', () => {
       .useModule(FixtureClientAuth)
       .overrideModule(InboxModule)
       .useModule(FixtureInboxBus)
+      .overrideModule(LeadFlowAgentsModule)
+      .useModule(FixtureRoomBus)
       .compile();
     try {
       await mod.init();
@@ -82,9 +95,11 @@ describe('CA11 production module init wiring', () => {
       }
       expect(bus.onEvent).toHaveBeenCalledTimes(1);
       expect(bus.onResync).toHaveBeenCalledTimes(1);
+      expect(roomBus.onEvent).toHaveBeenCalledTimes(1);
+      expect(roomBus.onResyncRequired).toHaveBeenCalledTimes(1);
     } finally {
       await mod.close();
     }
-    expect(off).toHaveBeenCalledTimes(2);
+    expect(off).toHaveBeenCalledTimes(4);
   });
 });

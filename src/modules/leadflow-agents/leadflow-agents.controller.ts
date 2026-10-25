@@ -66,6 +66,7 @@ export class LeadFlowAgentsController {
     return this.agentService.list(ctx);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Get('room/state')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
   async roomState(@RequestContextData() ctx: RequestContext) {
@@ -80,6 +81,7 @@ export class LeadFlowAgentsController {
     );
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Get('room/events')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.view)
   async roomEvents(
@@ -108,6 +110,7 @@ export class LeadFlowAgentsController {
     );
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Get('room/actions')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
   listRoomActions(
@@ -116,6 +119,7 @@ export class LeadFlowAgentsController {
     return this.operationsActionService.list(ctx);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post('room/actions')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
   proposeRoomAction(
@@ -125,6 +129,7 @@ export class LeadFlowAgentsController {
     return this.operationsActionService.propose(ctx, dto);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post('room/actions/:actionId/confirm')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
   confirmRoomAction(
@@ -135,6 +140,7 @@ export class LeadFlowAgentsController {
     return this.operationsActionService.confirm(ctx, actionId, dto);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Post('room/actions/:actionId/cancel')
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
   cancelRoomAction(

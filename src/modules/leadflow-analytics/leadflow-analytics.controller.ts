@@ -16,6 +16,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -128,6 +129,9 @@ export class LeadFlowAnalyticsController {
     return this.overview.getOverview(ctx, query);
   }
 
+  // OR3: the Operations Room chat KPIs reach the Client Area company-scoped
+  // (`resolveCompanyAwareScope`); the bridge proves level and references.
+  @ClientAreaExposed('leadflow_agents')
   @Get('commercial-journey')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
@@ -140,6 +144,7 @@ export class LeadFlowAnalyticsController {
     return this.analytics.getCommercialJourney(ctx, query);
   }
 
+  @ClientAreaExposed('leadflow_agents')
   @Get('operational-overview')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,

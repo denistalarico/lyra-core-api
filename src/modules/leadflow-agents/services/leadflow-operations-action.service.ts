@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
+import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
@@ -280,18 +281,18 @@ export class LeadFlowOperationsActionService {
 
   private async resolveActiveSettings(ctx: RequestContext) {
     const workspaceId = this.requireWorkspaceId(ctx);
-    const managedClientId =
-      ctx.managedContext?.operatingMode === 'client' &&
-      ctx.managedContext.clientId
-        ? ctx.managedContext.clientId
-        : null;
+    // OR3: the settings row is per company. Filtering by AgencyClient alone
+    // let Company A read/confirm Company B's proposals of the same client.
+    // Client mode without a company fails closed (CC2G).
+    const scope = resolveCompanyAwareScope(ctx);
     const settings = await this.settingsRepository.findOne({
-      where: managedClientId
+      where: scope.agencyClientId
         ? {
             tenantId: ctx.tenantId,
             workspaceId,
             contextType: LeadFlowSettingsContextType.Client,
-            agencyClientId: managedClientId,
+            agencyClientId: scope.agencyClientId,
+            companyContextId: scope.companyContextId as string,
           }
         : {
             tenantId: ctx.tenantId,

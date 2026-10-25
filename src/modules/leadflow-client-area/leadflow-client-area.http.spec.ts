@@ -51,6 +51,7 @@ import { CrmController } from '../crm/crm.controller';
 import { AgencyContactsController } from '../agency/agency-contacts.controller';
 import { LeadFlowAgendaController } from '../leadflow-agenda/leadflow-agenda.controller';
 import { LeadFlowAgentsController } from '../leadflow-agents/leadflow-agents.controller';
+import { LeadFlowAnalyticsController } from '../leadflow-analytics/leadflow-analytics.controller';
 import { LeadFlowClientAreaScopeService } from './leadflow-client-area-scope.service';
 import { LeadFlowClientAreaInterceptor } from './leadflow-client-area.interceptor';
 import {
@@ -80,6 +81,8 @@ const fixtureResult = () => ({
   createdByUserId: user,
   conversation: { id: own },
   message: { id: own, externalMessageId: 'mocked' },
+  // OR3: `room/state` and `room/events` read the visible agents first.
+  items: [],
 });
 const controllers = [
   InboxController,
@@ -96,6 +99,7 @@ const controllers = [
   AgencyContactsController,
   LeadFlowAgendaController,
   LeadFlowAgentsController,
+  LeadFlowAnalyticsController,
 ];
 describe('CA11 actual product controllers through the real HTTP bridge', () => {
   let app: INestApplication, jwt: JwtService, level: ClientAreaAccessLevel;
@@ -480,6 +484,48 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     await call(send).expect(403);
     expect(calls).toHaveLength(0);
     await call(window).expect(200);
+  });
+  it('OR3: every Agents level sees the room and its KPIs; only Manager (the Owner) proposes or confirms', async () => {
+    const route = (method: string, path: string) =>
+      LEADFLOW_CLIENT_AREA_ROUTES.find(
+        (item) => item.method === method && item.path === path,
+      )!;
+    const reads = [
+      route('GET', '/leadflow/agents/room/state'),
+      route('GET', '/leadflow/agents/room/events'),
+      route('GET', '/leadflow/analytics/commercial-journey'),
+      route('GET', '/leadflow/analytics/operational-overview'),
+    ];
+    const writes = [
+      route('POST', '/leadflow/agents/room/actions'),
+      route('POST', '/leadflow/agents/room/actions/:actionId/confirm'),
+      route('POST', '/leadflow/agents/room/actions/:actionId/cancel'),
+    ];
+    const list = route('GET', '/leadflow/agents/room/actions');
+    for (const current of ['viewer', 'operator'] as const) {
+      level = current;
+      accountRole = 'client_member';
+      for (const read of reads) await call(read).expect(200);
+      calls.length = 0;
+      for (const write of writes)
+        await call(write, company, own, { expectedRevision: 1 }).expect(403);
+      // Listing proposals is part of acting on them (Agency: `manage`).
+      await call(list).expect(403);
+      expect(calls).toHaveLength(0);
+    }
+    level = 'manager';
+    for (const write of writes)
+      await call(write, company, own, { expectedRevision: 1 }).expect(201);
+    await call(list).expect(200);
+    // Q-OR-2: the Owner resolves to `manager` with no stored level.
+    expect(
+      resolveMemberAccess('client_owner', { leadflow_agents: true }, {})
+        .leadflow_agents,
+    ).toEqual({ available: true, level: 'manager' });
+    // A KPI filter of another company never reaches the analytics service.
+    calls.length = 0;
+    await call(reads[3]).query({ channelId: foreign }).expect(404);
+    expect(calls).toHaveLength(0);
   });
   it('accepts the Agency DTO shape instead of a parallel field list', async () => {
     const patch = LEADFLOW_CLIENT_AREA_ROUTES.find(

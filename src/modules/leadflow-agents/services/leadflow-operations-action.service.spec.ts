@@ -1,4 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
+import type { RequestContext } from '../../../common/context/request-context.interface';
+import { CompanyContextRequiredException } from '../../../common/context/company-aware-scope';
 import type { DataSource, Repository } from 'typeorm';
 import { LeadFlowClientSettingsEntity } from '../../leadflow-settings/entities';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
@@ -79,7 +81,7 @@ function createHarness() {
     workspaceId: settings.workspaceId,
     userId: '00000000-0000-4000-8000-000000000003',
   };
-  return { service, ctx, actions, events };
+  return { service, ctx, actions, events, settingsRepository };
 }
 
 describe('LeadFlowOperationsActionService', () => {
@@ -137,5 +139,39 @@ describe('LeadFlowOperationsActionService', () => {
         expectedRevision: proposed.revision,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('OR3: resolves the company settings row by client and company, never the client alone', async () => {
+    const harness = createHarness();
+    const clientCtx = {
+      ...harness.ctx,
+      managedContext: {
+        operatingMode: 'client',
+        clientId: '00000000-0000-4000-8000-0000000000c1',
+        companyContextId: '00000000-0000-4000-8000-0000000000a1',
+      },
+    } as unknown as RequestContext;
+    await harness.service.list(clientCtx);
+    expect(harness.settingsRepository.findOne).toHaveBeenLastCalledWith({
+      where: {
+        tenantId: harness.ctx.tenantId,
+        workspaceId: harness.ctx.workspaceId,
+        contextType: LeadFlowSettingsContextType.Client,
+        agencyClientId: '00000000-0000-4000-8000-0000000000c1',
+        companyContextId: '00000000-0000-4000-8000-0000000000a1',
+      },
+    });
+    // Client mode without a company fails closed (CC2G) before any read.
+    harness.settingsRepository.findOne.mockClear();
+    await expect(
+      harness.service.list({
+        ...clientCtx,
+        managedContext: {
+          ...clientCtx.managedContext,
+          companyContextId: null,
+        },
+      } as unknown as RequestContext),
+    ).rejects.toBeInstanceOf(CompanyContextRequiredException);
+    expect(harness.settingsRepository.findOne).not.toHaveBeenCalled();
   });
 });

@@ -98,7 +98,12 @@ function projectLeadFlowPermissions(
         ];
   }
   if (module === 'leadflow_agents') {
-    const reads = [grant('leadflow.agents.agent.view.client', read)];
+    const reads = [
+      grant('leadflow.agents.agent.view.client', read),
+      // OR3: the Operations Room chat KPIs; only the two exposed analytics
+      // routes carry this key on the bridge.
+      grant('leadflow.analytics.reports.view.operational', read),
+    ];
     return level !== 'manager'
       ? reads
       : [
@@ -106,6 +111,9 @@ function projectLeadFlowPermissions(
           ...['configure', 'activate', 'deactivate', 'publish'].map((action) =>
             grant(`leadflow.agents.agent.${action}.admin`, ['POST', 'PATCH']),
           ),
+          // OR3: listing the room proposals (`GET room/actions`) is part of
+          // acting on them, as in the Agency; no other exposed GET uses it.
+          grant('leadflow.agents.agent.configure.admin', read),
           // CA11.1: only the exposed binding route carries this key; the scope adapter
           // requires an explicit company channel and agent (never the workspace sweep).
           grant('leadflow.channels.channel.update.admin', ['POST']),

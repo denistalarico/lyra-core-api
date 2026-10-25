@@ -21,7 +21,10 @@ export type LeadFlowClientKind =
   | 'reminder'
   | 'agent'
   | 'preset'
-  | 'catalog';
+  | 'catalog'
+  | 'room'
+  | 'room-action'
+  | 'analytics';
 export type LeadFlowClientRoute = {
   method: string;
   path: string;
@@ -165,6 +168,17 @@ for (const action of ['activate', 'pause', 'publish', 'archive', 'unarchive'])
   agent('agent', 'POST', `/:id/${action}`);
 // CA11.1: the agent page binds a company channel to an explicit agent (or clears it).
 add('leadflow_agents', 'channel', 'POST', '/inbox/channels/bindings/reconcile');
+// OR3: the Operations Room. Reads follow the Agents level; proposals need the
+// `manager` grant (Owner resolves to `manager`, D-OR-5).
+agent('room', 'GET', '/room/state');
+agent('room', 'GET', '/room/events');
+agent('room-action', 'GET', '/room/actions');
+agent('room-action', 'POST', '/room/actions');
+for (const action of ['confirm', 'cancel'])
+  agent('room-action', 'POST', `/room/actions/:actionId/${action}`);
+// OR3: the room chat KPIs, company-scoped by the analytics services.
+for (const path of ['commercial-journey', 'operational-overview'])
+  add('leadflow_agents', 'analytics', 'GET', `/leadflow/analytics/${path}`);
 
 /**
  * Closed method+template contract (D-02 item 8). Controller opt-ins and the frontend transport
