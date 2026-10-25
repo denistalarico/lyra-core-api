@@ -94,6 +94,8 @@ const policyFields: Record<string, readonly string[]> = {
     'direction',
   ],
   'PATCH /inbox/settings': ['quickReplies'],
+  // OR4: scope never travels in an Orion turn; the selected agent is proved below.
+  'POST /orion/turns': ['text', 'surface', 'agentId', 'clientTurnId'],
 };
 const object = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -191,6 +193,13 @@ export class LeadFlowClientAreaScopeService implements OnModuleInit {
       );
       if (!modes[0] || modes[0].mode !== query.businessMode) return null;
     }
+    // OR4: the agent selected in the room must be one of this company's.
+    if (
+      route.kind === 'orion' &&
+      body.agentId != null &&
+      !(await load('agent', body.agentId))
+    )
+      return null;
     let primary: Row | null = null;
     let kind = route.kind;
     let primaryId: unknown =

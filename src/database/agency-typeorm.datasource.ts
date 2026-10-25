@@ -2,6 +2,7 @@ import { CreateInboxFollowupTemplates1800300000000 } from './migrations/18003000
 import { CreateInboxComments1800400000000 } from './migrations/1800400000000-create-inbox-comments';
 import { AddInboxSmsChannelNumberIndex1800500000000 } from './migrations/1800500000000-add-inbox-sms-channel-number-index';
 import { FanoutAppointmentsToLeadScore1800600000000 } from './migrations/1800600000000-fanout-appointments-to-lead-score';
+import { CreateOrionTurnsAndHelpSearch1800700000000 } from './migrations/1800700000000-create-orion-turns-and-help-search';
 import { AddSurfaceToTrustedDevices1800200000000 } from './migrations/1800200000000-add-surface-to-trusted-devices';
 import { CreateClientAreaAnalyticsDashboards1800100000000 } from './migrations/1800100000000-create-client-area-analytics-dashboards';
 import { CreateFinanceReceivableWriteOffs1799900000000 } from './migrations/1799900000000-create-finance-receivable-write-offs';
@@ -564,5 +565,6 @@ export const AgencyDataSource = new DataSource({
     CreateInboxComments1800400000000,
     AddInboxSmsChannelNumberIndex1800500000000,
     FanoutAppointmentsToLeadScore1800600000000,
+    CreateOrionTurnsAndHelpSearch1800700000000,
   ],
 });

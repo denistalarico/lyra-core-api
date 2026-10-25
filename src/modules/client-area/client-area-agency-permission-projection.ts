@@ -104,10 +104,18 @@ function projectLeadFlowPermissions(
       // routes carry this key on the bridge.
       grant('leadflow.analytics.reports.view.operational', read),
     ];
+    // OR4: a free-text turn of the Orion (`POST /orion/turns`, the only
+    // exposed route carrying this key). It spends the agency's AI budget.
+    const orion: ClientAreaAgencyGrant = {
+      ...grant('leadflow.agents.agent.use.client', ['POST']),
+      cost: 'ai',
+    };
+    if (level === 'viewer') return reads;
     return level !== 'manager'
-      ? reads
+      ? [...reads, orion]
       : [
           ...reads,
+          orion,
           ...['configure', 'activate', 'deactivate', 'publish'].map((action) =>
             grant(`leadflow.agents.agent.${action}.admin`, ['POST', 'PATCH']),
           ),

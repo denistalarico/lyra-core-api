@@ -52,6 +52,7 @@ import { AgencyContactsController } from '../agency/agency-contacts.controller';
 import { LeadFlowAgendaController } from '../leadflow-agenda/leadflow-agenda.controller';
 import { LeadFlowAgentsController } from '../leadflow-agents/leadflow-agents.controller';
 import { LeadFlowAnalyticsController } from '../leadflow-analytics/leadflow-analytics.controller';
+import { OrionController } from '../orion/orion.controller';
 import { LeadFlowClientAreaScopeService } from './leadflow-client-area-scope.service';
 import { LeadFlowClientAreaInterceptor } from './leadflow-client-area.interceptor';
 import {
@@ -100,10 +101,13 @@ const controllers = [
   LeadFlowAgendaController,
   LeadFlowAgentsController,
   LeadFlowAnalyticsController,
+  OrionController,
 ];
 describe('CA11 actual product controllers through the real HTTP bridge', () => {
   let app: INestApplication, jwt: JwtService, level: ClientAreaAccessLevel;
   let accountRole: 'client_owner' | 'client_member';
+  // OR4: the company's switch for AI-cost actions (an Orion turn is one).
+  let allowAiCostActions: boolean;
   const saved = { ...process.env },
     calls: unknown[][] = [];
   const fakeService = new Proxy(
@@ -247,6 +251,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
                 membershipId: randomUUID(),
                 role: 'client_member',
                 accountRole,
+                allowAiCostActions,
                 modules,
                 permissions: new Set(),
                 memberAccess: resolveMemberAccess('client_member', modules, {
@@ -298,6 +303,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     level = 'manager';
     // Owner: the only account role a Danger Zone route admits (IX3).
     accountRole = 'client_owner';
+    allowAiCostActions = true;
     calls.length = 0;
     process.env.CLIENT_AREA_BRIDGE_ENABLED = 'true';
   });
@@ -539,6 +545,42 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     await call(settings, company, own, { quickReplies: [] }).expect(200);
     calls.length = 0;
     await call(settings, company, own, { leadRules: [] }).expect(404);
+    expect(calls).toHaveLength(0);
+  });
+  it('OR4: every Agents level reads the Orion status; a turn is operator+, AI-cost gated, scope-free and company-proved', async () => {
+    const route = (method: string, path: string) =>
+      LEADFLOW_CLIENT_AREA_ROUTES.find(
+        (item) => item.method === method && item.path === path,
+      )!;
+    const status = route('GET', '/orion/status');
+    const turn = route('POST', '/orion/turns');
+    level = 'viewer';
+    accountRole = 'client_member';
+    await call(status).expect(200);
+    calls.length = 0;
+    await call(turn, company, own, { text: 'oi' }).expect(403);
+    expect(calls).toHaveLength(0);
+    level = 'operator';
+    await call(turn, company, own, { text: 'oi', agentId: own }).expect(200);
+    expect(calls).toHaveLength(1);
+    calls.length = 0;
+    // Scope never travels in the body, and a foreign agent is not this company's.
+    await call(turn, company, own, {
+      text: 'oi',
+      companyContextId: company,
+    }).expect(404);
+    await call(turn, company, own, { text: 'oi', tenantId: tenant }).expect(
+      404,
+    );
+    await call(turn, company, own, { text: 'oi', agentId: foreign }).expect(
+      404,
+    );
+    expect(calls).toHaveLength(0);
+    allowAiCostActions = false;
+    const refused = await call(turn, company, own, { text: 'oi' }).expect(403);
+    expect((refused.body as { code?: string }).code).toBe(
+      'client_area_cost_action_disabled',
+    );
     expect(calls).toHaveLength(0);
   });
   it('denies viewer writes, operator items owned by others, and routes without exposure', async () => {

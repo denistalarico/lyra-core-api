@@ -24,7 +24,8 @@ export type LeadFlowClientKind =
   | 'catalog'
   | 'room'
   | 'room-action'
-  | 'analytics';
+  | 'analytics'
+  | 'orion';
 export type LeadFlowClientRoute = {
   method: string;
   path: string;
@@ -179,6 +180,10 @@ for (const action of ['confirm', 'cancel'])
 // OR3: the room chat KPIs, company-scoped by the analytics services.
 for (const path of ['commercial-journey', 'operational-overview'])
   add('leadflow_agents', 'analytics', 'GET', `/leadflow/analytics/${path}`);
+// OR4: the Orion in the room. Status follows the Agents level; a turn is an
+// AI-cost action (operator/manager, company AI switch on).
+add('leadflow_agents', 'orion', 'GET', '/orion/status');
+add('leadflow_agents', 'orion', 'POST', '/orion/turns');
 
 /**
  * Closed method+template contract (D-02 item 8). Controller opt-ins and the frontend transport

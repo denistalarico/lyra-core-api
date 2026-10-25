@@ -232,6 +232,8 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "media-assets/media-asset.controller.ts:getContent",
        "media-assets/media-asset.controller.ts:list",
        "media-assets/media-asset.controller.ts:upload",
+       "orion/orion.controller.ts:status",
+       "orion/orion.controller.ts:turn",
        "projects/controllers/project-boards.controller.ts:getMyTasksBoard",
        "projects/controllers/project-boards.controller.ts:getProjectTasksBoard",
        "projects/controllers/project-boards.controller.ts:getProjectsBoard",

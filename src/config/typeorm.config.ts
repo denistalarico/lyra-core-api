@@ -13,6 +13,7 @@ import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 import { MediaAssetEntity } from '../common/media-assets';
 import { AiOperationalCostEntity } from '../modules/ai-costs/entities';
+import { OrionTurnEntity } from '../modules/orion/entities';
 import {
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
@@ -475,6 +476,8 @@ export const agencyEntities = [
   CreativeProductionEventEntity,
   // CS6-B: provider-neutral AI cost ledger (Finance reads it, never providers).
   AiOperationalCostEntity,
+  // OR4: Orion turns (audit + monthly budget ledger).
+  OrionTurnEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
   SocialApprovalRequestEntity,
