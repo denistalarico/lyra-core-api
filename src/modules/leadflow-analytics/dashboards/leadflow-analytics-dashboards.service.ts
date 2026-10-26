@@ -35,7 +35,6 @@ export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
   { channel: 'commercial', name: 'Comercial' },
   { channel: 'lead_quality', name: 'Qualidade dos leads' },
   { channel: 'automations', name: 'Automações' },
-  { channel: 'recommendations', name: 'Sugestões' },
 ];
 
 export type LeadFlowAnalyticsDashboardView = {

@@ -81,7 +81,7 @@ run('CA12 dashboards and daily company isolation (Agency test only)', () => {
       ),
     ).rejects.toMatchObject({ code: '23514' });
     const items = await service.list(a, null);
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(5);
     expect(items.filter((item) => item.isDefault)).toHaveLength(1);
     for (const item of items)
       expect(parseDashboardLayout(item.layout)).toEqual(item.layout);
@@ -98,7 +98,7 @@ run('CA12 dashboards and daily company isolation (Agency test only)', () => {
       }),
     ).rejects.toMatchObject({ status: 409 });
   });
-  it('concurrent lazy seeding produces one default and one fixed screen per section', async () => {
+  it('concurrent lazy seeding does not create or recreate a recommendations screen', async () => {
     const second = AgencyDataSource.createQueryRunner();
     await second.connect();
     try {
@@ -120,8 +120,19 @@ run('CA12 dashboards and daily company isolation (Agency test only)', () => {
         'commercial',
         'lead_quality',
         'automations',
-        'recommendations',
       ]);
+      expect(
+        await runner.query(
+          `SELECT count(*)::int AS total
+             FROM leadflow_analytics_dashboards
+            WHERE tenant_id = $1
+              AND workspace_id = $2
+              AND agency_client_id = $3
+              AND company_context_id = $4
+              AND channel_key = 'recommendations'`,
+          [tenantId, workspaceId, clientId, a.companyContextId],
+        ),
+      ).toEqual([{ total: 0 }]);
     } finally {
       await second.query('SET search_path TO public');
       await second.release();
