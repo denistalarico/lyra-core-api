@@ -2,6 +2,9 @@ import { SocialAdStoryLookupRegistry } from '../inbox/comments/social-ad-story-l
 import { InboxSocialAdLookupModule } from './inbox-social-ad-lookup.module';
 import { SocialAdStoryLookupAdapter } from './services/social-ad-story-lookup.adapter';
 
+// The Inbox module graph reaches otplib (ESM-only) through the Client Area.
+jest.mock('otplib', () => ({ verify: jest.fn() }));
+
 /**
  * IX3 item 7 — the ad-story port is actually filled at runtime.
  *

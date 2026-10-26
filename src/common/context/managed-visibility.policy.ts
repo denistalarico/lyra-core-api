@@ -152,7 +152,8 @@ const OPERATIONAL_DOMAINS: VisibilityDomainPolicy[] = [
     key: 'leadflow.agents',
     productKey: 'leadflow',
     allowedScopes: ACTIVE_ONLY,
-    routePrefixes: ['leadflow/agents'],
+    // OR4: the Orion of the Operations Room, gated by the agents permissions.
+    routePrefixes: ['leadflow/agents', 'orion'],
     authority: 'leadflow agent configuration of the active company',
     rationale:
       'Agent instructions and prompts are company assets and internal ' +
