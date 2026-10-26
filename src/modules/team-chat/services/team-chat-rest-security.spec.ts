@@ -259,6 +259,7 @@ function makeServices() {
     channelsService,
     publisher,
     assetAccess as never,
+    { schedule: jest.fn() } as never,
   );
 
   return { channelsService, messagesService, publisher, members };

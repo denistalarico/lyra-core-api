@@ -30,6 +30,7 @@ import { TeamChatChannelsService } from './team-chat-channels.service';
 import { TeamChatNotificationPublisher } from './team-chat-notification.publisher';
 import { TeamChatChannelKind, TeamChatChannelVisibility } from '../enums';
 import { isElevatedRole, type TeamChatContext } from './team-chat-access';
+import { TeamChatOrionMentionService } from './team-chat-orion-mention.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -47,6 +48,7 @@ export class TeamChatMessagesService {
     private readonly channelsService: TeamChatChannelsService,
     private readonly teamChatNotificationPublisher: TeamChatNotificationPublisher,
     private readonly assetAccess: AssetAccessService,
+    private readonly orionMentions: TeamChatOrionMentionService,
   ) {}
 
   /**
@@ -194,6 +196,8 @@ export class TeamChatMessagesService {
         });
       }
     }
+
+    this.orionMentions.schedule({ context, channelId, message: saved });
 
     return this.authorizeMessage(saved, context.userId);
   }

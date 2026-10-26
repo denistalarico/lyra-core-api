@@ -56,6 +56,23 @@ export interface TeamChatCardPostInput {
   source?: { module: string; resourceId?: string | null };
 }
 
+/** A plain-text platform reply linked to a human message thread. */
+export interface TeamChatAgentReplyInput {
+  tenantId: string;
+  workspaceId: string;
+  channelId: string;
+  parentMessageId: string;
+  dedupeKey: string;
+  sender: TeamChatCardSender;
+  body: string;
+  replyTo: {
+    id: string;
+    senderDisplayName: string | null;
+    body: string | null;
+  };
+  source?: { module: string; resourceId?: string | null };
+}
+
 export type TeamChatCardPostResult =
   | { status: 'posted'; messageId: string }
   | { status: 'duplicate'; messageId: string }

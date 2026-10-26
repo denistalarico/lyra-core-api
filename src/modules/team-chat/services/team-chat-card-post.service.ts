@@ -10,6 +10,7 @@ import {
 } from '../enums';
 import { TeamChatGateway } from '../gateways/team-chat.gateway';
 import type {
+  TeamChatAgentReplyInput,
   TeamChatCardPostInput,
   TeamChatCardPostResult,
 } from '../types/team-chat-card.types';
@@ -48,6 +49,20 @@ export class TeamChatCardPostService {
   async postCard(
     input: TeamChatCardPostInput,
   ): Promise<TeamChatCardPostResult> {
+    return this.postMessage(input, input.card, null);
+  }
+
+  async postReply(
+    input: TeamChatAgentReplyInput,
+  ): Promise<TeamChatCardPostResult> {
+    return this.postMessage(input, undefined, input.parentMessageId);
+  }
+
+  private async postMessage(
+    input: TeamChatCardPostInput | TeamChatAgentReplyInput,
+    card: TeamChatCardPostInput['card'] | undefined,
+    parentMessageId: string | null,
+  ): Promise<TeamChatCardPostResult> {
     const channel = await this.channelsRepository.findOne({
       where: {
         id: input.channelId,
@@ -81,7 +96,7 @@ export class TeamChatCardPostService {
         workspaceId: input.workspaceId,
         channelId: channel.id,
         meetingRoomId: null,
-        parentMessageId: null,
+        parentMessageId,
         senderUserId: null,
         senderTeamMemberId: null,
         externalGuestId: null,
@@ -90,7 +105,8 @@ export class TeamChatCardPostService {
         status: TeamChatMessageStatus.SENT,
         body: input.body,
         metadata: {
-          card: input.card,
+          ...(card ? { card } : {}),
+          ...('replyTo' in input ? { replyTo: input.replyTo } : {}),
           dedupeKey: input.dedupeKey,
           agent: {
             id: input.sender.agentId ?? null,

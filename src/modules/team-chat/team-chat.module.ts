@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
@@ -41,6 +41,8 @@ import { TeamChatMeetingAiProviderService } from './services/team-chat-meeting-a
 import { TeamChatMeetingAiWorkerService } from './services/team-chat-meeting-ai-worker.service';
 import { TeamChatMeetingAiPdfService } from './services/team-chat-meeting-ai-pdf.service';
 import { TeamChatPublicMeetingsController } from './controllers/team-chat-public-meetings.controller';
+import { OrionModule } from '../orion/orion.module';
+import { TeamChatOrionMentionService } from './services/team-chat-orion-mention.service';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -50,6 +52,7 @@ const AGENCY_CONNECTION = 'agency';
     DocumentLayoutsModule,
     NotificationsModule,
     PermissionsModule,
+    forwardRef(() => OrionModule),
     // The gateway verifies the Agency access token in the handshake; the secret
     // is supplied per call, as in NotificationsModule.
     JwtModule.register({}),
@@ -97,6 +100,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatUserSettingsService,
     TeamChatCardPostService,
     TeamChatGateway,
+    TeamChatOrionMentionService,
   ],
   exports: [
     TeamChatChannelsService,

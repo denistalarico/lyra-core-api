@@ -33,6 +33,9 @@ const KNOWN_PRICES: Record<
 export class OrionConfigService implements OnModuleInit {
   readonly mode = resolveMode();
 
+  /** OR6 kill switch: shipping the integration never enables chat turns. */
+  readonly teamChatEnabled = booleanFlag('ORION_TEAM_CHAT_ENABLED', false);
+
   readonly endpoint = (
     process.env.ORION_PROVIDER_BASE_URL ?? 'https://api.openai.com/v1'
   ).replace(/\/$/, '');
@@ -185,4 +188,10 @@ function optionalDecimal(name: string): number | undefined {
   if (!raw) return undefined;
   const value = Number(raw);
   return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function booleanFlag(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (raw === undefined || raw === '') return fallback;
+  return raw === 'true' || raw === '1';
 }

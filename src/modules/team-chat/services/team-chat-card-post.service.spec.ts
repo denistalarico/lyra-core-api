@@ -94,6 +94,46 @@ describe('TeamChatCardPostService', () => {
     );
   });
 
+  it('posts an agent reply in the source-message thread without a card', async () => {
+    const { service, save } = build();
+
+    const result = await service.postReply({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      channelId: 'channel-1',
+      parentMessageId: 'message-source',
+      dedupeKey: 'orion:team-chat:message-source',
+      sender: { displayName: 'Orion', agentType: 'orchestrator' },
+      body: 'Você não tem acesso aos dados de CRM.',
+      replyTo: {
+        id: 'message-source',
+        senderDisplayName: 'Denis',
+        body: '@Orion, veja o CRM',
+      },
+      source: { module: 'orion', resourceId: 'message-source' },
+    });
+
+    expect(result).toEqual({ status: 'posted', messageId: 'message-1' });
+    const saved = save.mock.calls[0][0] as Record<string, unknown>;
+    expect(saved).toMatchObject({
+      parentMessageId: 'message-source',
+      senderUserId: null,
+      senderDisplayName: 'Orion',
+      body: 'Você não tem acesso aos dados de CRM.',
+      metadata: {
+        dedupeKey: 'orion:team-chat:message-source',
+        agent: { id: null, name: 'Orion', type: 'orchestrator' },
+        replyTo: {
+          id: 'message-source',
+          senderDisplayName: 'Denis',
+          body: '@Orion, veja o CRM',
+        },
+        source: { module: 'orion', resourceId: 'message-source' },
+      },
+    });
+    expect((saved.metadata as Record<string, unknown>).card).toBeUndefined();
+  });
+
   it('publishes once per dedupe key', async () => {
     const { service, save } = build({ existing: { id: 'message-earlier' } });
 

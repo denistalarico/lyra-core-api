@@ -52,6 +52,10 @@ const assetAccess = {
   issueGrant: jest.fn(),
 };
 
+const orionMentions = {
+  schedule: jest.fn(),
+};
+
 describe('TeamChatMessagesService notifications', () => {
   it('publishes direct message received for a direct channel recipient', async () => {
     const messagesRepository = createRepositoryMock();
@@ -81,6 +85,7 @@ describe('TeamChatMessagesService notifications', () => {
       channelsService as never,
       publisher as never,
       assetAccess as never,
+      orionMentions as never,
     );
 
     await service.create(context, 'channel-a', { body: 'Olá' });
@@ -128,6 +133,7 @@ describe('TeamChatMessagesService notifications', () => {
       channelsService as never,
       publisher as never,
       assetAccess as never,
+      orionMentions as never,
     );
 
     await service.create(context, 'channel-a', {
@@ -167,11 +173,61 @@ describe('TeamChatMessagesService notifications', () => {
       channelsService as never,
       publisher as never,
       assetAccess as never,
+      orionMentions as never,
     );
 
     await service.create(context, 'channel-a', { body: 'Mensagem aberta' });
 
     expect(publisher.publishDirectMessageReceived).not.toHaveBeenCalled();
     expect(publisher.publishUserMentioned).not.toHaveBeenCalled();
+  });
+
+  it('schedules Orion once on create and never retriggers it from an edit', async () => {
+    orionMentions.schedule.mockClear();
+    const messagesRepository = createRepositoryMock();
+    const readsRepository = createRepositoryMock();
+    const membersRepository = createRepositoryMock();
+    const channel = {
+      id: 'channel-a',
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      kind: TeamChatChannelKind.CHANNEL,
+      visibility: TeamChatChannelVisibility.WORKSPACE,
+      status: TeamChatChannelStatus.ACTIVE,
+    };
+    const channelsService = createChannelsServiceMock(channel);
+    const publisher = {
+      publishDirectMessageReceived: jest.fn(),
+      publishUserMentioned: jest.fn(),
+    };
+    const service = new TeamChatMessagesService(
+      messagesRepository as never,
+      readsRepository as never,
+      membersRepository as never,
+      channelsService as never,
+      publisher as never,
+      assetAccess as never,
+      orionMentions as never,
+    );
+
+    const created = await service.create(context, 'channel-a', {
+      body: '@Orion, veja o CRM',
+      metadata: { assistantMention: 'orion' },
+    });
+    messagesRepository.findOne.mockResolvedValue(created);
+    await service.patch(context, 'channel-a', created.id, {
+      body: '@Orion, veja apenas o funil',
+      metadata: { assistantMention: 'orion' },
+    });
+
+    expect(orionMentions.schedule).toHaveBeenCalledTimes(1);
+    expect(orionMentions.schedule).toHaveBeenCalledWith({
+      context,
+      channelId: 'channel-a',
+      message: expect.objectContaining({
+        id: 'message-a',
+        metadata: { assistantMention: 'orion' },
+      }),
+    });
   });
 });

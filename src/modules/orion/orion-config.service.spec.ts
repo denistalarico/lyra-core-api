@@ -17,7 +17,16 @@ describe('OrionConfigService', () => {
     expect(config.model).toBe('gpt-5.6-terra');
     expect(config.tenantMonthlyBudgetUsd).toBe(5);
     expect(config.userHourlyLimit).toBe(30);
+    expect(config.teamChatEnabled).toBe(false);
     expect(config.prices()).toEqual({ input: 2.5, cached: 0.25, output: 15 });
+  });
+
+  it('enables Team Chat mentions only with the explicit flag', () => {
+    process.env.ORION_TEAM_CHAT_ENABLED = 'true';
+    expect(new OrionConfigService().teamChatEnabled).toBe(true);
+
+    process.env.ORION_TEAM_CHAT_ENABLED = 'false';
+    expect(new OrionConfigService().teamChatEnabled).toBe(false);
   });
 
   it('refuses an unknown mode and a live mode without key or HTTPS', () => {
