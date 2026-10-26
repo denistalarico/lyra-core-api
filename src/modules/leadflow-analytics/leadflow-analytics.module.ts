@@ -8,6 +8,9 @@ import { CrmOpportunityEntity } from '../crm/entities/crm-opportunity.entity';
 import { CrmOpportunityEventEntity } from '../crm/entities/crm-opportunity-event.entity';
 import { CrmPipelineEntity } from '../crm/entities/crm-pipeline.entity';
 import { CrmStageEntity } from '../crm/entities/crm-stage.entity';
+import { AnalyticsReportsModule } from '../analytics-reports/analytics-reports.module';
+import { FilesModule } from '../../common/files/files.module';
+import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { InboxConversationEventEntity } from '../inbox/entities/inbox-conversation-event.entity';
 import { InboxModule } from '../inbox/inbox.module';
@@ -25,14 +28,16 @@ import {
   LeadFlowIntelligenceRecommendationEntity,
   LeadFlowIntelligenceResultEntity,
   LeadFlowAnalyticsViewEntity,
+  LeadFlowAnalyticsReportEntity,
 } from './entities';
 import { LeadFlowAttributionCohortAdapter } from './intelligence/leadflow-attribution-cohort.adapter';
 import { BusinessModeDimensionAdapter } from './intelligence/business-mode-dimension.adapter';
 import { LeadFlowAttributionAdapter } from './intelligence/leadflow-attribution.adapter';
 import { LeadFlowIntelligenceAdapter } from './intelligence/leadflow-intelligence.adapter';
 import { LeadFlowAnalyticsController } from './leadflow-analytics.controller';
+import { LeadFlowAnalyticsReportsController } from './leadflow-analytics-reports.controller';
 import { LeadFlowAnalyticsEventIngressService } from './services/leadflow-analytics-event-ingress.service';
-import { LeadFlowAnalyticsReportService } from './services/leadflow-analytics-report.service';
+import { LeadFlowAnalyticsSnapshotReportService } from './services/leadflow-analytics-snapshot-report.service';
 import { LeadFlowAnalyticsService } from './services/leadflow-analytics.service';
 import { LeadFlowCsatService } from './services/leadflow-csat.service';
 import { LeadFlowIntelligenceService } from './services/leadflow-intelligence.service';
@@ -44,6 +49,9 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
   imports: [
     PermissionsModule,
     DocumentLayoutsModule,
+    // AN-LF2: the report PDF (letterhead, renderer) shared with Social.
+    AnalyticsReportsModule,
+    FilesModule,
     // Inbox → … → Team Chat → Orion → Analytics (OR6) closes a file-level cycle.
     forwardRef(() => InboxModule),
     LeadFlowSettingsModule,
@@ -64,6 +72,8 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
         LeadFlowIntelligenceConfigVersionEntity,
         LeadFlowIntelligenceResultEntity,
         LeadFlowAnalyticsViewEntity,
+        LeadFlowAnalyticsReportEntity,
+        AgencyUserProfileEntity,
       ],
       'agency',
     ),
@@ -71,6 +81,7 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
   controllers: [
     LeadFlowAnalyticsController,
     LeadFlowAnalyticsDashboardsController,
+    LeadFlowAnalyticsReportsController,
   ],
   providers: [
     LeadFlowAnalyticsDashboardsService,
@@ -78,7 +89,7 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     LeadFlowAnalyticsService,
     LeadFlowOperationalAnalyticsService,
     LeadFlowOverviewService,
-    LeadFlowAnalyticsReportService,
+    LeadFlowAnalyticsSnapshotReportService,
     LeadFlowAnalyticsEventIngressService,
     LeadFlowCsatService,
     LeadFlowIntelligenceService,
@@ -107,7 +118,6 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
     LeadFlowAnalyticsService,
     LeadFlowOperationalAnalyticsService,
     LeadFlowOverviewService,
-    LeadFlowAnalyticsReportService,
     LeadFlowCsatService,
     LeadFlowIntelligenceService,
     LeadFlowIntelligenceAdapter,

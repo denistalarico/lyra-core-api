@@ -7,9 +7,9 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { LeadFlowSettingsContextType } from '../../leadflow-settings/enums/leadflow-settings-context-type.enum';
-import type { LeadFlowAnalyticsReportType } from '../dto/create-analytics-report.dto';
 import type {
   LeadFlowAnalyticsChartMode,
+  LeadFlowAnalyticsReportType,
   LeadFlowAnalyticsSummaryType,
 } from '../dto/upsert-analytics-view.dto';
 

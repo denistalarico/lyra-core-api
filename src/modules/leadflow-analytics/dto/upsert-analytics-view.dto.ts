@@ -10,10 +10,18 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
-import {
-  LEADFLOW_ANALYTICS_REPORT_TYPES,
-  type LeadFlowAnalyticsReportType,
-} from './create-analytics-report.dto';
+
+/** Report kinds a saved legacy view may name (rotas `views*`, dívida AN-F1). */
+export const LEADFLOW_ANALYTICS_REPORT_TYPES = [
+  'overview',
+  'commercial',
+  'messages',
+  'lead_score',
+  'automations',
+] as const;
+
+export type LeadFlowAnalyticsReportType =
+  (typeof LEADFLOW_ANALYTICS_REPORT_TYPES)[number];
 
 export const LEADFLOW_ANALYTICS_WIDGET_IDS = [
   'commercial_performance',

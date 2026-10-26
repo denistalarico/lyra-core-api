@@ -46,7 +46,6 @@ function fixture() {
     profiles as never,
     {} as never,
     {} as never,
-    {} as never,
     files as never,
   );
 

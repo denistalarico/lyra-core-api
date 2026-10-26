@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { BrandKitModule } from '../brand-kit/brand-kit.module';
+import { AnalyticsReportsModule } from '../analytics-reports/analytics-reports.module';
 import { FilesModule } from '../../common/files/files.module';
 import { DocumentLayoutsModule } from '../document-layouts/document-layouts.module';
 import { PermissionsModule } from '../permissions';
@@ -16,7 +16,6 @@ import { SocialAnalyticsReportsController } from './social-analytics-reports.con
 import { SocialAnalyticsInsightConfigService } from './services/social-analytics-insight-config.service';
 import { SocialAnalyticsInsightProvider } from './services/social-analytics-insight.provider';
 import { SocialAnalyticsInsightService } from './services/social-analytics-insight.service';
-import { SocialAnalyticsReportLogoService } from './services/social-analytics-report-logo.service';
 import { SocialAnalyticsReportService } from './services/social-analytics-report.service';
 
 /**
@@ -33,17 +32,16 @@ import { SocialAnalyticsReportService } from './services/social-analytics-report
  * also arrives formatted, and the only thing read server-side is the
  * letterhead. `DocumentLayoutsModule` is imported for the agency's document
  * model (the report's header and footer) and for its Playwright renderer, the
- * one place in the codebase that launches a browser. `BrandKitModule` is
- * imported for the client's logo, through the service it exports for exactly
- * this: its own module doc says consumers must read Brand Kit through that
- * service and never by building a storage URL by hand.
+ * one place in the codebase that launches a browser. The letterhead and the
+ * client's logo come from `AnalyticsReportsModule` (AN-LF2), shared with the
+ * LeadFlow reports.
  */
 @Module({
   imports: [
     PermissionsModule,
     FilesModule,
     DocumentLayoutsModule,
-    BrandKitModule,
+    AnalyticsReportsModule,
     TypeOrmModule.forFeature(
       [
         SocialAnalyticsDashboardEntity,
@@ -63,7 +61,6 @@ import { SocialAnalyticsReportService } from './services/social-analytics-report
     SocialAnalyticsInsightConfigService,
     SocialAnalyticsInsightProvider,
     SocialAnalyticsInsightService,
-    SocialAnalyticsReportLogoService,
     SocialAnalyticsReportService,
   ],
   exports: [

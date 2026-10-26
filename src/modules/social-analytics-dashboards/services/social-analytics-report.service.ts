@@ -14,10 +14,14 @@ import {
   type CompanyAwareScope,
 } from '../../../common/context/company-aware-scope';
 import type { RequestContext } from '../../../common/context/request-context.interface';
-import { DocumentLayoutsService } from '../../document-layouts/document-layouts.service';
 import { DocumentPdfRendererService } from '../../document-layouts/document-pdf-renderer.service';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
-import { SocialAnalyticsReportLogoService } from './social-analytics-report-logo.service';
+import { AnalyticsReportLetterheadService } from '../../analytics-reports/analytics-report-letterhead.service';
+import {
+  analyticsReportFilename,
+  isAllowedReportRequest,
+  normalizeReportTimezone,
+} from '../../analytics-reports/analytics-report.helpers';
 import type { DashboardChannelId } from '../dashboard-layout.contract';
 import { SocialAnalyticsReportEntity } from '../entities';
 import {
@@ -27,10 +31,9 @@ import {
   type ReportPageMode,
   type ReportSnapshot,
 } from '../report-snapshot.contract';
-import {
-  buildSocialAnalyticsReportHtml,
-  type ReportLetterhead,
-} from './social-analytics-report.renderer';
+import { buildSocialAnalyticsReportHtml } from './social-analytics-report.renderer';
+
+export { isAllowedReportRequest };
 
 export type SocialAnalyticsReportView = {
   id: string;
@@ -91,9 +94,8 @@ export class SocialAnalyticsReportService {
     private readonly reports: Repository<SocialAnalyticsReportEntity>,
     @InjectRepository(AgencyUserProfileEntity, 'agency')
     private readonly profiles: Repository<AgencyUserProfileEntity>,
-    private readonly documentLayouts: DocumentLayoutsService,
+    private readonly letterheads: AnalyticsReportLetterheadService,
     private readonly pdfRenderer: DocumentPdfRendererService,
-    private readonly logos: SocialAnalyticsReportLogoService,
     private readonly files: FilesService,
   ) {}
 
@@ -140,7 +142,7 @@ export class SocialAnalyticsReportService {
       throw error;
     }
 
-    const { letterhead, logoUrl } = await this.resolveLetterhead(ctx, scope);
+    const { letterhead, logoUrl } = await this.letterheads.resolve(ctx, scope);
 
     return {
       title,
@@ -189,11 +191,14 @@ export class SocialAnalyticsReportService {
         request,
         title,
         buffer,
-        this.filename(title, request),
+        analyticsReportFilename(title, request.since, request.until),
       );
     }
 
-    return { buffer, filename: this.filename(title, request) };
+    return {
+      buffer,
+      filename: analyticsReportFilename(title, request.since, request.until),
+    };
   }
 
   private async record(
@@ -207,7 +212,7 @@ export class SocialAnalyticsReportService {
     const id = randomUUID();
     const storageKey = this.storageKey(scope, id);
     const issuedByName = await this.resolveActorName(scope.tenantId, actorId);
-    const issuedTimezone = normalizeTimezone(request.issuedTimezone);
+    const issuedTimezone = normalizeReportTimezone(request.issuedTimezone);
 
     await this.files.uploadPrivateBuffer({
       body: buffer,
@@ -284,10 +289,11 @@ export class SocialAnalyticsReportService {
       contentType: asset.contentType,
       filename:
         report.fileName ??
-        this.filename(report.title, {
-          since: report.periodSince,
-          until: report.periodUntil,
-        }),
+        analyticsReportFilename(
+          report.title,
+          report.periodSince,
+          report.periodUntil,
+        ),
     };
   }
 
@@ -358,77 +364,6 @@ export class SocialAnalyticsReportService {
     ].join('/');
   }
 
-  /**
-   * The agency's document model, plus the client the data belongs to.
-   *
-   * The model is the one Vendas › Layout de documentos edits: the default
-   * layout of this tenant and workspace, with the company data filled from the
-   * workspace settings where the layout leaves it blank, and the CSS of the
-   * template it picked.
-   *
-   * The client's company is the selected company context when there is one,
-   * otherwise the client itself. Their logo comes from the Brand Kit, inlined as
-   * a `data:` URI (see `SocialAnalyticsReportLogoService`). Neither is asked for
-   * in agency scope, where the Brand Kit would answer with the agency's own kit
-   * and the agency would appear as the subject of its own report.
-   */
-  private async resolveLetterhead(
-    ctx: RequestContext,
-    scope: CompanyAwareScope,
-  ): Promise<{ letterhead: ReportLetterhead; logoUrl: string | null }> {
-    const clientName =
-      ctx.managedContext?.companyName?.trim() ||
-      ctx.managedContext?.clientName?.trim() ||
-      null;
-
-    const [layout, clientLogoUrl] = await Promise.all([
-      this.documentLayouts.getDefaultLayout({
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-      }),
-      clientName ? this.logos.resolveClientLogo(ctx) : Promise.resolve(null),
-    ]);
-    const template = await this.documentLayouts.getSystemTemplateForType(
-      layout.layoutType,
-    );
-    const chrome = this.pdfRenderer.buildLayoutChrome(layout, template);
-
-    return {
-      logoUrl: chrome.logoUrl,
-      letterhead: {
-        layoutType: layout.layoutType,
-        layoutCss: chrome.css,
-        headerHtml: chrome.headerHtml,
-        footerHtml: chrome.footerHtml,
-        footerText:
-          layout.footerText?.trim() || layout.companyName?.trim() || '',
-        fontFamily: layout.fontFamily || 'Inter',
-        headingFontFamily: layout.headingFontFamily || 'Sora',
-        clientName,
-        // Null is expected, not a failure: a client with no Brand Kit logo
-        // gets their name and no mark.
-        clientLogoUrl,
-      },
-    };
-  }
-
-  /** A filename an operator can find again in a downloads folder. */
-  private filename(
-    title: string,
-    request: Pick<RenderReportRequest, 'since' | 'until'>,
-  ): string {
-    const slug =
-      title
-        .normalize('NFD')
-        .replace(/[̀-ͯ]/g, '')
-        .replace(/[^a-zA-Z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .toLowerCase()
-        .slice(0, 60) || 'relatorio';
-
-    return `${slug}-${request.since}-${request.until}.pdf`;
-  }
-
   private where(scope: CompanyAwareScope) {
     return {
       tenantId: scope.tenantId,
@@ -456,47 +391,3 @@ export class SocialAnalyticsReportService {
     };
   }
 }
-
-function normalizeTimezone(value: string | undefined): string {
-  const timezone = value?.trim() || 'UTC';
-  try {
-    Intl.DateTimeFormat('en-US', { timeZone: timezone }).format();
-    return timezone;
-  } catch {
-    return 'UTC';
-  }
-}
-
-/**
- * What the report may load while Chromium renders it.
- *
- * The body is operator-supplied markup, so by default nothing is fetched: the
- * client inlines every image it can as a `data:` URI, and those never touch the
- * network. Two exceptions remain. The agency logo is a URL of this API, allowed
- * exactly. Meta's CDN serves the reel thumbnails the browser could not inline
- * (it does not send CORS headers), and is allowed by host, over HTTPS only.
- * Everything else, internal addresses included, is refused.
- */
-export function isAllowedReportRequest(
-  url: string,
-  logoUrl: string | null,
-): boolean {
-  if (logoUrl && url === logoUrl) return true;
-
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-
-  if (parsed.protocol !== 'https:') return false;
-
-  const host = parsed.hostname.toLowerCase();
-
-  return META_CDN_HOSTS.some(
-    (suffix) => host === suffix || host.endsWith(`.${suffix}`),
-  );
-}
-
-const META_CDN_HOSTS = ['fbcdn.net', 'cdninstagram.com'];

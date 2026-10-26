@@ -11,7 +11,6 @@ describe('LeadFlow Analytics HTTP contract', () => {
     'updateView',
     'removeView',
     'getRecommendations',
-    'renderReportPdf',
   ] as const)(
     'requires an operational or full analytics permission on %s',
     (handler) => {
@@ -51,13 +50,9 @@ describe('LeadFlow Analytics HTTP contract', () => {
     );
   });
 
-  it('keeps PDF generation behind a dedicated controller method', () => {
+  it('no longer serves the legacy report PDF (AN-LF2 moved it)', () => {
     expect(
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      LeadFlowAnalyticsController.prototype.renderReportPdf,
-    ).not.toBe(
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      LeadFlowAnalyticsController.prototype.getOperationalOverview,
-    );
+      Object.getOwnPropertyNames(LeadFlowAnalyticsController.prototype),
+    ).not.toContain('renderReportPdf');
   });
 });

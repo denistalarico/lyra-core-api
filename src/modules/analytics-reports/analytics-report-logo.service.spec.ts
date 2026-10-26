@@ -1,8 +1,8 @@
 import { Readable } from 'node:stream';
-import type { RequestContext } from '../../../common/context/request-context.interface';
-import type { BrandKitService } from '../../brand-kit/services/brand-kit.service';
-import type { BrandKitAssetResponse } from '../../brand-kit/dto/brand-kit.view';
-import { SocialAnalyticsReportLogoService } from './social-analytics-report-logo.service';
+import type { RequestContext } from '../../common/context/request-context.interface';
+import type { BrandKitService } from '../brand-kit/services/brand-kit.service';
+import type { BrandKitAssetResponse } from '../brand-kit/dto/brand-kit.view';
+import { AnalyticsReportLogoService } from './analytics-report-logo.service';
 
 const ctx = {
   tenantId: '10000000-0000-4000-8000-000000000001',
@@ -50,13 +50,13 @@ function build(
   } as unknown as BrandKitService;
 
   return {
-    service: new SocialAnalyticsReportLogoService(brandKit),
+    service: new AnalyticsReportLogoService(brandKit),
     listAssets,
     getAssetContent,
   };
 }
 
-describe('SocialAnalyticsReportLogoService', () => {
+describe('AnalyticsReportLogoService', () => {
   it('inlines the logo as a data URI rather than as a link', async () => {
     // The Brand Kit's content endpoint is behind JwtAuthGuard, and Playwright
     // renders with `setContent` — no cookies, no Authorization header. A URL
@@ -128,7 +128,7 @@ describe('SocialAnalyticsReportLogoService', () => {
       getAssetContent: jest.fn(),
     } as unknown as BrandKitService;
 
-    const service = new SocialAnalyticsReportLogoService(brandKit);
+    const service = new AnalyticsReportLogoService(brandKit);
 
     await expect(service.resolveClientLogo(ctx)).resolves.toBeNull();
   });

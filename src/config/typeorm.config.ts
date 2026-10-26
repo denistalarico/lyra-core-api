@@ -354,6 +354,7 @@ import {
   LeadFlowIntelligenceRecommendationEntity,
   LeadFlowIntelligenceResultEntity,
   LeadFlowAnalyticsViewEntity,
+  LeadFlowAnalyticsReportEntity,
 } from '../modules/leadflow-analytics/entities';
 import {
   LeadFlowProductTelemetryDailyEntity,
@@ -481,6 +482,8 @@ export const agencyEntities = [
   OrionTurnEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
+  // AN-LF2: LeadFlow report archive (same shape as the Social one).
+  LeadFlowAnalyticsReportEntity,
   // AN-HDR: Visão Geral header shared by LeadFlow and Social.
   AnalyticsOverviewHeaderEntity,
   SocialApprovalRequestEntity,
