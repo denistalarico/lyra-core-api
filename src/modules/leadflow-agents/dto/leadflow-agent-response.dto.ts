@@ -38,6 +38,8 @@ export interface LeadFlowAgentSummaryResponse {
   channels: LeadFlowAgentChannelBindingResponse[];
   publishedVersionId: string | null;
   archivedAt: string | null;
+  /** OR5: set while the agent is paused for a period. */
+  pausedUntil: string | null;
   deletedAt: string | null;
   updatedAt: string;
 }
@@ -95,6 +97,7 @@ export function mapAgentSummary(
     channels: bindings.map(mapChannelBinding),
     publishedVersionId: agent.publishedVersionId,
     archivedAt: agent.archivedAt ? agent.archivedAt.toISOString() : null,
+    pausedUntil: agent.pausedUntil ? agent.pausedUntil.toISOString() : null,
     deletedAt: agent.deletedAt ? agent.deletedAt.toISOString() : null,
     updatedAt: agent.updatedAt.toISOString(),
   };

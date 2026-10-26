@@ -11,6 +11,9 @@ import { LeadFlowAgendaModule } from '../leadflow-agenda/leadflow-agenda.module'
 import { LeadFlowAgendaService } from '../leadflow-agenda/leadflow-agenda.service';
 import { LeadFlowAgentsModule } from '../leadflow-agents/leadflow-agents.module';
 import { LeadFlowAgentService } from '../leadflow-agents/services/leadflow-agent.service';
+import { LeadFlowOperationsActionService } from '../leadflow-agents/services/leadflow-operations-action.service';
+import { AgencyContactsModule } from '../agency/agency-contacts.module';
+import { AgencyContactsService } from '../agency/agency-contacts.service';
 import { LeadFlowAnalyticsModule } from '../leadflow-analytics/leadflow-analytics.module';
 import { LeadFlowAnalyticsService } from '../leadflow-analytics/services/leadflow-analytics.service';
 import { LeadFlowOperationalAnalyticsService } from '../leadflow-analytics/services/leadflow-operational-analytics.service';
@@ -21,6 +24,10 @@ import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import { OrionController } from './orion.controller';
 import { OrionModule } from './orion.module';
 import { OrionService } from './orion.service';
+
+// OR5: the module now reaches Agency contacts, whose module graph loads the
+// ESM-only 2FA library; the wiring never runs it.
+jest.mock('otplib', () => ({ verify: jest.fn() }));
 
 @Global()
 @Module({
@@ -67,7 +74,9 @@ describe('OrionModule wiring', () => {
         ),
       )
       .overrideModule(LeadFlowAgentsModule)
-      .useModule(fixture(LeadFlowAgentService))
+      .useModule(fixture(LeadFlowAgentService, LeadFlowOperationsActionService))
+      .overrideModule(AgencyContactsModule)
+      .useModule(fixture(AgencyContactsService))
       .overrideModule(LeadFlowAnalyticsModule)
       .useModule(
         fixture(LeadFlowAnalyticsService, LeadFlowOperationalAnalyticsService),

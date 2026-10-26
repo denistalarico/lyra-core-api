@@ -271,6 +271,13 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationCategory.STATUS,
     NotificationRecipientStrategy.EXPLICIT_USERS,
   ),
+  // OR5: an agent paused for a period is back; tells who scheduled the pause.
+  standard(
+    'leadflow.agent.pause_ended',
+    'sales',
+    NotificationCategory.STATUS,
+    NotificationRecipientStrategy.EXPLICIT_USERS,
+  ),
   // Team Chat
   standard(
     'chat.direct_message_received',

@@ -165,7 +165,13 @@ describe('OrionService.runTurn', () => {
     });
     expect(tools.execute).toHaveBeenCalledWith(
       { id: 'c1', name: 'list_agents', arguments: '{"tenantId":"x"}' },
-      { ctx, access: agency },
+      {
+        ctx,
+        access: agency,
+        requestText: 'quem está atendendo?',
+        callKey: 'turn-1:0',
+        surface: 'operations_room',
+      },
     );
     // The tool result reaches the model framed as untrusted data.
     const toolMessage = seen[0].find((message) => message.role === 'tool');
@@ -193,6 +199,29 @@ describe('OrionService.runTurn', () => {
         tools: ['list_agents'],
       },
     });
+  });
+
+  it('records a server-owned Team Chat surface and exposes it as context data', async () => {
+    const { service, provider, budget, seen } = setup();
+    provider.complete.mockReset().mockImplementation((input) => {
+      seen.push(input.messages);
+      return Promise.resolve({
+        content: 'Resposta no canal.',
+        toolCalls: [],
+        usage: {},
+        attempts: 1,
+      });
+    });
+
+    await service.runTurn(
+      ctx,
+      agency,
+      { text: 'Como está o CRM?' },
+      { surface: 'team_chat' },
+    );
+
+    expect(budget.reserve.mock.calls[0][0].scope.surface).toBe('team_chat');
+    expect(seen[0][1].content).toContain('"superficie":"Team Chat"');
   });
 
   it('keeps the system prefix identical across users; names travel as context data', async () => {

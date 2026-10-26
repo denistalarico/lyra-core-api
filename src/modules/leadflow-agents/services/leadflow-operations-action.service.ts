@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -21,16 +22,30 @@ import {
   LeadFlowOperationsActionEventEntity,
   type LeadFlowOperationsActionEventType,
   type LeadFlowOperationsActionIntent,
+  type LeadFlowOperationsActionTargetType,
 } from '../entities';
+import {
+  operationsActionRequirement,
+  LeadFlowOperationsActionAccessService,
+  type LeadFlowActionAccess,
+} from './leadflow-operations-action-access.service';
+import {
+  actionTitle,
+  agentScopeIssue,
+  isDomainIntent,
+  normalizeDomainAction,
+  readRecord,
+  RULE_INTENTS,
+} from './leadflow-operations-action-domain';
+import { LeadFlowOperationsActionExecutorService } from './leadflow-operations-action-executor.service';
+import { LeadFlowAgentService } from './leadflow-agent.service';
 
 const AGENCY_CONNECTION = 'agency';
-const EXECUTABLE_INTENTS = new Set<LeadFlowOperationsActionIntent>([
-  'capacity_unavailable',
-  'capacity_released',
-  'add_closure',
-]);
+const EXECUTABLE_INTENTS = RULE_INTENTS;
 
 type NormalizedAction = {
+  targetType: LeadFlowOperationsActionTargetType | null;
+  targetId: string | null;
   timezone: string | null;
   resourceKey: string | null;
   effectiveFrom: Date | null;
@@ -48,6 +63,9 @@ export class LeadFlowOperationsActionService {
     private readonly settingsRepository: Repository<LeadFlowClientSettingsEntity>,
     @InjectRepository(LeadFlowOperationsActionEntity, AGENCY_CONNECTION)
     private readonly actionsRepository: Repository<LeadFlowOperationsActionEntity>,
+    private readonly agents: LeadFlowAgentService,
+    private readonly access: LeadFlowOperationsActionAccessService,
+    private readonly executor: LeadFlowOperationsActionExecutorService,
   ) {}
 
   async list(
@@ -62,9 +80,16 @@ export class LeadFlowOperationsActionService {
     return { items: items.map((item) => this.mapResponse(item)) };
   }
 
+  /**
+   * `access` is the proposer, proven by the request. OR5: an executable
+   * intent is only offered to who could confirm it (the confirmation checks
+   * again, for the confirmer); a proposal made to an agent (`agentId`) stays
+   * inside that agent's scope.
+   */
   async propose(
     ctx: RequestContext,
     dto: CreateLeadFlowOperationsActionDto,
+    access: LeadFlowActionAccess,
   ): Promise<LeadFlowOperationsActionResponse> {
     const active = await this.resolveActiveSettings(ctx);
     const workspaceId = this.requireWorkspaceId(ctx);
@@ -80,7 +105,26 @@ export class LeadFlowOperationsActionService {
       if (existing) return this.mapResponse(existing);
     }
 
+    const agent = dto.agentId
+      ? await this.agents.findScopedEntity(ctx, dto.agentId)
+      : null;
+    if (agent) this.assertAgentScope(dto.intent, agent, dto.payload);
     const normalized = this.normalize(dto.intent, dto.payload);
+    if (agent) normalized.preview.proposedToAgent = true;
+    if (isDomainIntent(dto.intent)) {
+      if (
+        (dto.intent === 'pause_agent' || dto.intent === 'activate_agent') &&
+        normalized.targetId
+      )
+        await this.agents.findScopedEntity(ctx, normalized.targetId);
+      await this.assertDomainPermission(
+        ctx,
+        access,
+        dto.intent,
+        normalized.targetId,
+        dto.payload,
+      );
+    }
     return this.dataSource.transaction(async (manager) => {
       const repository = manager.getRepository(LeadFlowOperationsActionEntity);
       const action = await repository.save(
@@ -90,6 +134,9 @@ export class LeadFlowOperationsActionService {
           settingsId: active.id,
           businessModeKey: String(active.businessModeKey),
           intent: dto.intent,
+          agentId: agent?.id ?? null,
+          targetType: normalized.targetType,
+          targetId: normalized.targetId,
           status: 'pending_confirmation',
           requestText: dto.requestText.trim(),
           payload: dto.payload,
@@ -113,10 +160,17 @@ export class LeadFlowOperationsActionService {
     });
   }
 
+  /**
+   * `access` is the confirmer. OR5: an executable intent runs here, through
+   * the domain service, only after the confirmer's own permission for the
+   * equivalent route (and the agent's scope, again) is proven. A failure
+   * rolls back: the proposal stays pending.
+   */
   async confirm(
     ctx: RequestContext,
     actionId: string,
     dto: ConfirmLeadFlowOperationsActionDto,
+    access: LeadFlowActionAccess,
   ): Promise<LeadFlowOperationsActionResponse> {
     const active = await this.resolveActiveSettings(ctx);
     return this.dataSource.transaction(async (manager) => {
@@ -140,6 +194,33 @@ export class LeadFlowOperationsActionService {
           message: 'A proposta ainda possui dados pendentes.',
           validationIssues: action.validationIssues,
         });
+      }
+
+      if (isDomainIntent(action.intent)) {
+        if (action.preview.proposedToAgent === true) {
+          // The agent was removed since: never widen to the user's scope.
+          if (!action.agentId)
+            throw new ForbiddenException({
+              code: 'agent_scope_denied',
+              message: 'O agente desta proposta não existe mais.',
+            });
+          const agent = await this.agents.findScopedEntity(ctx, action.agentId);
+          this.assertAgentScope(action.intent, agent, action.payload);
+        }
+        await this.assertDomainPermission(
+          ctx,
+          access,
+          action.intent,
+          action.targetId,
+          action.payload,
+        );
+        const execution = await this.executor.execute(ctx, action);
+        action.targetId = execution.targetId ?? action.targetId;
+        action.preview = {
+          ...action.preview,
+          runtimeEffect: 'executed',
+          result: execution.result,
+        };
       }
 
       action.status = 'confirmed';
@@ -191,6 +272,25 @@ export class LeadFlowOperationsActionService {
     intent: LeadFlowOperationsActionIntent,
     payload: Record<string, unknown>,
   ): NormalizedAction {
+    if (isDomainIntent(intent)) {
+      const domain = normalizeDomainAction(intent, payload);
+      return {
+        targetType: domain.targetType,
+        targetId: domain.targetId,
+        timezone: domain.timezone,
+        resourceKey: null,
+        effectiveFrom: domain.effectiveFrom,
+        effectiveUntil: domain.effectiveUntil,
+        validationIssues: domain.validationIssues,
+        preview: {
+          title: domain.title,
+          summary: domain.summary,
+          requiresExplicitConfirmation: true,
+          runtimeEffect: 'domain_execution',
+          proposedToAgent: false,
+        },
+      };
+    }
     const issues: string[] = [];
     const timezone = this.readString(payload.timezone);
     const resourceKey = this.readString(payload.resourceRef);
@@ -227,6 +327,8 @@ export class LeadFlowOperationsActionService {
     }
 
     return {
+      targetType: null,
+      targetId: null,
       timezone,
       resourceKey,
       effectiveFrom,
@@ -268,15 +370,40 @@ export class LeadFlowOperationsActionService {
   }
 
   private actionTitle(intent: LeadFlowOperationsActionIntent) {
-    const titles: Record<LeadFlowOperationsActionIntent, string> = {
-      update_offer_price: 'Alterar preço',
-      schedule_discount: 'Programar desconto',
-      add_closure: 'Registrar fechamento',
-      update_business_hours: 'Alterar horário',
-      capacity_unavailable: 'Registrar indisponibilidade',
-      capacity_released: 'Liberar capacidade',
-    };
-    return titles[intent];
+    return actionTitle(intent);
+  }
+
+  private assertAgentScope(
+    intent: LeadFlowOperationsActionIntent,
+    agent: Parameters<typeof agentScopeIssue>[1],
+    payload: Record<string, unknown>,
+  ) {
+    const issue = agentScopeIssue(intent, agent, payload);
+    if (issue)
+      throw new ForbiddenException({
+        code: 'agent_scope_denied',
+        message: issue,
+      });
+  }
+
+  private async assertDomainPermission(
+    ctx: RequestContext,
+    access: LeadFlowActionAccess,
+    intent: LeadFlowOperationsActionIntent,
+    targetId: string | null,
+    payload: Record<string, unknown>,
+  ) {
+    const company = resolveCompanyAwareScope(ctx).companyContextId !== null;
+    const requirement = operationsActionRequirement(intent, targetId, company);
+    if (!requirement) return;
+    // Only what the route body would carry and its scope adapter may read.
+    const body =
+      intent === 'create_appointment'
+        ? { contactId: readRecord(payload)?.contactId ?? null }
+        : intent === 'move_opportunity'
+          ? { stageId: payload.stageId ?? null }
+          : null;
+    await this.access.assert(access, requirement, body);
   }
 
   private async resolveActiveSettings(ctx: RequestContext) {
@@ -330,6 +457,9 @@ export class LeadFlowOperationsActionService {
           intent: action.intent,
           revision: action.revision,
           settingsId: action.settingsId,
+          agentId: action.agentId,
+          targetType: action.targetType,
+          targetId: action.targetId,
           businessModeKey: action.businessModeKey,
           resourceKey: action.resourceKey,
           effectiveFrom: action.effectiveFrom?.toISOString() ?? null,
@@ -355,6 +485,9 @@ export class LeadFlowOperationsActionService {
         action.status === 'pending_confirmation' &&
         action.validationIssues.length === 0,
       revision: action.revision,
+      agentId: action.agentId,
+      targetType: action.targetType,
+      result: readRecord(action.preview.result),
       effectiveFrom: action.effectiveFrom?.toISOString() ?? null,
       effectiveUntil: action.effectiveUntil?.toISOString() ?? null,
       timezone: action.timezone,

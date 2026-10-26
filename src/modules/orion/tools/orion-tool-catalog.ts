@@ -3,6 +3,10 @@ import { LEADFLOW_ANALYTICS_PERMISSIONS } from '../../leadflow-analytics/leadflo
 import type { OrionToolDefinition } from '../orion.provider';
 import type { OrionToolRequirement } from './orion-tool-access.service';
 import { ORION_DAYS, ORION_PERIODS } from './orion-period';
+import {
+  APPOINTMENT_TYPES,
+  ORION_PROPOSAL_INTENTS,
+} from './orion-proposal.service';
 
 export const ORION_TOOL_NAMES = [
   'search_help',
@@ -12,6 +16,7 @@ export const ORION_TOOL_NAMES = [
   'crm_pipeline_snapshot',
   'agenda_for_day',
   'ui_action',
+  'propose_action',
 ] as const;
 export type OrionToolName = (typeof ORION_TOOL_NAMES)[number];
 
@@ -208,6 +213,76 @@ export const ORION_TOOL_CATALOG: readonly OrionToolSpec[] = [
       additionalProperties: false,
     },
     requirement: null,
+    clientArea: true,
+  },
+  {
+    // OR5 — write only by proposal (D-OR-7): creates a card the user
+    // confirms; never changes anything by itself. The tool needs the room
+    // proposal route (`POST room/actions`); the domain write permission of
+    // the intent is checked when proposing and again when confirming.
+    name: 'propose_action',
+    description:
+      'Propõe uma alteração para o usuário confirmar num cartão (nada muda ' +
+      'antes da confirmação): pausar um agente (opcionalmente até uma data), ' +
+      'ativar um agente, criar um contato, mover uma oportunidade de etapa, ' +
+      'atualizar nome/sobrenome/cargo de um contato ou criar um compromisso. ' +
+      'Use nomes como o usuário disse; datas em ISO 8601 com fuso.',
+    parameters: {
+      type: 'object',
+      properties: {
+        intent: { type: 'string', enum: [...ORION_PROPOSAL_INTENTS] },
+        agent: {
+          type: 'string',
+          description: 'Nome do agente (pausar/ativar).',
+        },
+        until: {
+          type: 'string',
+          description:
+            'Fim da pausa, ISO 8601 com fuso. Omita para pausar sem data.',
+        },
+        name: { type: 'string', description: 'Nome do novo contato.' },
+        email: { type: 'string' },
+        phone: { type: 'string' },
+        contact: {
+          type: 'string',
+          description: 'Nome do contato existente (atualizar ou compromisso).',
+        },
+        fields: {
+          type: 'object',
+          properties: {
+            displayName: { type: 'string' },
+            firstName: { type: 'string' },
+            lastName: { type: 'string' },
+            jobTitle: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        opportunity: {
+          type: 'string',
+          description: 'Título da oportunidade (ou nome do lead) a mover.',
+        },
+        stage: { type: 'string', description: 'Nome da etapa de destino.' },
+        title: { type: 'string', description: 'Título do compromisso.' },
+        type: { type: 'string', enum: [...APPOINTMENT_TYPES] },
+        startAt: { type: 'string', description: 'Início, ISO 8601 com fuso.' },
+        endAt: { type: 'string', description: 'Término, ISO 8601 com fuso.' },
+      },
+      required: ['intent'],
+      additionalProperties: false,
+    },
+    requirement: {
+      agency: {
+        anyOf: [LEADFLOW_AGENTS_PERMISSIONS.manage],
+        routePath: '/leadflow/agents/room/actions',
+        method: 'POST',
+      },
+      clientArea: {
+        module: 'leadflow_agents',
+        key: LEADFLOW_AGENTS_PERMISSIONS.manage,
+        routePath: '/leadflow/agents/room/actions',
+        method: 'POST',
+      },
+    },
     clientArea: true,
   },
 ];

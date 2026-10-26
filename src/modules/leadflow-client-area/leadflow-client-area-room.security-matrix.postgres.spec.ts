@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Table, type DataSource, type QueryRunner } from 'typeorm';
 import { AgencyDataSource } from '../../database/agency-typeorm.datasource';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
@@ -27,6 +27,10 @@ import { LeadFlowAgentBindingReconcilerService } from '../leadflow-agents/servic
 import { LeadFlowAgentPresetService } from '../leadflow-agents/services/leadflow-agent-preset.service';
 import { LeadFlowAgentService } from '../leadflow-agents/services/leadflow-agent.service';
 import { LeadFlowOperationsActionService } from '../leadflow-agents/services/leadflow-operations-action.service';
+import { LeadFlowOperationsActionAccessService } from '../leadflow-agents/services/leadflow-operations-action-access.service';
+import { LeadFlowOperationsActionExecutorService } from '../leadflow-agents/services/leadflow-operations-action-executor.service';
+import { LeadFlowAgentPauseResumeService } from '../leadflow-agents/services/leadflow-agent-pause-resume.service';
+import type { ClientAreaAccessLevel } from '../client-area/client-area.types';
 import { OperationsRoomStateService } from '../leadflow-agents/services/operations-room-state.service';
 import { LEADFLOW_CLIENT_SCOPE_SQL } from './leadflow-client-area-scope.service';
 
@@ -63,6 +67,31 @@ describePostgresIntegration()(
       },
     });
     const agency: RequestContext = { tenantId, workspaceId, userId };
+    // The authenticated request the controller derives the principal from.
+    const request = (
+      ctx: RequestContext,
+      level: ClientAreaAccessLevel | null = 'manager',
+    ) =>
+      (ctx.managedContext
+        ? {
+            user: { surface: 'client_area', sub: userId, tenantId },
+            clientAreaContext: {
+              surface: 'client_area',
+              userId,
+              tenantId,
+              workspaceId,
+              agencyClientId: clientId,
+              companyContextId: ctx.managedContext.companyContextId,
+              memberAccess: {
+                leadflow_agents: { available: level !== null, level },
+              },
+            },
+          }
+        : {
+            user: { sub: userId, tenantId, workspaceId, role: 'owner' },
+          }) as never;
+    let resumeJob: LeadFlowAgentPauseResumeService;
+    const notifications = { process: jest.fn().mockResolvedValue(undefined) };
     const proposal = {
       intent: 'capacity_released' as const,
       requestText: 'Liberou uma mesa sexta às 15h',
@@ -196,7 +225,7 @@ describePostgresIntegration()(
         runner.manager.getRepository(AgencyWorkspaceUserEntity),
         runner.manager.getRepository(AgencyUserProfileEntity),
         new LeadFlowAgentPresetService(),
-        {} as never,
+        { buildAgentContract: () => ({}) } as never,
         {} as never,
         new LeadFlowAgentBindingReconcilerService(scoped),
         { recordTransition: () => Promise.resolve(undefined) } as never,
@@ -212,7 +241,26 @@ describePostgresIntegration()(
           scoped,
           runner.manager.getRepository(LeadFlowClientSettingsEntity),
           runner.manager.getRepository(LeadFlowOperationsActionEntity),
+          agentService,
+          // Real level projection; the bridge scope resolver is proven by the
+          // `room-action` SQL below and by the CA11 suites.
+          new LeadFlowOperationsActionAccessService(
+            { assertAny: () => Promise.resolve() } as never,
+            { assertClientAreaScope: () => Promise.resolve() } as never,
+          ),
+          new LeadFlowOperationsActionExecutorService(
+            agentService,
+            {} as never,
+            {} as never,
+            {} as never,
+          ),
         ),
+      );
+      resumeJob = new LeadFlowAgentPauseResumeService(
+        scoped,
+        runner.manager.getRepository(LeadFlowAgentEntity),
+        agentService,
+        notifications as never,
       );
     });
     afterEach(async () => {
@@ -243,7 +291,11 @@ describePostgresIntegration()(
     });
 
     it('a sibling company never lists, confirms or cancels another company proposal', async () => {
-      const own = await controller.proposeRoomAction(company(a), proposal);
+      const own = await controller.proposeRoomAction(
+        company(a),
+        request(company(a)),
+        proposal,
+      );
       expect(
         (await controller.listRoomActions(company(a))).items.map((i) => i.id),
       ).toEqual([own.id]);
@@ -251,7 +303,7 @@ describePostgresIntegration()(
       expect((await controller.listRoomActions(agency)).items).toEqual([]);
       for (const ctx of [company(b), agency]) {
         await expect(
-          controller.confirmRoomAction(ctx, own.id, {
+          controller.confirmRoomAction(ctx, request(ctx), own.id, {
             expectedRevision: own.revision,
           }),
         ).rejects.toBeInstanceOf(NotFoundException);
@@ -274,14 +326,21 @@ describePostgresIntegration()(
         { id: own.id, client: clientId, company: a, creator: userId },
       ]);
       expect(await scope(b)).toEqual([]);
-      const confirmed = await controller.confirmRoomAction(company(a), own.id, {
-        expectedRevision: own.revision,
-      });
+      const confirmed = await controller.confirmRoomAction(
+        company(a),
+        request(company(a)),
+        own.id,
+        { expectedRevision: own.revision },
+      );
       expect(confirmed.status).toBe('confirmed');
     });
 
     it('keeps the Agency room proposals in the Agency settings row', async () => {
-      const own = await controller.proposeRoomAction(agency, proposal);
+      const own = await controller.proposeRoomAction(
+        agency,
+        request(agency),
+        proposal,
+      );
       expect(
         (await controller.listRoomActions(agency)).items.map((i) => i.id),
       ).toEqual([own.id]);
@@ -291,6 +350,121 @@ describePostgresIntegration()(
         [own.id],
       );
       expect(row).toEqual([{ settings_id: settings.agency }]);
+    });
+
+    describe('OR5 — timed pause, confirmer permission and agent scope', () => {
+      const pause = (
+        targetAgentId: string,
+        endsAt: string | null,
+        agentId?: string,
+      ) => ({
+        intent: 'pause_agent' as const,
+        requestText: 'pausa até segunda',
+        agentId,
+        payload: {
+          targetAgentId,
+          timezone: 'America/Sao_Paulo',
+          effectivePeriod: { endsAt },
+        },
+      });
+      const agentRow = async (id: string) =>
+        (
+          (await runner.query(
+            'SELECT status, paused_until FROM leadflow_agents WHERE id=$1',
+            [id],
+          )) as Array<{ status: string; paused_until: Date | null }>
+        )[0];
+
+      it('a company never targets a sibling company agent, as target or as agent', async () => {
+        const until = new Date(Date.now() + 2 * 86_400_000).toISOString();
+        await expect(
+          controller.proposeRoomAction(
+            company(a),
+            request(company(a)),
+            pause(agents.b, until),
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        await expect(
+          controller.proposeRoomAction(
+            company(a),
+            request(company(a)),
+            pause(agents.a, until, agents.b),
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        // An agent only pauses itself.
+        await expect(
+          controller.proposeRoomAction(
+            agency,
+            request(agency),
+            pause(agents.a, until, agents.agency),
+          ),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(
+          await runner.query(
+            'SELECT count(*)::int AS n FROM leadflow_operations_actions',
+          ),
+        ).toEqual([{ n: 0 }]);
+      });
+
+      it('the confirmer level decides: operator is refused, manager pauses until the date', async () => {
+        const until = new Date(Date.now() + 2 * 86_400_000);
+        const own = await controller.proposeRoomAction(
+          company(a),
+          request(company(a)),
+          pause(agents.a, until.toISOString(), agents.a),
+        );
+        expect(own).toMatchObject({ agentId: agents.a, canConfirm: true });
+        await expect(
+          controller.confirmRoomAction(
+            company(a),
+            request(company(a), 'operator'),
+            own.id,
+            { expectedRevision: own.revision },
+          ),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(await agentRow(agents.a)).toMatchObject({
+          status: 'active',
+          paused_until: null,
+        });
+        const confirmed = await controller.confirmRoomAction(
+          company(a),
+          request(company(a)),
+          own.id,
+          { expectedRevision: own.revision },
+        );
+        expect(confirmed.status).toBe('confirmed');
+        const row = await agentRow(agents.a);
+        expect(row.status).toBe('paused');
+        expect(row.paused_until?.toISOString()).toBe(until.toISOString());
+        // The sibling company agent is untouched.
+        expect((await agentRow(agents.b)).status).toBe('active');
+      });
+
+      it('the resume job reactivates only due agents, once', async () => {
+        const due = new Date(Date.now() - 60_000);
+        const later = new Date(Date.now() + 86_400_000);
+        await runner.query(
+          `UPDATE leadflow_agents SET status='paused', paused_until=$2, updated_by_id=$3 WHERE id=$1`,
+          [agents.a, due, userId],
+        );
+        await runner.query(
+          `UPDATE leadflow_agents SET status='paused', paused_until=$2 WHERE id=$1`,
+          [agents.b, later],
+        );
+        expect(await resumeJob.resumeDue()).toBe(1);
+        expect(await agentRow(agents.a)).toMatchObject({
+          status: 'active',
+          paused_until: null,
+        });
+        expect((await agentRow(agents.b)).status).toBe('paused');
+        expect(notifications.process).toHaveBeenCalledWith(
+          expect.objectContaining({
+            eventType: 'leadflow.agent.pause_ended',
+            recipients: [expect.objectContaining({ userId })],
+          }),
+        );
+        expect(await resumeJob.resumeDue()).toBe(0);
+      });
     });
   },
 );

@@ -10,8 +10,11 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { AuthenticatedRequest } from '../auth/types/authenticated-request.type';
+import type { ClientAreaRequest } from '../client-area/client-area.types';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
@@ -46,6 +49,7 @@ import {
 } from './services/leadflow-agent.service';
 import { OperationsRoomStateService } from './services/operations-room-state.service';
 import { LeadFlowOperationsActionService } from './services/leadflow-operations-action.service';
+import { leadFlowActionAccessOf } from './services/leadflow-operations-action-access.service';
 
 @Controller('leadflow/agents')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -124,9 +128,14 @@ export class LeadFlowAgentsController {
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
   proposeRoomAction(
     @RequestContextData() ctx: RequestContext,
+    @Req() request: AuthenticatedRequest & ClientAreaRequest,
     @Body() dto: CreateLeadFlowOperationsActionDto,
   ): Promise<LeadFlowOperationsActionResponse> {
-    return this.operationsActionService.propose(ctx, dto);
+    return this.operationsActionService.propose(
+      ctx,
+      dto,
+      leadFlowActionAccessOf(request),
+    );
   }
 
   @ClientAreaExposed('leadflow_agents')
@@ -134,10 +143,18 @@ export class LeadFlowAgentsController {
   @RequirePermission(LEADFLOW_AGENTS_PERMISSIONS.manage)
   confirmRoomAction(
     @RequestContextData() ctx: RequestContext,
+    @Req() request: AuthenticatedRequest & ClientAreaRequest,
     @Param('actionId', ParseUUIDPipe) actionId: string,
     @Body() dto: ConfirmLeadFlowOperationsActionDto,
   ): Promise<LeadFlowOperationsActionResponse> {
-    return this.operationsActionService.confirm(ctx, actionId, dto);
+    // OR5: the confirmer's own permission for the executed route is checked
+    // in the service; `manage` here only opens the room actions.
+    return this.operationsActionService.confirm(
+      ctx,
+      actionId,
+      dto,
+      leadFlowActionAccessOf(request),
+    );
   }
 
   @ClientAreaExposed('leadflow_agents')

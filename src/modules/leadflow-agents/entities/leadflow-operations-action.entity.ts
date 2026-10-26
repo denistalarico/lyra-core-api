@@ -14,10 +14,24 @@ export const LEADFLOW_OPERATIONS_ACTION_INTENTS = [
   'update_business_hours',
   'capacity_unavailable',
   'capacity_released',
+  // OR5: executed on confirmation through the domain service, with the
+  // confirmer's permission.
+  'pause_agent',
+  'activate_agent',
+  'create_contact',
+  'move_opportunity',
+  'update_contact_fields',
+  'create_appointment',
 ] as const;
 
 export type LeadFlowOperationsActionIntent =
   (typeof LEADFLOW_OPERATIONS_ACTION_INTENTS)[number];
+
+export type LeadFlowOperationsActionTargetType =
+  | 'agent'
+  | 'contact'
+  | 'opportunity'
+  | 'appointment';
 
 export const LEADFLOW_OPERATIONS_ACTION_STATUSES = [
   'pending_confirmation',
@@ -59,6 +73,16 @@ export class LeadFlowOperationsActionEntity {
 
   @Column({ type: 'varchar', length: 60 })
   intent!: LeadFlowOperationsActionIntent;
+
+  /** OR5: the agent the proposal was made to; `null` = the Orion. */
+  @Column({ name: 'agent_id', type: 'uuid', nullable: true })
+  agentId!: string | null;
+
+  @Column({ name: 'target_type', type: 'varchar', length: 40, nullable: true })
+  targetType!: LeadFlowOperationsActionTargetType | null;
+
+  @Column({ name: 'target_id', type: 'uuid', nullable: true })
+  targetId!: string | null;
 
   @Column({ type: 'varchar', length: 30 })
   status!: LeadFlowOperationsActionStatus;

@@ -10,6 +10,7 @@ export {
   LEADFLOW_OPERATIONS_ACTION_STATUSES,
   type LeadFlowOperationsActionIntent,
   type LeadFlowOperationsActionStatus,
+  type LeadFlowOperationsActionTargetType,
 } from './leadflow-operations-action.entity';
 export {
   LeadFlowOperationsActionEventEntity,

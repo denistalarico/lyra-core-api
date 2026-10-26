@@ -5,11 +5,16 @@ import { LeadFlowAgendaService } from '../../leadflow-agenda/leadflow-agenda.ser
 import { LeadFlowAgentService } from '../../leadflow-agents/services/leadflow-agent.service';
 import { LeadFlowAnalyticsService } from '../../leadflow-analytics/services/leadflow-analytics.service';
 import { LeadFlowOperationalAnalyticsService } from '../../leadflow-analytics/services/leadflow-operational-analytics.service';
-import type { OrionToolCallRecord } from '../entities';
+import type { OrionToolCallRecord, OrionTurnSurface } from '../entities';
 import { ORION_CAPABILITIES_MANIFEST } from '../manifest/orion-capabilities.manifest';
 import { OrionConfigService } from '../orion-config.service';
 import type { OrionToolCall } from '../orion.provider';
-import type { OrionCard, OrionUiAction } from '../orion.types';
+import type { OrionCard, OrionProposal, OrionUiAction } from '../orion.types';
+import {
+  ORION_PROPOSAL_INTENTS,
+  OrionProposalService,
+  type OrionProposalIntent,
+} from './orion-proposal.service';
 import { OrionHelpSearchService } from './orion-help-search.service';
 import {
   ORION_DAYS,
@@ -30,6 +35,11 @@ import { ORION_TOOL_CATALOG, type OrionToolName } from './orion-tool-catalog';
 export type OrionToolRun = {
   ctx: RequestContext;
   access: OrionAccess;
+  /** OR5: the user's text and a per-call key, for proposals only. */
+  requestText?: string;
+  callKey?: string;
+  /** Proposals only exist where a card can be confirmed (the room). */
+  surface?: OrionTurnSurface;
 };
 
 export type OrionToolExecution = {
@@ -38,6 +48,7 @@ export type OrionToolExecution = {
   payload: unknown;
   card?: OrionCard;
   uiAction?: OrionUiAction;
+  proposal?: OrionProposal;
 };
 
 type Args = Record<string, unknown>;
@@ -70,6 +81,7 @@ export class OrionToolsService {
     private readonly crm: CrmService,
     private readonly agenda: LeadFlowAgendaService,
     private readonly config: OrionConfigService,
+    private readonly proposals: OrionProposalService,
   ) {}
 
   async execute(
@@ -94,6 +106,12 @@ export class OrionToolsService {
     const args = parseArguments(call.arguments);
     if (!args || !validArguments(spec.name, args))
       return fail('invalid', 'invalid_arguments');
+    // OR5: the confirmation card exists only in the Operations Room.
+    if (
+      spec.name === 'propose_action' &&
+      (run.surface ?? 'operations_room') !== 'operations_room'
+    )
+      return fail('invalid', 'proposals_only_in_operations_room');
 
     if (
       spec.requirement &&
@@ -134,6 +152,17 @@ export class OrionToolsService {
         return this.agendaForDay(args.day as OrionDay, run.ctx);
       case 'ui_action':
         return Promise.resolve(uiAction(args, run.access.kind));
+      case 'propose_action':
+        return this.proposals.propose(
+          args.intent as OrionProposalIntent,
+          args,
+          {
+            ctx: run.ctx,
+            access: run.access,
+            requestText: run.requestText ?? '',
+            idempotencyKey: `orion:${run.callKey ?? 'call'}`,
+          },
+        );
     }
   }
 
@@ -368,6 +397,10 @@ function validArguments(name: OrionToolName, args: Args): boolean {
       return (ORION_DAYS as readonly unknown[]).includes(args.day);
     case 'ui_action':
       return typeof args.action === 'string' && typeof args.value === 'string';
+    case 'propose_action':
+      return (ORION_PROPOSAL_INTENTS as readonly unknown[]).includes(
+        args.intent,
+      );
     default:
       return true;
   }

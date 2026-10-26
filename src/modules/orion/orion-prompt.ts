@@ -1,11 +1,12 @@
 import { ORION_CAPABILITIES_MANIFEST } from './manifest/orion-capabilities.manifest';
+import type { OrionTurnSurface } from './entities';
 import type { OrionChatMessage } from './orion.provider';
 
 /**
  * Bumped whenever the wording below changes, so an old turn stays
  * explainable (recorded in `orion_turns.prompt_version`).
  */
-export const ORION_PROMPT_VERSION = 'orion-v1';
+export const ORION_PROMPT_VERSION = 'orion-v2';
 
 const MANIFEST_TEXT = JSON.stringify(ORION_CAPABILITIES_MANIFEST);
 
@@ -34,8 +35,13 @@ export function orionSystemPrompt(principal: 'agency' | 'client_area'): string {
       '2. Use só números que as ferramentas devolveram. Não invente métricas, ' +
       'nomes, telas nem funcionalidades. Se não souber, diga que não sabe e ' +
       'sugira a Central de Ajuda.\n' +
-      '3. Você não altera nada no sistema. Se pedirem uma alteração, explique ' +
-      'onde ela é feita (tela e caminho) ou o comando da sala que a propõe.\n' +
+      '3. Você nunca altera nada sozinho. Para pausar (até uma data) ou ativar ' +
+      'um agente, criar contato, mover oportunidade, atualizar nome/cargo de ' +
+      'contato ou criar compromisso, use propose_action: ela só cria um cartão ' +
+      'que a pessoa confirma. Diga que a alteração acontece depois da ' +
+      'confirmação. Se a ferramenta devolver "_ambiguous", pergunte qual dos ' +
+      'candidatos; "_not_found", peça o nome certo. Outras alterações: explique ' +
+      'onde são feitas (tela e caminho).\n' +
       '4. Recuse com educação: pagamentos, baixas e estornos financeiros; ' +
       'usuários, papéis e permissões; credenciais, tokens e integrações; ' +
       'exclusão em massa; exportação de dados brutos; enviar mensagem a lead em ' +
@@ -69,6 +75,7 @@ export function orionTurnMessages(
   principal: 'agency' | 'client_area',
   session: OrionSessionContext,
   text: string,
+  surface: OrionTurnSurface = 'operations_room',
 ): OrionChatMessage[] {
   const context = {
     primeiroNome: session.firstName,
@@ -76,7 +83,12 @@ export function orionTurnMessages(
     agenteSelecionado: session.selectedAgentName,
     hoje: session.today,
     fuso: session.timeZone,
-    superficie: 'Operations Room',
+    superficie:
+      surface === 'team_chat'
+        ? 'Team Chat'
+        : surface === 'client_chat'
+          ? 'Chat agência-cliente'
+          : 'Operations Room',
   };
   return [
     { role: 'system', content: orionSystemPrompt(principal) },

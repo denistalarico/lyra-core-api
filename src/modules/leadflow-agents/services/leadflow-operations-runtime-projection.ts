@@ -1,4 +1,5 @@
 import type { LeadFlowOperationsActionEntity } from '../entities';
+import { RULE_INTENTS } from './leadflow-operations-action-domain';
 
 export type LeadFlowOperationalRule = {
   actionId: string;
@@ -20,6 +21,8 @@ export function projectLeadFlowOperationalRules(
   const effective = actions
     .filter(
       (action) =>
+        // OR5: executed intents (pause, CRM, agenda) are not runtime rules.
+        RULE_INTENTS.has(action.intent) &&
         action.status === 'confirmed' &&
         action.effectiveFrom !== null &&
         (action.effectiveUntil === null ||

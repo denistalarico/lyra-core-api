@@ -138,6 +138,12 @@ function setup(allowed = true) {
         { stageId: 's2' },
       ]),
   };
+  const proposals = {
+    propose: jest.fn().mockResolvedValue({
+      payload: { proposal: { title: 'Pausar agente' } },
+      proposal: { id: 'p1', title: 'Pausar agente' },
+    }),
+  };
   const service = new OrionToolsService(
     access as unknown as OrionToolAccessService,
     help as never,
@@ -147,8 +153,9 @@ function setup(allowed = true) {
     crm as never,
     agenda as never,
     { timeZone: 'America/Sao_Paulo' } as OrionConfigService,
+    proposals as never,
   );
-  return { service, access, help, operational, agents, agenda, crm };
+  return { service, access, help, operational, agents, agenda, crm, proposals };
 }
 
 const call = (name: string, args: unknown) => ({
@@ -321,6 +328,63 @@ describe('OrionToolsService', () => {
     ).resolves.toEqual({
       record: { name: 'list_agents', outcome: 'error' },
       payload: { error: 'unavailable' },
+    });
+  });
+
+  describe('OR5 propose_action', () => {
+    it('needs the room proposal route and a known intent; passes the turn text and call key', async () => {
+      const denied = setup(false);
+      await expect(
+        denied.service.execute(
+          call('propose_action', { intent: 'pause_agent', agent: 'Ana' }),
+          { ctx, access: agency },
+        ),
+      ).resolves.toMatchObject({ record: { outcome: 'denied' } });
+      expect(denied.proposals.propose).not.toHaveBeenCalled();
+      const [, requirement] = denied.access.allowed.mock.calls[0];
+      expect(requirement.agency).toMatchObject({
+        method: 'POST',
+        routePath: '/leadflow/agents/room/actions',
+      });
+
+      const { service, proposals } = setup();
+      await expect(
+        service.execute(call('propose_action', { intent: 'delete_tenant' }), {
+          ctx,
+          access: agency,
+        }),
+      ).resolves.toMatchObject({ record: { outcome: 'invalid' } });
+      const ok = await service.execute(
+        call('propose_action', {
+          intent: 'pause_agent',
+          agent: 'Ana',
+          tenantId: 'evil',
+        }),
+        { ctx, access: client, requestText: 'pausa a Ana', callKey: 'turn:0' },
+      );
+      expect(ok.record.outcome).toBe('ok');
+      expect(ok.proposal).toMatchObject({ id: 'p1' });
+      // Team Chat (OR6) has no confirmation card: no proposal there.
+      await expect(
+        service.execute(call('propose_action', { intent: 'pause_agent' }), {
+          ctx,
+          access: agency,
+          surface: 'team_chat',
+        }),
+      ).resolves.toMatchObject({
+        payload: { error: 'proposals_only_in_operations_room' },
+      });
+      expect(proposals.propose).toHaveBeenCalledTimes(1);
+      expect(proposals.propose).toHaveBeenCalledWith(
+        'pause_agent',
+        expect.anything(),
+        {
+          ctx,
+          access: client,
+          requestText: 'pausa a Ana',
+          idempotencyKey: 'orion:turn:0',
+        },
+      );
     });
   });
 });

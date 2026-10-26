@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { AgencyContactsModule } from '../agency/agency-contacts.module';
 import { AiCostsModule } from '../ai-costs/ai-costs.module';
 import { CrmModule } from '../crm/crm.module';
 import { LeadFlowAgendaModule } from '../leadflow-agenda/leadflow-agenda.module';
@@ -13,6 +14,7 @@ import { OrionProvider } from './orion.provider';
 import { OrionService } from './orion.service';
 import { OrionHelpSearchService } from './tools/orion-help-search.service';
 import { OrionToolAccessService } from './tools/orion-tool-access.service';
+import { OrionProposalService } from './tools/orion-proposal.service';
 import { OrionToolsService } from './tools/orion-tools.service';
 
 /**
@@ -31,7 +33,11 @@ import { OrionToolsService } from './tools/orion-tools.service';
     LeadFlowAgentsModule,
     LeadFlowAnalyticsModule,
     CrmModule,
-    LeadFlowAgendaModule,
+    // Agenda → appointments → Team Chat → Orion (OR6) closes a file-level
+    // cycle; the forward reference keeps the import defined at decoration.
+    forwardRef(() => LeadFlowAgendaModule),
+    // OR5: contact names are resolved for proposals.
+    AgencyContactsModule,
   ],
   controllers: [OrionController],
   providers: [
@@ -40,9 +46,10 @@ import { OrionToolsService } from './tools/orion-tools.service';
     OrionBudgetService,
     OrionHelpSearchService,
     OrionToolAccessService,
+    OrionProposalService,
     OrionToolsService,
     OrionService,
   ],
-  exports: [OrionService],
+  exports: [OrionService, OrionConfigService],
 })
 export class OrionModule {}

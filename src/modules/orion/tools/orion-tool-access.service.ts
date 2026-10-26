@@ -28,11 +28,13 @@ export type OrionAccess =
  * tool does not exist for the client).
  */
 export type OrionToolRequirement = {
-  agency: { anyOf: readonly string[]; routePath: string };
+  /** `method` defaults to GET (read tools); OR5's proposal tool uses POST. */
+  agency: { anyOf: readonly string[]; routePath: string; method?: string };
   clientArea: {
     module: ClientAreaModuleKey;
     key: string;
     routePath: string;
+    method?: string;
   } | null;
 };
 
@@ -87,7 +89,7 @@ export class OrionToolAccessService {
         access.permission,
         [...requirement.agency.anyOf],
         {
-          method: 'GET',
+          method: requirement.agency.method ?? 'GET',
           routePath: requirement.agency.routePath,
           params: {},
           query: {},
@@ -99,11 +101,12 @@ export class OrionToolAccessService {
 
     const exposure = requirement.clientArea;
     if (!exposure) throw new ForbiddenException('Not available.');
+    const method = exposure.method ?? 'GET';
     const member = access.context.memberAccess?.[exposure.module];
     if (!member?.available) throw new ForbiddenException('Not available.');
     const grant = projectAgencyPermissions(exposure.module, member.level).find(
       (candidate) =>
-        candidate.key === exposure.key && candidate.methods.includes('GET'),
+        candidate.key === exposure.key && candidate.methods.includes(method),
     );
     if (!grant) throw new ForbiddenException('Insufficient module level.');
     await this.scopes.assertClientAreaScope(
@@ -111,7 +114,7 @@ export class OrionToolAccessService {
       exposure.module,
       exposure.key,
       {
-        method: 'GET',
+        method,
         routePath: exposure.routePath,
         params: {},
         query: {},

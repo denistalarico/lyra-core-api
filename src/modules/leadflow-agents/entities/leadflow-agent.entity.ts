@@ -89,6 +89,10 @@ export class LeadFlowAgentEntity {
   @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
   archivedAt!: Date | null;
 
+  /** OR5: a timed pause; the resume job reactivates the agent after it. */
+  @Column({ name: 'paused_until', type: 'timestamptz', nullable: true })
+  pausedUntil!: Date | null;
+
   @DeleteDateColumn({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt!: Date | null;
 

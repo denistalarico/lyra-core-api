@@ -415,6 +415,70 @@ export class LeadFlowAgentService {
     return this.transition(ctx, id, LeadFlowAgentStatus.Paused);
   }
 
+  /**
+   * OR5 — pause with a return date (`null` = no date, like `pause`). The
+   * resume job brings the agent back once `until` passes.
+   */
+  async pauseUntil(
+    ctx: RequestContext,
+    id: string,
+    until: Date | null,
+  ): Promise<LeadFlowAgentDetailResponse> {
+    return this.transition(ctx, id, LeadFlowAgentStatus.Paused, {
+      pausedUntil: until,
+    });
+  }
+
+  /** OR5 — the agent row in the caller's context (agent-scoped proposals). */
+  async findScopedEntity(
+    ctx: RequestContext,
+    id: string,
+  ): Promise<LeadFlowAgentEntity> {
+    const active = await this.resolveActiveContext(ctx);
+    return this.findScopedAgent(ctx, active, id);
+  }
+
+  /**
+   * OR5 — the resume job's step for one agent whose timed pause is due. Runs
+   * without a user, in the agent's own persisted context (never a payload's).
+   * Idempotent: an agent no longer paused, or whose pause moved or was
+   * cleared, is left alone. Returns the agent when it was resumed.
+   */
+  async resumeExpiredPause(
+    row: Pick<
+      LeadFlowAgentEntity,
+      'id' | 'tenantId' | 'workspaceId' | 'agencyClientId' | 'companyContextId'
+    >,
+    now = new Date(),
+  ): Promise<LeadFlowAgentEntity | null> {
+    const ctx: RequestContext = {
+      tenantId: row.tenantId,
+      workspaceId: row.workspaceId,
+      ...(row.agencyClientId && row.companyContextId
+        ? {
+            managedContext: {
+              productKey: 'leadflow',
+              operatingMode: 'client',
+              clientId: row.agencyClientId,
+              companyContextId: row.companyContextId,
+              managedTenantId: null,
+            },
+          }
+        : {}),
+    };
+    const agent = await this.findScopedEntity(ctx, row.id);
+    if (
+      agent.status !== LeadFlowAgentStatus.Paused ||
+      !agent.pausedUntil ||
+      agent.pausedUntil.getTime() > now.getTime()
+    )
+      return null;
+    await this.transition(ctx, agent.id, LeadFlowAgentStatus.Active, {
+      reasonCode: 'agent_pause_expired',
+    });
+    return agent;
+  }
+
   async archive(
     ctx: RequestContext,
     id: string,
@@ -675,6 +739,7 @@ export class LeadFlowAgentService {
     ctx: RequestContext,
     id: string,
     status: LeadFlowAgentStatus,
+    options: { pausedUntil?: Date | null; reasonCode?: string } = {},
   ): Promise<LeadFlowAgentDetailResponse> {
     const active = await this.resolveActiveContext(ctx);
     const agent = await this.findScopedAgent(ctx, active, id);
@@ -686,6 +751,11 @@ export class LeadFlowAgentService {
     }
 
     agent.status = status;
+    // OR5: a manual pause or activation always ends a timed pause.
+    agent.pausedUntil =
+      status === LeadFlowAgentStatus.Paused
+        ? (options.pausedUntil ?? null)
+        : null;
     agent.updatedById = ctx.userId ?? null;
     await this.agentsRepository.save(agent);
 
@@ -703,9 +773,10 @@ export class LeadFlowAgentService {
       status === LeadFlowAgentStatus.Active
         ? RoomAgentOperationalStatus.Available
         : RoomAgentOperationalStatus.Paused,
-      status === LeadFlowAgentStatus.Active
-        ? 'agent_activated'
-        : 'agent_paused',
+      options.reasonCode ??
+        (status === LeadFlowAgentStatus.Active
+          ? 'agent_activated'
+          : 'agent_paused'),
     );
 
     return this.detail(ctx, agent.id);

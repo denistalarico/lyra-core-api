@@ -1,3 +1,4 @@
+import { projectAgencyPermissions } from '../../client-area/client-area-agency-permission-projection';
 import { ForbiddenException } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import { ClientAreaBridgeRegistry } from '../../../common/client-area-bridge/client-area-bridge.registry';
@@ -122,7 +123,7 @@ describe('OrionToolAccessService — permission matrix per tool', () => {
           ),
         ).resolves.toBe(true);
         expect(allowed.scopeRequests[0]).toMatchObject({
-          method: 'GET',
+          method: requirement.agency.method ?? 'GET',
           routePath: requirement.agency.routePath,
           body: null,
         });
@@ -144,9 +145,16 @@ describe('OrionToolAccessService — permission matrix per tool', () => {
         {} as never,
         realClientAreaEvaluator(),
       );
+      // Reads open at every level; OR5's proposal tool (POST) only where
+      // the level projects the room proposal grant (`manager`).
+      const method = exposure.method ?? 'GET';
+      const projected = projectAgencyPermissions(exposure.module, level).some(
+        (grant) => grant.key === exposure.key && grant.methods.includes(method),
+      );
+      expect(projected).toBe(method === 'GET' || level === 'manager');
       await expect(
         service.allowed(clientAccess(level), tool.requirement!),
-      ).resolves.toBe(true);
+      ).resolves.toBe(projected);
       // The module switched off for the member denies, whatever the level.
       await expect(
         service.allowed(

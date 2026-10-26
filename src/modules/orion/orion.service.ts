@@ -13,7 +13,7 @@ import { resolveCompanyAwareScope } from '../../common/context/company-aware-sco
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { LeadFlowAgentService } from '../leadflow-agents/services/leadflow-agent.service';
 import type { CreateOrionTurnDto } from './dto/create-orion-turn.dto';
-import type { OrionToolCallRecord } from './entities';
+import type { OrionToolCallRecord, OrionTurnSurface } from './entities';
 import {
   OrionBudgetService,
   type OrionReservation,
@@ -31,6 +31,7 @@ import { OrionProvider } from './orion.provider';
 import { OrionLimitError, OrionProviderError } from './orion.errors';
 import type {
   OrionCard,
+  OrionProposal,
   OrionStatusResponse,
   OrionTurnLimit,
   OrionTurnResponse,
@@ -84,6 +85,9 @@ export class OrionService {
     ctx: RequestContext,
     access: OrionAccess,
     dto: CreateOrionTurnDto,
+    invocation: { surface: OrionTurnSurface } = {
+      surface: 'operations_room',
+    },
   ): Promise<OrionTurnResponse> {
     if (!this.config.available)
       throw new ServiceUnavailableException({
@@ -97,7 +101,7 @@ export class OrionService {
         message: 'Escreva uma pergunta para o Orion.',
       });
 
-    const scope = turnScope(ctx, access);
+    const scope = turnScope(ctx, access, invocation.surface);
     let reservation: OrionReservation;
     try {
       reservation = await this.budget.reserve({
@@ -131,13 +135,19 @@ export class OrionService {
     const records: OrionToolCallRecord[] = [];
     let card: OrionCard | null = null;
     let uiAction: OrionUiAction | null = null;
+    let proposal: OrionProposal | null = null;
     let attempts = 0;
     let rounds = 0;
     let answer: string | null = null;
 
     try {
       const session = await this.sessionContext(ctx, access, dto.agentId);
-      const messages = orionTurnMessages(access.kind, session, text);
+      const messages = orionTurnMessages(
+        access.kind,
+        session,
+        text,
+        invocation.surface,
+      );
       const definitions = orionToolDefinitions(access.kind);
       for (let round = 1; round <= this.config.maxRounds; round += 1) {
         rounds = round;
@@ -169,10 +179,17 @@ export class OrionService {
           })),
         });
         for (const call of calls) {
-          const execution = await this.tools.execute(call, { ctx, access });
+          const execution = await this.tools.execute(call, {
+            ctx,
+            access,
+            requestText: text,
+            callKey: `${reservation.id}:${records.length}`,
+            surface: invocation.surface,
+          });
           records.push(execution.record);
           if (execution.card) card = mergeCards(card, execution.card);
           if (execution.uiAction) uiAction = execution.uiAction;
+          if (execution.proposal) proposal = execution.proposal;
           messages.push(orionToolMessage(call.id, execution.payload));
         }
       }
@@ -209,7 +226,7 @@ export class OrionService {
       text: answer.slice(0, MAX_ANSWER_CHARS),
       card,
       uiAction,
-      proposal: null,
+      proposal,
       meta: {
         ai: true,
         mode: this.config.mode === 'mock' ? 'mock' : 'live',
@@ -311,7 +328,11 @@ export class OrionService {
 }
 
 /** The turn's scope, from the authenticated principal only. */
-function turnScope(ctx: RequestContext, access: OrionAccess): OrionTurnScope {
+function turnScope(
+  ctx: RequestContext,
+  access: OrionAccess,
+  surface: OrionTurnSurface,
+): OrionTurnScope {
   if (access.kind === 'client_area') {
     const context = access.context;
     return {
@@ -321,7 +342,7 @@ function turnScope(ctx: RequestContext, access: OrionAccess): OrionTurnScope {
       companyContextId: context.companyContextId,
       userId: context.userId,
       principal: 'client_area',
-      surface: 'operations_room',
+      surface,
     };
   }
   if (!ctx.userId)
@@ -334,7 +355,7 @@ function turnScope(ctx: RequestContext, access: OrionAccess): OrionTurnScope {
     companyContextId: company.companyContextId,
     userId: ctx.userId,
     principal: 'agency',
-    surface: 'operations_room',
+    surface,
   };
 }
 

@@ -4,6 +4,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
   MinLength,
@@ -30,6 +31,11 @@ export class CreateLeadFlowOperationsActionDto {
   @IsString()
   @MaxLength(160)
   idempotencyKey?: string;
+
+  /** OR5: the agent the request was made to; its scope limits the proposal. */
+  @IsOptional()
+  @IsUUID()
+  agentId?: string;
 }
 
 export class ConfirmLeadFlowOperationsActionDto {
@@ -49,6 +55,11 @@ export type LeadFlowOperationsActionResponse = {
   validationIssues: string[];
   canConfirm: boolean;
   revision: number;
+  /** OR5: the agent the proposal was made to (`null` = the Orion). */
+  agentId: string | null;
+  targetType: string | null;
+  /** The execution outcome of an OR5 intent, once confirmed. */
+  result: Record<string, unknown> | null;
   effectiveFrom: string | null;
   effectiveUntil: string | null;
   timezone: string | null;
