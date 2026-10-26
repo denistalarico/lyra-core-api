@@ -69,5 +69,198 @@
       "reports-managerial-dre",
       "best-practices-monthly-routine"
     ]
+  },
+  {
+    "key": "conhecendo-o-orion",
+    "title": "Conhecendo o Orion",
+    "description": "O que o assistente da plataforma faz, como chamá-lo e quais são os limites de dados e de custo.",
+    "audience": "Todos",
+    "estimatedMinutes": 16,
+    "productKey": "lyra-agency",
+    "moduleKey": "orion",
+    "order": 5,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "orion-what-it-does",
+      "orion-commands",
+      "orion-mentions",
+      "orion-privacy-limits"
+    ]
+  },
+  {
+    "key": "primeiros-passos-leadflow",
+    "title": "Primeiros passos no LeadFlow",
+    "description": "Do tipo de negócio ao primeiro agente atendendo: a ordem certa para ativar o LeadFlow.",
+    "audience": "Quem vai ativar o LeadFlow",
+    "estimatedMinutes": 36,
+    "productKey": "lyra-leadflow",
+    "moduleKey": "leadflow",
+    "order": 6,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "leadflow-overview",
+      "leadflow-settings-business-mode",
+      "channels-overview",
+      "agents-overview",
+      "agents-create-from-preset",
+      "crm-pipelines-stages",
+      "leadflow-briefing"
+    ]
+  },
+  {
+    "key": "agentes-e-operations-room",
+    "title": "Agentes e Operations Room",
+    "description": "Crie, configure e acompanhe os agentes, e use a Operations Room para consultar e ajustar a operação.",
+    "audience": "Gestores",
+    "estimatedMinutes": 38,
+    "productKey": "lyra-leadflow",
+    "moduleKey": "leadflow",
+    "order": 7,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "agents-overview",
+      "agents-create-from-preset",
+      "agents-channels-activation",
+      "agents-handoff",
+      "agents-crm-behavior",
+      "operations-room-chat",
+      "agents-pause-activate",
+      "orion-what-it-does"
+    ]
+  },
+  {
+    "key": "area-do-cliente-para-agencias",
+    "title": "Área do Cliente para agências",
+    "description": "Ative o portal, convide o responsável, defina níveis por módulo, aplique a sua marca e converse com o cliente.",
+    "audience": "Owner da agência",
+    "estimatedMinutes": 26,
+    "productKey": "lyra-agency",
+    "moduleKey": "client-area",
+    "order": 8,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "client-area-overview",
+      "client-area-invite",
+      "client-area-module-levels",
+      "client-area-white-label",
+      "client-conversations"
+    ]
+  },
+  {
+    "key": "conectar-canais",
+    "title": "Conectar os canais de atendimento",
+    "description": "Escolha e conecte os canais que chegam ao Inbox do LeadFlow.",
+    "audience": "Owner/Admin",
+    "estimatedMinutes": 30,
+    "productKey": "lyra-leadflow",
+    "moduleKey": "leadflow-channels",
+    "order": 9,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "channels-overview",
+      "channel-whatsapp",
+      "channel-instagram",
+      "channel-messenger",
+      "channel-webchat",
+      "channel-sms"
+    ]
+  },
+  {
+    "key": "crm-e-funil",
+    "title": "CRM e funil comercial",
+    "description": "Funis, etapas, oportunidades, contatos, lead score e atividades.",
+    "audience": "Comercial",
+    "estimatedMinutes": 25,
+    "productKey": "lyra-leadflow",
+    "moduleKey": "leadflow",
+    "order": 10,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "crm-pipelines-stages",
+      "crm-opportunities",
+      "crm-contacts",
+      "crm-lead-score",
+      "crm-activities"
+    ]
+  },
+  {
+    "key": "automacoes-e-followup",
+    "title": "Automações e follow-up",
+    "description": "Receitas, cadência de follow-up, variáveis, distribuição de leads e webhooks.",
+    "audience": "Gestores",
+    "estimatedMinutes": 25,
+    "productKey": "lyra-leadflow",
+    "moduleKey": "leadflow",
+    "order": 11,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "automations-overview",
+      "automations-followup-cadence",
+      "automations-message-variables",
+      "automations-lead-distribution",
+      "automations-webhooks"
+    ]
+  },
+  {
+    "key": "agenda",
+    "title": "Agenda e compromissos",
+    "description": "Configure a agenda, marque e remarque compromissos e deixe o agente agendar.",
+    "audience": "Recepção/agenda",
+    "estimatedMinutes": 15,
+    "productKey": "lyra-leadflow",
+    "moduleKey": "leadflow",
+    "order": 12,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "appointments-setup",
+      "appointments-daily",
+      "appointments-agent-scheduling"
+    ]
+  },
+  {
+    "key": "primeiros-passos-social",
+    "title": "Primeiros passos no Social",
+    "description": "Conecte as contas, monte o Brand Kit e planeje o conteúdo com IA.",
+    "audience": "Social media",
+    "estimatedMinutes": 25,
+    "productKey": "lyra-social",
+    "moduleKey": "social",
+    "order": 13,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "social-overview",
+      "social-connect-accounts",
+      "social-brand-kit",
+      "social-settings",
+      "social-planner-plans"
+    ]
+  },
+  {
+    "key": "social-producao-e-aprovacao",
+    "title": "Produção, aprovação e publicação",
+    "description": "Do conteúdo criado à aprovação do cliente, publicação e relatório.",
+    "audience": "Social media e cliente",
+    "estimatedMinutes": 25,
+    "productKey": "lyra-social",
+    "moduleKey": "social",
+    "order": 14,
+    "locale": "pt-BR",
+    "status": "published",
+    "articleKeys": [
+      "social-planner-content",
+      "social-creative-studio",
+      "social-approvals",
+      "social-publishing",
+      "social-analytics"
+    ]
   }
 ]

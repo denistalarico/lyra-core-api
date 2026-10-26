@@ -9,6 +9,12 @@ import sanitizeHtml from "sanitize-html";
  *   inline code, fenced code blocks, blockquote, [links](url) (internal and
  *   external), GFM pipe tables and horizontal rules.
  *
+ * Reader extras (OR-DOC): `h2`/`h3` get a stable `id` (the article page builds
+ * its "Neste artigo" index from them), tables are wrapped so they scroll on
+ * narrow screens, and a blockquote opening with a known bold label
+ * (`> **Dica:** …`) becomes a callout. The label stays plain Markdown, so the
+ * raw article still reads naturally for the Orion help search.
+ *
  * The output is ALWAYS run through sanitize-html so that, even though the
  * source is trusted, no raw/dangerous HTML can ever reach the browser. The
  * frontend renders the result via dangerouslySetInnerHTML, so sanitizing here
@@ -40,13 +46,37 @@ const ALLOWED_TAGS = [
   "tr",
   "th",
   "td",
+  "aside",
+  "div",
 ];
 
 const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   a: ["href", "target", "rel"],
   th: ["colspan", "rowspan", "align"],
   td: ["colspan", "rowspan", "align"],
+  h2: ["id"],
+  h3: ["id"],
 };
+
+// Callout label (normalized, no accents) → variant. Anything else stays a
+// plain blockquote.
+const CALLOUTS: Record<string, string> = {
+  dica: "tip",
+  nota: "note",
+  importante: "important",
+  atencao: "warning",
+  permissao: "permission",
+};
+
+const ALLOWED_CLASSES: Record<string, string[]> = {
+  aside: ["help-callout", ...Object.values(CALLOUTS).map((v) => `help-callout--${v}`)],
+  p: ["help-callout-title"],
+  div: ["help-table"],
+};
+
+interface RenderState {
+  usedIds: Map<string, number>;
+}
 
 // Private-use-area sentinels for inline-code placeholders. These characters
 // never occur in authored prose, so placeholders cannot collide with real text
@@ -55,10 +85,11 @@ const CODE_OPEN = String.fromCharCode(0xe000);
 const CODE_CLOSE = String.fromCharCode(0xe001);
 
 export function markdownToHtml(markdown: string): string {
-  const html = renderBlocks(markdown ?? "");
+  const html = renderBlocks(markdown ?? "", { usedIds: new Map() });
   return sanitizeHtml(html, {
     allowedTags: ALLOWED_TAGS,
     allowedAttributes: ALLOWED_ATTRIBUTES,
+    allowedClasses: ALLOWED_CLASSES,
     // Relative (internal) links are allowed by omitting them from schemes.
     allowedSchemes: ["http", "https", "mailto"],
     allowedSchemesByTag: { a: ["http", "https", "mailto"] },
@@ -77,7 +108,7 @@ export function markdownToHtml(markdown: string): string {
   });
 }
 
-function renderBlocks(markdown: string): string {
+function renderBlocks(markdown: string, state: RenderState): string {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   let i = 0;
@@ -108,7 +139,9 @@ function renderBlocks(markdown: string): string {
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
       const level = heading[1].length;
-      out.push(`<h${level}>${renderInline(heading[2].trim())}</h${level}>`);
+      const text = heading[2].trim();
+      const id = level === 2 || level === 3 ? ` id="${headingId(text, state)}"` : "";
+      out.push(`<h${level}${id}>${renderInline(text)}</h${level}>`);
       i += 1;
       continue;
     }
@@ -128,20 +161,18 @@ function renderBlocks(markdown: string): string {
         table.push(lines[i]);
         i += 1;
       }
-      out.push(renderTable(table));
+      out.push(`<div class="help-table">${renderTable(table)}</div>`);
       continue;
     }
 
-    // Blockquote.
+    // Blockquote (or callout, when it opens with a known `**Label:**`).
     if (/^>\s?/.test(line)) {
       const quote: string[] = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) {
         quote.push(lines[i].replace(/^>\s?/, ""));
         i += 1;
       }
-      out.push(
-        `<blockquote><p>${renderInline(quote.join(" ").trim())}</p></blockquote>`,
-      );
+      out.push(renderQuote(quote, state));
       continue;
     }
 
@@ -185,6 +216,41 @@ function renderBlocks(markdown: string): string {
   }
 
   return out.join("\n");
+}
+
+function renderQuote(quote: string[], state: RenderState): string {
+  const label = quote[0]?.match(/^\*\*([^*]+?):\*\*\s*(.*)$/);
+  const variant = label ? CALLOUTS[normalizeKey(label[1])] : undefined;
+  if (!label || !variant) {
+    return `<blockquote>${renderBlocks(quote.join("\n"), state)}</blockquote>`;
+  }
+  // "Nota: a conversa…" reads as one sentence in the source; once the label
+  // becomes a title, the body starts its own sentence.
+  const first = label[2].charAt(0).toUpperCase() + label[2].slice(1);
+  const body = [first, ...quote.slice(1)].join("\n");
+  return (
+    `<aside class="help-callout help-callout--${variant}">` +
+    `<p class="help-callout-title">${renderInline(label[1].trim())}</p>` +
+    `${renderBlocks(body, state)}</aside>`
+  );
+}
+
+function normalizeKey(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function headingId(text: string, state: RenderState): string {
+  const base =
+    normalizeKey(text.replace(/[`*_]/g, ""))
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "secao";
+  const seen = state.usedIds.get(base) ?? 0;
+  state.usedIds.set(base, seen + 1);
+  return seen ? `${base}-${seen + 1}` : base;
 }
 
 function isBlockStart(line: string, next?: string): boolean {

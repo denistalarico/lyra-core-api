@@ -70,5 +70,65 @@
     "order": 6,
     "locale": "pt-BR",
     "status": "published"
+  },
+  {
+    "key": "orion",
+    "title": "Orion",
+    "description": "O assistente da plataforma: o que ele faz, como chamar e quais são os limites.",
+    "icon": "Sparkles",
+    "color": "#4f46e5",
+    "productKey": "lyra-agency",
+    "moduleKey": "orion",
+    "order": 7,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "leadflow",
+    "title": "LeadFlow",
+    "description": "Atendimento com agentes de IA: configuração, agentes, Operations Room e Analytics.",
+    "icon": "MessagesSquare",
+    "color": "#7c3aed",
+    "productKey": "lyra-leadflow",
+    "moduleKey": "leadflow",
+    "order": 8,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "leadflow-canais",
+    "title": "Canais do LeadFlow",
+    "description": "WhatsApp, Instagram, Messenger, Webchat e SMS conectados ao Inbox.",
+    "icon": "Radio",
+    "color": "#0d9488",
+    "productKey": "lyra-leadflow",
+    "moduleKey": "leadflow-channels",
+    "order": 9,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "social",
+    "title": "Social",
+    "description": "Planejamento, criação, aprovação, publicação e análise de conteúdo.",
+    "icon": "Megaphone",
+    "color": "#db2777",
+    "productKey": "lyra-social",
+    "moduleKey": "social",
+    "order": 10,
+    "locale": "pt-BR",
+    "status": "published"
+  },
+  {
+    "key": "area-do-cliente",
+    "title": "Área do Cliente",
+    "description": "O portal da agência para os clientes: acessos, módulos, marca e conversas.",
+    "icon": "Building2",
+    "color": "#0284c7",
+    "productKey": "lyra-agency",
+    "moduleKey": "client-area",
+    "order": 11,
+    "locale": "pt-BR",
+    "status": "published"
   }
 ]

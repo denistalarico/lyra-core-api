@@ -249,7 +249,7 @@ describe("HelpCenterService", () => {
     );
 
     const result = await service.getArticleBySlug("md-artigo");
-    expect(result.article.contentHtml).toContain("<h2>Seção</h2>");
+    expect(result.article.contentHtml).toContain('<h2 id="secao">Seção</h2>');
     expect(result.article.contentHtml).toContain("<em>texto</em>");
     expect(result.article.contentHtml).toContain("<code>code</code>");
   });

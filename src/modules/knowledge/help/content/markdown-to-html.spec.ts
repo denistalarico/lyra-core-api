@@ -3,7 +3,7 @@ import { markdownToHtml } from "./markdown-to-html";
 describe("markdownToHtml", () => {
   it("renders headings, paragraphs and inline emphasis", () => {
     const html = markdownToHtml("## Título\n\nTexto com **negrito** e *itálico*.");
-    expect(html).toContain("<h2>Título</h2>");
+    expect(html).toContain('<h2 id="titulo">Título</h2>');
     expect(html).toContain("<strong>negrito</strong>");
     expect(html).toContain("<em>itálico</em>");
     expect(html).toContain("<p>Texto com");
@@ -20,9 +20,46 @@ describe("markdownToHtml", () => {
     const html = markdownToHtml(
       "| A | B |\n| --- | --- |\n| **x** | y |",
     );
-    expect(html).toContain("<table>");
+    expect(html).toContain('<div class="help-table"><table>');
     expect(html).toContain("<th>A</th>");
     expect(html).toContain("<td><strong>x</strong></td>");
+  });
+
+  it("gives h2/h3 stable, accent-free and unique ids for the article index", () => {
+    const html = markdownToHtml(
+      "## Problemas comuns\n\n### Por que `ma-5`?\n\n## Problemas comuns\n\n#### Sem id",
+    );
+    expect(html).toContain('<h2 id="problemas-comuns">');
+    expect(html).toContain('<h3 id="por-que-ma-5">');
+    expect(html).toContain('<h2 id="problemas-comuns-2">');
+    expect(html).toContain("<h4>Sem id</h4>");
+  });
+
+  it("turns a blockquote opening with a known label into a callout", () => {
+    const html = markdownToHtml(
+      "> **Atenção:** pausar não apaga nada.\n>\n> - item um\n> - item dois",
+    );
+    expect(html).toContain('<aside class="help-callout help-callout--warning">');
+    expect(html).toContain('<p class="help-callout-title">Atenção</p>');
+    expect(html).toContain("<p>Pausar não apaga nada.</p>");
+    expect(html).toContain("<ul><li>item um</li><li>item dois</li></ul>");
+    expect(html).not.toContain("<blockquote>");
+
+    expect(markdownToHtml("> **Permissão:** só Owner")).toContain(
+      "help-callout--permission",
+    );
+    // Unknown labels stay a plain quote.
+    expect(markdownToHtml("> **Curiosidade:** x")).toContain("<blockquote>");
+  });
+
+  it("never lets authored classes or ids through outside the allowlist", () => {
+    const html = markdownToHtml(
+      '<aside class="evil help-callout">x</aside>\n\n<p class="x" id="y">z</p>',
+    );
+    // Raw HTML is escaped to inert text: no element carries those attributes.
+    expect(html).not.toContain('<aside class="evil');
+    expect(html).not.toContain('<p class="x"');
+    expect(html).toContain("&lt;aside");
   });
 
   it("renders blockquotes and internal/external links", () => {
