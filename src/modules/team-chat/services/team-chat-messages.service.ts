@@ -1,8 +1,10 @@
 import {
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
@@ -48,6 +50,8 @@ export class TeamChatMessagesService {
     private readonly channelsService: TeamChatChannelsService,
     private readonly teamChatNotificationPublisher: TeamChatNotificationPublisher,
     private readonly assetAccess: AssetAccessService,
+    // Other side of the gateway's forward reference (OR6 cycle).
+    @Inject(forwardRef(() => TeamChatOrionMentionService))
     private readonly orionMentions: TeamChatOrionMentionService,
   ) {}
 

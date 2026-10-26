@@ -30,11 +30,12 @@ import { OrionToolsService } from './tools/orion-tools.service';
     JwtModule.register({}),
     AiCostsModule,
     PermissionsModule,
-    LeadFlowAgentsModule,
+    // Agents → Agenda → appointments → Team Chat → Orion (OR6) closes a
+    // file-level cycle; the forward references keep the imports defined at
+    // decoration.
+    forwardRef(() => LeadFlowAgentsModule),
     LeadFlowAnalyticsModule,
     CrmModule,
-    // Agenda → appointments → Team Chat → Orion (OR6) closes a file-level
-    // cycle; the forward reference keeps the import defined at decoration.
     forwardRef(() => LeadFlowAgendaModule),
     // OR5: contact names are resolved for proposals.
     AgencyContactsModule,

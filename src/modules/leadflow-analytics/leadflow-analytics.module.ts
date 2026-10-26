@@ -2,7 +2,7 @@ import { LeadFlowAnalyticsDashboardsController } from './dashboards/leadflow-ana
 import { LeadFlowAnalyticsDashboardsService } from './dashboards/leadflow-analytics-dashboards.service';
 import { LeadFlowAnalyticsDashboardEntity } from './dashboards/leadflow-analytics-dashboard.entity';
 import { LeadFlowTimeseriesService } from './services/leadflow-timeseries.service';
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CrmOpportunityEntity } from '../crm/entities/crm-opportunity.entity';
 import { CrmOpportunityEventEntity } from '../crm/entities/crm-opportunity-event.entity';
@@ -44,7 +44,8 @@ import { LeadFlowAnalyticsViewsService } from './services/leadflow-analytics-vie
   imports: [
     PermissionsModule,
     DocumentLayoutsModule,
-    InboxModule,
+    // Inbox → … → Team Chat → Orion → Analytics (OR6) closes a file-level cycle.
+    forwardRef(() => InboxModule),
     LeadFlowSettingsModule,
     TypeOrmModule.forFeature(
       [

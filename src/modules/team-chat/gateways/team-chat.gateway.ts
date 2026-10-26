@@ -7,7 +7,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Inject, Logger, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { DefaultEventsMap, Server, Socket } from 'socket.io';
@@ -84,6 +84,8 @@ export class TeamChatGateway
   private readonly logger = new Logger(TeamChatGateway.name);
 
   constructor(
+    // Messages → Orion mentions → card posts → gateway (OR6) is a cycle.
+    @Inject(forwardRef(() => TeamChatMessagesService))
     private readonly messagesService: TeamChatMessagesService,
     private readonly channelsService: TeamChatChannelsService,
     private readonly jwtService: JwtService,
