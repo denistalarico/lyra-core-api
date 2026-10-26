@@ -1,5 +1,6 @@
 import { LEADFLOW_AGENTS_PERMISSIONS } from '../../leadflow-agents/leadflow-agents.permissions';
 import { LEADFLOW_ANALYTICS_PERMISSIONS } from '../../leadflow-analytics/leadflow-analytics.permissions';
+import type { OrionAudience } from '../orion-prompt';
 import type { OrionToolDefinition } from '../orion.provider';
 import type { OrionToolRequirement } from './orion-tool-access.service';
 import { ORION_DAYS, ORION_PERIODS } from './orion-period';
@@ -287,11 +288,29 @@ export const ORION_TOOL_CATALOG: readonly OrionToolSpec[] = [
   },
 ];
 
+/**
+ * OR7 — the agency↔client chat gets an asynchronous text reply: no browser
+ * to act on and no card to confirm, so these tools are not offered there.
+ */
+const NOT_IN_CLIENT_CHAT: ReadonlySet<OrionToolName> = new Set([
+  'ui_action',
+  'propose_action',
+]);
+
+export function orionToolOffered(
+  tool: OrionToolSpec,
+  audience: OrionAudience,
+): boolean {
+  if (audience === 'agency') return true;
+  if (!tool.clientArea) return false;
+  return audience !== 'client_chat' || !NOT_IN_CLIENT_CHAT.has(tool.name);
+}
+
 export function orionToolDefinitions(
-  principal: 'agency' | 'client_area',
+  audience: OrionAudience,
 ): OrionToolDefinition[] {
-  return ORION_TOOL_CATALOG.filter(
-    (tool) => principal === 'agency' || tool.clientArea,
+  return ORION_TOOL_CATALOG.filter((tool) =>
+    orionToolOffered(tool, audience),
   ).map((tool) => ({
     type: 'function',
     function: {

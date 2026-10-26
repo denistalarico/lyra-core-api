@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
@@ -33,4 +34,13 @@ export class SendClientConversationMessageDto {
   @ArrayMaxSize(10)
   @IsUUID('4', { each: true })
   attachmentIds?: string[];
+
+  /**
+   * OR7 — the composer picked the Orion from the `@` list. A marker, not
+   * metadata: the server records `metadata.assistantMention` only when the
+   * body also carries a visible `@Orion`, and never trusts anything else.
+   */
+  @IsOptional()
+  @IsIn(['orion'])
+  assistantMention?: 'orion';
 }

@@ -291,6 +291,34 @@ describe('OrionToolsService', () => {
     expect(clientHit.card?.items[0].route).toBeNull();
   });
 
+  it('OR7: the client chat gets no Agency link, no UI action and no proposal, whoever mentioned', async () => {
+    const { service, access, proposals } = setup();
+    const chatAgency: OrionAccess = {
+      ...agency,
+      clientVisible: { modules: {} as never },
+    } as OrionAccess;
+    const hit = await service.execute(
+      call('search_help', { query: 'whatsapp' }),
+      { ctx, access: chatAgency, surface: 'client_chat' },
+    );
+    expect(hit.card?.items[0].route).toBeNull();
+    for (const who of [chatAgency, client]) {
+      for (const [name, args] of [
+        ['ui_action', { action: 'set_theme', value: 'dark' }],
+        ['propose_action', { intent: 'pause_agent', agent: 'Ana' }],
+      ] as const) {
+        const result = await service.execute(call(name, args), {
+          ctx,
+          access: who,
+          surface: 'client_chat',
+        });
+        expect(result.record).toEqual({ name: 'unknown', outcome: 'invalid' });
+      }
+    }
+    expect(access.allowed).not.toHaveBeenCalled();
+    expect(proposals.propose).not.toHaveBeenCalled();
+  });
+
   it('allows only allowlisted UI actions; the client never navigates to Agency screens', async () => {
     const { service } = setup();
     const theme = await service.execute(

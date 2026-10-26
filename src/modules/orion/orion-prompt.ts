@@ -6,22 +6,39 @@ import type { OrionChatMessage } from './orion.provider';
  * Bumped whenever the wording below changes, so an old turn stays
  * explainable (recorded in `orion_turns.prompt_version`).
  */
-export const ORION_PROMPT_VERSION = 'orion-v2';
+export const ORION_PROMPT_VERSION = 'orion-v3';
 
 const MANIFEST_TEXT = JSON.stringify(ORION_CAPABILITIES_MANIFEST);
 
 /**
+ * Who reads the answer. `client_chat` (OR7) is the agency↔client chat: the
+ * mention may come from either side, but the reply is visible to the client.
+ */
+export type OrionAudience = 'agency' | 'client_area' | 'client_chat';
+
+const CLIENT_LIMITS =
+  'Nunca fale de custo, margem, faturamento da agência, notas internas, outras ' +
+  'empresas ou outros clientes. Não indique telas do painel da agência.';
+
+/**
  * The stable prefix: identity, rules and the manifest. Identical for every
- * tenant and user of a principal, so the provider can cache it (AO-09: the
+ * tenant and user of an audience, so the provider can cache it (AO-09: the
  * cache was barely used before). Nothing user-specific may enter here.
  */
-export function orionSystemPrompt(principal: 'agency' | 'client_area'): string {
+export function orionSystemPrompt(principal: OrionAudience): string {
   const audience =
     principal === 'client_area'
       ? 'Você está falando com um cliente da agência, dentro da Área do Cliente. ' +
-        'Nunca fale de custo, margem, faturamento da agência, notas internas, outras ' +
-        'empresas ou outros clientes. Não indique telas do painel da agência.'
-      : 'Você está falando com um membro da equipe da agência, no painel do Lyra.';
+        CLIENT_LIMITS
+      : principal === 'client_chat'
+        ? 'Você responde no chat entre a agência e um cliente: quem marcou você ' +
+          'pode ser da agência ou do cliente, mas a resposta é sempre visível ao ' +
+          'cliente. ' +
+          CLIENT_LIMITS +
+          ' Se pedirem algo assim, mesmo vindo da agência, recuse com educação e ' +
+          'sugira tratar pelo painel da agência. Neste chat você não altera nada ' +
+          'nem abre telas.'
+        : 'Você está falando com um membro da equipe da agência, no painel do Lyra.';
   return [
     'Você é o Orion, o assistente da plataforma Lyra. Responda sempre em ' +
       'português do Brasil, de forma natural, curta e direta, chamando a pessoa ' +
@@ -72,7 +89,7 @@ export type OrionSessionContext = {
  * the question. Kept after the stable prefix.
  */
 export function orionTurnMessages(
-  principal: 'agency' | 'client_area',
+  principal: OrionAudience,
   session: OrionSessionContext,
   text: string,
   surface: OrionTurnSurface = 'operations_room',

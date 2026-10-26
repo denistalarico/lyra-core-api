@@ -26,6 +26,7 @@ import { EmailModule } from '../email/email.module';
 import { EmailService } from '../email/email.service';
 import { FilesService } from '../../common/files/files.service';
 import { ClientConversationsModule } from './client-conversations.module';
+import { ClientConversationsService } from './services/client-conversations.service';
 import { TenantContextAuthority } from '../../common/context/tenant-context-authority.service';
 
 // `otplib` v13 ships ESM that Jest's CommonJS transform cannot load, and
@@ -414,6 +415,78 @@ run(
             (message) => message.body,
           ),
         ).toContain('Bom dia, podemos alterar a data da campanha?');
+      });
+
+      it('OR7: the Orion reply lands only in its own company conversation, once, authorless', async () => {
+        const service = app.get(ClientConversationsService);
+        const scopeA = {
+          tenantId: T,
+          workspaceId: W,
+          agencyClientId: clientX,
+          companyContextId: A,
+        };
+        const scopeB = {
+          ...scopeA,
+          agencyClientId: clientY,
+          companyContextId: B,
+        };
+        // Provisioned and read through the domain as the Agency operator, so
+        // this case does not depend on the HTTP guard chain above.
+        const op = { surface: 'agency' as const, userId: OP };
+        const conversationA = (
+          await service.ensureDefaultConversation(scopeA, op)
+        ).id;
+        const conversationB = (
+          await service.ensureDefaultConversation(scopeB, op)
+        ).id;
+        const replyTo = randomUUID();
+        const input = {
+          body: 'O funil tem 3 oportunidades abertas.',
+          replyToMessageId: replyTo,
+          dedupeKey: `orion:client-chat:${replyTo}`,
+        };
+
+        // Company A's scope with company B's real conversation id: 404.
+        await expect(
+          service.publishAssistantReply(scopeA, conversationB, input),
+        ).rejects.toMatchObject({ status: 404 });
+
+        const first = await service.publishAssistantReply(
+          scopeA,
+          conversationA,
+          input,
+        );
+        expect(first.status).toBe('posted');
+        expect(first.message).toMatchObject({
+          conversationId: conversationA,
+          senderSurface: 'agency',
+          senderUserId: null,
+          kind: 'text',
+          metadata: {
+            assistant: 'orion',
+            replyToMessageId: replyTo,
+            dedupeKey: input.dedupeKey,
+          },
+        });
+        const again = await service.publishAssistantReply(
+          scopeA,
+          conversationA,
+          input,
+        );
+        expect(again).toMatchObject({
+          status: 'duplicate',
+          message: { id: first.message.id },
+        });
+
+        // It is in company A's conversation and never in company B's.
+        const own = await service.listMessages(scopeA, op, conversationA);
+        expect(own.messages.map((message) => message.body)).toContain(
+          input.body,
+        );
+        const other = await service.listMessages(scopeB, op, conversationB);
+        expect(other.messages.map((message) => message.body)).not.toContain(
+          input.body,
+        );
       });
 
       /** §18 — the viewer preset carries `view` but not `send`. */

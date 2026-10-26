@@ -30,6 +30,7 @@ import { ClientConversationTimelineService } from './services/client-conversatio
 import { ClientConversationsService } from './services/client-conversations.service';
 import { ClientConversationNotificationPublisher } from './services/client-conversation-notification.publisher';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { ClientConversationAssistantRegistry } from './client-conversation-assistant.port';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -89,12 +90,16 @@ const AGENCY_CONNECTION = 'agency';
     // NTF-C1 §39/§40 — one publisher for both directions of
     // `client_conversation.message.created`.
     ClientConversationNotificationPublisher,
+    // OR7 — filled by `ClientConversationOrionModule`.
+    ClientConversationAssistantRegistry,
   ],
   exports: [
     ClientConversationsService,
     ClientConversationAttachmentsService,
     ClientConversationTimelineService,
     ClientConversationApprovalsRegistry,
+    ClientConversationAssistantRegistry,
+    AgencyClientConversationAccessService,
     ClientConversationsGateway,
     AgencyClientConversationsGateway,
   ],

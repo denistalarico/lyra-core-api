@@ -26,10 +26,15 @@ import {
   type OrionPeriod,
 } from './orion-period';
 import {
+  isClientVisible,
   OrionToolAccessService,
   type OrionAccess,
 } from './orion-tool-access.service';
-import { ORION_TOOL_CATALOG, type OrionToolName } from './orion-tool-catalog';
+import {
+  ORION_TOOL_CATALOG,
+  orionToolOffered,
+  type OrionToolName,
+} from './orion-tool-catalog';
 
 /** Everything a tool may use: the caller's context, proven by the request. */
 export type OrionToolRun = {
@@ -88,10 +93,16 @@ export class OrionToolsService {
     call: OrionToolCall,
     run: OrionToolRun,
   ): Promise<OrionToolExecution> {
+    // Only what the turn's audience was offered (OR7: a client-visible turn
+    // never runs an Agency-only tool, even if the model names one).
+    const audience =
+      run.surface === 'client_chat'
+        ? 'client_chat'
+        : isClientVisible(run.access)
+          ? 'client_area'
+          : 'agency';
     const spec = ORION_TOOL_CATALOG.find(
-      (tool) =>
-        tool.name === call.name &&
-        (run.access.kind === 'agency' || tool.clientArea),
+      (tool) => tool.name === call.name && orionToolOffered(tool, audience),
     );
     const name = spec?.name ?? 'unknown';
     const fail = (
@@ -174,7 +185,7 @@ export class OrionToolsService {
     const hits = await this.help.search(query, { limit: 4 });
     // The Client Area has no Help Center screen: titles and excerpts only.
     const route = (slug: string) =>
-      run.access.kind === 'agency' ? `/knowledge/help/articles/${slug}` : null;
+      isClientVisible(run.access) ? null : `/knowledge/help/articles/${slug}`;
     return {
       payload: {
         articles: hits.map((hit) => ({

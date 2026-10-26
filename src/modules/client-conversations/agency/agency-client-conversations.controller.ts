@@ -31,6 +31,10 @@ import { AgencyClientConversationsGateway } from '../gateways/agency-client-conv
 import { SendClientConversationMessageDto } from '../dto/client-conversation.dto';
 import { NotificationRecipientSurface } from '../../notifications/enums';
 import { ClientConversationNotificationPublisher } from '../services/client-conversation-notification.publisher';
+import {
+  ClientConversationAssistantRegistry,
+  orionMentionMetadata,
+} from '../client-conversation-assistant.port';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -83,6 +87,7 @@ export class AgencyClientConversationsController {
     private readonly clientRealtime: ClientConversationsGateway,
     private readonly agencyRealtime: AgencyClientConversationsGateway,
     private readonly notificationPublisher: ClientConversationNotificationPublisher,
+    private readonly assistants: ClientConversationAssistantRegistry,
     @Optional() private readonly logos?: CompanyLogoRegistry,
   ) {}
 
@@ -277,7 +282,11 @@ export class AgencyClientConversationsController {
       scope,
       this.participant(user),
       conversationId,
-      { body: dto.body, attachmentIds: dto.attachmentIds },
+      {
+        body: dto.body,
+        attachmentIds: dto.attachmentIds,
+        metadata: orionMentionMetadata(dto),
+      },
     );
 
     const payload = {
@@ -288,6 +297,13 @@ export class AgencyClientConversationsController {
     };
     this.clientRealtime.broadcastMessageCreated(payload);
     this.agencyRealtime.broadcastMessageCreated(payload);
+
+    // OR7 — asynchronous; never delays or fails the send.
+    this.assistants.schedule({
+      author: { surface: 'agency', user: this.actorOf(user) },
+      scope,
+      message,
+    });
 
     // NTF-C1 §39/§66 — after the message is persisted and broadcast, so a
     // notification failure can never cost the message or the realtime event.

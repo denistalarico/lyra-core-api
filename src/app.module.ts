@@ -68,6 +68,7 @@ import { LeadFlowClientAreaModule } from './modules/leadflow-client-area/leadflo
 import { OrionModule } from './modules/orion/orion.module';
 import { ClientAreaModule } from './modules/client-area/client-area.module';
 import { ClientConversationApprovalsModule } from './modules/client-conversations/client-conversation-approvals.module';
+import { ClientConversationOrionModule } from './modules/client-conversations/client-conversation-orion.module';
 import { ClientConversationsModule } from './modules/client-conversations/client-conversations.module';
 import { ClientNotificationsModule } from './modules/client-notifications/client-notifications.module';
 import { ClientAreaApprovalsModule } from './modules/social-approvals/client/client-approvals.module';
@@ -152,6 +153,8 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     // lets the conversation timeline resolve them. Both domains work without
     // it; it is what connects them (see the module's own note).
     ClientConversationApprovalsModule,
+    // OR7 — `@Orion` in the agency↔client chat (same join pattern).
+    ClientConversationOrionModule,
     // PD4 — the self-context executive overview, projecting the canonical
     // Agency dashboard. Wired here for the same reason as AP3 above.
     ClientAreaSelfOverviewModule,

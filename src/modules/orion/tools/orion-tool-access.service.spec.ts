@@ -192,6 +192,64 @@ describe('OrionToolAccessService — permission matrix per tool', () => {
     ).resolves.toBe(false);
   });
 
+  it.each(permissioned.map((tool) => [tool.name, tool] as const))(
+    'OR7 client chat (Agency author): %s needs the Agency key AND the company module',
+    async (_name, tool) => {
+      const requirement = tool.requirement!;
+      const exposure = requirement.clientArea!;
+      const held = new Set(requirement.agency.anyOf);
+      const chat = (enabled: boolean): OrionAccess => ({
+        ...agency,
+        clientVisible: {
+          modules: { [exposure.module]: enabled } as never,
+        },
+      });
+
+      const both = agencyPermissions(held);
+      await expect(
+        new OrionToolAccessService(both.service, {} as never).allowed(
+          chat(true),
+          requirement,
+        ),
+      ).resolves.toBe(true);
+
+      // Module off for the company: denied before the Agency key is checked.
+      const moduleOff = agencyPermissions(held);
+      await expect(
+        new OrionToolAccessService(moduleOff.service, {} as never).allowed(
+          chat(false),
+          requirement,
+        ),
+      ).resolves.toBe(false);
+      expect(moduleOff.scopeRequests).toHaveLength(0);
+
+      // Module on, but the operator lacks the key.
+      const keyless = agencyPermissions(new Set());
+      await expect(
+        new OrionToolAccessService(keyless.service, {} as never).allowed(
+          chat(true),
+          requirement,
+        ),
+      ).resolves.toBe(false);
+    },
+  );
+
+  it('OR7 client chat (Agency author): an Agency-only route is denied even with the key', async () => {
+    const allowed = agencyPermissions(new Set(['agency.finance.view']));
+    await expect(
+      new OrionToolAccessService(allowed.service, {} as never).allowed(
+        {
+          ...agency,
+          clientVisible: { modules: { leadflow_agents: true } as never },
+        },
+        {
+          agency: { anyOf: ['agency.finance.view'], routePath: '/finance' },
+          clientArea: null,
+        },
+      ),
+    ).resolves.toBe(false);
+  });
+
   it('re-throws anything that is not a denial', async () => {
     const service = new OrionToolAccessService(
       { assertAny: jest.fn().mockRejectedValue(new Error('db down')) } as never,

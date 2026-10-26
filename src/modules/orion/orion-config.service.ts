@@ -36,6 +36,9 @@ export class OrionConfigService implements OnModuleInit {
   /** OR6 kill switch: shipping the integration never enables chat turns. */
   readonly teamChatEnabled = booleanFlag('ORION_TEAM_CHAT_ENABLED', false);
 
+  /** OR7 kill switch: `@Orion` in the agency↔client chat. */
+  readonly clientChatEnabled = booleanFlag('ORION_CLIENT_CHAT_ENABLED', false);
+
   readonly endpoint = (
     process.env.ORION_PROVIDER_BASE_URL ?? 'https://api.openai.com/v1'
   ).replace(/\/$/, '');

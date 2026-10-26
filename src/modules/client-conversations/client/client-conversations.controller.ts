@@ -34,6 +34,10 @@ import { AgencyClientConversationsGateway } from '../gateways/agency-client-conv
 import { SendClientConversationMessageDto } from '../dto/client-conversation.dto';
 import { NotificationRecipientSurface } from '../../notifications/enums';
 import { ClientConversationNotificationPublisher } from '../services/client-conversation-notification.publisher';
+import {
+  ClientConversationAssistantRegistry,
+  orionMentionMetadata,
+} from '../client-conversation-assistant.port';
 
 /**
  * CCOM1 — the Client Area conversations boundary (§22–§24).
@@ -71,6 +75,7 @@ export class ClientAreaConversationsController {
     private readonly clientRealtime: ClientConversationsGateway,
     private readonly agencyRealtime: AgencyClientConversationsGateway,
     private readonly notificationPublisher: ClientConversationNotificationPublisher,
+    private readonly assistants: ClientConversationAssistantRegistry,
   ) {}
 
   private scope(context: ClientAreaContext) {
@@ -199,12 +204,23 @@ export class ClientAreaConversationsController {
       scope,
       this.actor(context),
       conversationId,
-      { body: dto.body, attachmentIds: dto.attachmentIds },
+      {
+        body: dto.body,
+        attachmentIds: dto.attachmentIds,
+        metadata: orionMentionMetadata(dto),
+      },
     );
 
     // Both surfaces watching this conversation learn about it; the rooms are
     // separate, so this is two explicit emits rather than one shared room.
     this.broadcast(scope, message.conversationId, message);
+
+    // OR7 — asynchronous; never delays or fails the send.
+    this.assistants.schedule({
+      author: { surface: 'client_area', context },
+      scope,
+      message,
+    });
 
     // NTF-C1 §40 — the mirror direction: a client message notifies the
     // conversation's Agency participants, through the same publisher and the

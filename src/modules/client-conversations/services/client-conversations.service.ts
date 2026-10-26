@@ -834,6 +834,71 @@ export class ClientConversationsService {
     };
   }
 
+  /**
+   * OR7 — the Orion's answer to a mention, as an authorless Agency text.
+   *
+   * Like `publishCard`, not `createMessage`: there is no human actor, so no
+   * seat and no watermark move. Unlike a card, the conversation is the one the
+   * mention was written in, re-proved against the scope (a conversation of
+   * another company answers 404) and required active. `sender_user_id = NULL`
+   * with `sender_surface = 'agency'` is the authorless combination the CHECK
+   * allows; `metadata.assistant` is what the surfaces label as the automatic
+   * reply, and it is a reserved key no surface write can carry.
+   */
+  async publishAssistantReply(
+    scope: ClientConversationScope,
+    conversationId: unknown,
+    input: { body: string; replyToMessageId: string; dedupeKey: string },
+  ): Promise<{
+    status: 'posted' | 'duplicate';
+    message: ConversationMessageView;
+  }> {
+    const conversation = await this.findAccessible(scope, conversationId, {
+      requireActive: true,
+    });
+
+    const existing = await this.messages
+      .createQueryBuilder('m')
+      .where('m.conversation_id = :conversationId', {
+        conversationId: conversation.id,
+      })
+      .andWhere("m.metadata ->> 'dedupeKey' = :dedupeKey", {
+        dedupeKey: input.dedupeKey,
+      })
+      .getOne();
+    if (existing)
+      return { status: 'duplicate', message: toMessageView(existing) };
+
+    const body = normalizeBody(input.body);
+    if (!body) throw new BadRequestException('Reply body is required.');
+
+    const saved = await this.messages.save(
+      this.messages.create({
+        tenantId: conversation.tenantId,
+        workspaceId: conversation.workspaceId,
+        agencyClientId: conversation.agencyClientId,
+        companyContextId: conversation.companyContextId,
+        conversationId: conversation.id,
+        senderSurface: 'agency',
+        senderUserId: null,
+        body,
+        kind: 'text',
+        metadata: {
+          assistant: 'orion',
+          replyToMessageId: input.replyToMessageId,
+          dedupeKey: input.dedupeKey,
+        },
+      }),
+    );
+
+    await this.conversations.update(
+      { id: conversation.id },
+      { lastMessageAt: saved.createdAt },
+    );
+
+    return { status: 'posted', message: toMessageView(saved) };
+  }
+
   /** The company's active default conversation id, or null. For broadcasts. */
   async findDefaultConversationId(
     scope: ClientConversationScope,
@@ -953,6 +1018,9 @@ function resolveLimit(value: unknown): number {
 const RESERVED_METADATA_KEYS: ReadonlySet<string> = new Set([
   'card',
   'dedupeKey',
+  // OR7 — the Orion reply marker, written by `publishAssistantReply` alone.
+  'assistant',
+  'replyToMessageId',
 ]);
 
 function stripReservedMetadata(

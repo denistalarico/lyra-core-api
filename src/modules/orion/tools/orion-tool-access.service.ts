@@ -7,6 +7,7 @@ import { projectAgencyPermissions } from '../../client-area/client-area-agency-p
 import type {
   ClientAreaContext,
   ClientAreaModuleKey,
+  ClientAreaModules,
 } from '../../client-area/client-area.types';
 import { PermissionScopeEvaluatorService } from '../../permissions/services/permission-scope-evaluator.service';
 import { PlatformPermissionService } from '../../permissions/services/platform-permission.service';
@@ -18,8 +19,24 @@ import type { PermissionContext } from '../../permissions/types/permission-conte
  * from a tool argument.
  */
 export type OrionAccess =
-  | { kind: 'agency'; permission: PermissionContext }
+  | {
+      kind: 'agency';
+      permission: PermissionContext;
+      /**
+       * OR7 — the answer is visible to a client company (agency↔client
+       * chat). Tools then need, besides the Agency key, the route's Client
+       * Area exposure and that module enabled for the company: the
+       * intersection of what the operator and the client may see (§3.5
+       * item 6). Built server-side from the conversation's company.
+       */
+      clientVisible?: { modules: ClientAreaModules };
+    }
   | { kind: 'client_area'; context: ClientAreaContext };
+
+/** Whether the turn's output reaches a client (Client Area or client chat). */
+export function isClientVisible(access: OrionAccess): boolean {
+  return access.kind === 'client_area' || Boolean(access.clientVisible);
+}
 
 /**
  * The read route a tool stands in for. A tool may only do what the equivalent
@@ -85,6 +102,11 @@ export class OrionToolAccessService {
     requirement: OrionToolRequirement,
   ): Promise<void> {
     if (access.kind === 'agency') {
+      if (access.clientVisible) {
+        const exposure = requirement.clientArea;
+        if (!exposure || !access.clientVisible.modules[exposure.module])
+          throw new ForbiddenException('Not available.');
+      }
       await this.permissions.assertAny(
         access.permission,
         [...requirement.agency.anyOf],

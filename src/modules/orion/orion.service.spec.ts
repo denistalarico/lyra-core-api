@@ -224,6 +224,53 @@ describe('OrionService.runTurn', () => {
     expect(seen[0][1].content).toContain('"superficie":"Team Chat"');
   });
 
+  it('OR7: an Agency mention in the client chat speaks to the client, with client tools only and the company scope', async () => {
+    const { service, provider, budget, seen } = setup();
+    const offered: string[][] = [];
+    provider.complete.mockReset().mockImplementation((input) => {
+      seen.push(input.messages);
+      offered.push(
+        (
+          input as unknown as { tools: Array<{ function: { name: string } }> }
+        ).tools.map((tool) => tool.function.name),
+      );
+      return Promise.resolve({
+        content: 'Não posso falar de margem aqui.',
+        toolCalls: [],
+        usage: {},
+        attempts: 1,
+      });
+    });
+
+    await service.runTurn(
+      {
+        ...ctx,
+        managedContext: {
+          operatingMode: 'client',
+          productKey: 'leadflow',
+          clientId: 'client-a',
+          companyContextId: 'company-a',
+          managedTenantId: null,
+        },
+      },
+      { ...agency, clientVisible: { modules: {} as never } },
+      { text: 'qual a nossa margem com eles?' },
+      { surface: 'client_chat' },
+    );
+
+    expect(budget.reserve.mock.calls[0][0].scope).toMatchObject({
+      principal: 'agency',
+      surface: 'client_chat',
+      agencyClientId: 'client-a',
+      companyContextId: 'company-a',
+    });
+    expect(seen[0][0].content).toContain('a resposta é sempre visível ao');
+    expect(seen[0][0].content).toContain('Nunca fale de custo, margem');
+    expect(offered[0]).not.toContain('ui_action');
+    expect(offered[0]).not.toContain('propose_action');
+    expect(offered[0]).toContain('search_help');
+  });
+
   it('keeps the system prefix identical across users; names travel as context data', async () => {
     const first = setup();
     const second = setup();

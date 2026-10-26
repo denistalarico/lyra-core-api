@@ -25,6 +25,7 @@ import {
   ORION_PROMPT_VERSION,
   orionToolMessage,
   orionTurnMessages,
+  type OrionAudience,
   type OrionSessionContext,
 } from './orion-prompt';
 import { OrionProvider } from './orion.provider';
@@ -142,13 +143,17 @@ export class OrionService {
 
     try {
       const session = await this.sessionContext(ctx, access, dto.agentId);
+      // OR7: in the agency↔client chat the client reads the answer, whoever
+      // mentioned the Orion.
+      const audience: OrionAudience =
+        invocation.surface === 'client_chat' ? 'client_chat' : access.kind;
       const messages = orionTurnMessages(
-        access.kind,
+        audience,
         session,
         text,
         invocation.surface,
       );
-      const definitions = orionToolDefinitions(access.kind);
+      const definitions = orionToolDefinitions(audience);
       for (let round = 1; round <= this.config.maxRounds; round += 1) {
         rounds = round;
         const completion = await this.provider
