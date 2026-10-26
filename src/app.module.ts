@@ -62,6 +62,7 @@ import { SocialPlannerModule } from './modules/social-planner';
 import { SocialCampaignsModule } from './modules/social-campaigns';
 import { SocialCreativeStudioModule } from './modules/social-creative-studio/social-creative-studio.module';
 import { SocialAnalyticsDashboardsModule } from './modules/social-analytics-dashboards/social-analytics-dashboards.module';
+import { AnalyticsOverviewModule } from './modules/analytics-overview/analytics-overview.module';
 import { SocialApprovalsModule } from './modules/social-approvals/social-approvals.module';
 import { SocialClientAreaModule } from './modules/social-client-area/social-client-area.module';
 import { LeadFlowClientAreaModule } from './modules/leadflow-client-area/leadflow-client-area.module';
@@ -139,6 +140,7 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     SocialCampaignsModule,
     SocialCreativeStudioModule,
     SocialAnalyticsDashboardsModule,
+    AnalyticsOverviewModule,
     SocialApprovalsModule,
     SocialClientAreaModule,
     LeadFlowClientAreaModule,

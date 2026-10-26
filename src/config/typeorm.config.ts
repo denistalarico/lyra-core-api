@@ -32,6 +32,7 @@ import {
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
 } from '../modules/social-analytics-dashboards/entities';
+import { AnalyticsOverviewHeaderEntity } from '../modules/analytics-overview/analytics-overview-header.entity';
 import {
   SocialApprovalCommentEntity,
   SocialApprovalRequestEntity,
@@ -480,6 +481,8 @@ export const agencyEntities = [
   OrionTurnEntity,
   SocialAnalyticsDashboardEntity,
   SocialAnalyticsReportEntity,
+  // AN-HDR: Visão Geral header shared by LeadFlow and Social.
+  AnalyticsOverviewHeaderEntity,
   SocialApprovalRequestEntity,
   SocialApprovalCommentEntity,
   SocialApprovalStageDecisionEntity,

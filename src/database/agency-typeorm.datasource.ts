@@ -4,6 +4,7 @@ import { AddInboxSmsChannelNumberIndex1800500000000 } from './migrations/1800500
 import { FanoutAppointmentsToLeadScore1800600000000 } from './migrations/1800600000000-fanout-appointments-to-lead-score';
 import { CreateOrionTurnsAndHelpSearch1800700000000 } from './migrations/1800700000000-create-orion-turns-and-help-search';
 import { AddAgentPauseUntilAndActionTargets1800800000000 } from './migrations/1800800000000-add-agent-pause-until-and-action-targets';
+import { CreateAnalyticsOverviewHeaders1801200000000 } from './migrations/1801200000000-create-analytics-overview-headers';
 import { AddSurfaceToTrustedDevices1800200000000 } from './migrations/1800200000000-add-surface-to-trusted-devices';
 import { CreateClientAreaAnalyticsDashboards1800100000000 } from './migrations/1800100000000-create-client-area-analytics-dashboards';
 import { CreateFinanceReceivableWriteOffs1799900000000 } from './migrations/1799900000000-create-finance-receivable-write-offs';
@@ -568,5 +569,6 @@ export const AgencyDataSource = new DataSource({
     FanoutAppointmentsToLeadScore1800600000000,
     CreateOrionTurnsAndHelpSearch1800700000000,
     AddAgentPauseUntilAndActionTargets1800800000000,
+    CreateAnalyticsOverviewHeaders1801200000000,
   ],
 });
