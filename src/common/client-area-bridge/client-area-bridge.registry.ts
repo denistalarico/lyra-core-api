@@ -11,6 +11,17 @@ import {
   type ExecutionContext,
 } from '@nestjs/common';
 export const CLIENT_AREA_EXPOSED_METADATA = 'client_area:exposed';
+/**
+ * CA-AN1 — the modules a handler is exposed to, in declaration order. The
+ * metadata is an array since CA-AN1; a bare string (older decorator) still
+ * reads as one module.
+ */
+export function clientAreaExposedModules(
+  metadata: unknown,
+): ClientAreaModuleKey[] {
+  if (typeof metadata === 'string') return [metadata as ClientAreaModuleKey];
+  return Array.isArray(metadata) ? (metadata as ClientAreaModuleKey[]) : [];
+}
 export interface ClientAreaBridgePort {
   authenticate(context: ExecutionContext): Promise<boolean>;
 }
@@ -31,7 +42,12 @@ export type ClientAreaActorNamesResolver = (
   tenantId: string,
   userIds: readonly string[],
 ) => Promise<Record<string, string>>;
-/** Owned by the consumer; ClientAreaModule registers at init. Absence is fail-closed. */
+/**
+ * Owned by the consumer; ClientAreaModule registers at init. Absence is
+ * fail-closed. A module may have several resolvers (CA-AN1: `analytics`
+ * spans the Social, LeadFlow, CA13 and header tables); each answers only for
+ * its own route table, and the first non-null answer wins.
+ */
 @Injectable()
 export class ClientAreaBridgeRegistry {
   private bridge?: ClientAreaBridgePort;
@@ -47,29 +63,27 @@ export class ClientAreaBridgeRegistry {
   }
   private readonly scopeResolvers = new Map<
     ClientAreaModuleKey,
-    ClientAreaScopeResolver
+    ClientAreaScopeResolver[]
   >();
   registerScopeResolver(
     module: ClientAreaModuleKey,
     resolver: ClientAreaScopeResolver,
   ) {
-    const current = this.scopeResolvers.get(module);
-    if (current && current !== resolver)
-      throw new Error(
-        `Client Area scope resolver already registered: ${module}`,
-      );
-    this.scopeResolvers.set(module, resolver);
+    const current = this.scopeResolvers.get(module) ?? [];
+    if (!current.includes(resolver))
+      this.scopeResolvers.set(module, [...current, resolver]);
   }
-  resolveScope(
+  async resolveScope(
     module: ClientAreaModuleKey,
     context: ClientAreaContext,
     permissionKey: string,
     request: PermissionScopeRequest,
-  ) {
-    return (
-      this.scopeResolvers.get(module)?.(context, permissionKey, request) ??
-      Promise.resolve(null)
-    );
+  ): Promise<ClientAreaScopedResource | null> {
+    for (const resolver of this.scopeResolvers.get(module) ?? []) {
+      const resource = await resolver(context, permissionKey, request);
+      if (resource) return resource;
+    }
+    return null;
   }
   register(bridge: ClientAreaBridgePort) {
     if (this.bridge && this.bridge !== bridge)

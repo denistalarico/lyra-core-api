@@ -52,7 +52,9 @@ const tenant = randomUUID(),
 /** One row id the fake database answers for every table, in this company. */
 const own = randomUUID(),
   alien = randomUUID(),
-  foreign = randomUUID();
+  foreign = randomUUID(),
+  // CA-AN1: a private dashboard of another Owner of the same company.
+  otherOwned = randomUUID();
 const clientSecret = 'ca10-client-secret-012345678901234567890';
 const agencySecret = 'ca10-agency-secret-012345678901234567890';
 
@@ -119,7 +121,7 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
       if (t !== tenant || w !== workspace) return Promise.resolve([]);
       return Promise.resolve(
         ids.flatMap((id) =>
-          ([own, alien, foreign] as string[]).includes(id)
+          ([own, alien, foreign, otherOwned] as string[]).includes(id)
             ? [
                 {
                   id,
@@ -127,6 +129,7 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
                   company: id === foreign ? randomUUID() : company,
                   creator: id === alien ? randomUUID() : user,
                   parent: own,
+                  owner: id === otherOwned ? randomUUID() : null,
                 },
               ]
             : [],
@@ -322,7 +325,10 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
     referenceIds: [own],
     connectionId: own,
   };
-  const exposed = socialRoutes().filter((route) => route.exposed);
+  // CA10 modules; the Analytics module has its own block below (CA-AN1).
+  const exposed = socialRoutes().filter(
+    (route) => route.exposed && route.module !== 'analytics',
+  );
   const verb = (route: { verb: string }) =>
     route.verb.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
   const url = (route: { verb: string; path: string }) =>
@@ -523,5 +529,147 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
     await call('get', `/social/creative-studio/production/${own}`);
     const [ctx] = production.view.mock.calls.at(-1) as [{ role: string }];
     expect(ctx.role).toBe('client_area_actor');
+  });
+
+  describe('CA-AN1 Analytics module over the Social routes', () => {
+    const analytics = socialRoutes().filter(
+      (route) => route.exposed && route.module === 'analytics',
+    );
+    const access = (
+      level: ClientAreaAccessLevel | null,
+      role: 'client_owner' | 'client_member' = 'client_member',
+      products: ('leadflow' | 'social')[] = ['leadflow', 'social'],
+    ) => {
+      context.role = role;
+      context.accountRole = role;
+      context.memberAccess = resolveMemberAccess(
+        role,
+        { analytics: true },
+        level ? { analytics: level } : {},
+      );
+      context.analyticsProducts = products;
+    };
+    const query = (id = own) =>
+      `connectionId=${id}&assetId=${id}&paidConnectionId=${id}&organicAssetId=${id}&publicationIds=${own},${id}`;
+    const target = (route: { verb: string; path: string }, id = own) =>
+      route.verb === 'GET'
+        ? `${fill(route.path, id)}?${query(id)}`
+        : fill(route.path, id);
+    const isRead = (route: { verb: string; path: string }) =>
+      route.verb === 'GET' || /\/reports\/(preview|pdf)$/.test(route.path);
+    // Through the guards: the handler may still answer 404 on its own (an ad
+    // without a thumbnail), so only the evaluator's 404 counts as refusal.
+    const passed = ({ status, body }: { status: number; body: unknown }) =>
+      ![401, 403].includes(status) &&
+      !(
+        status === 404 &&
+        (body as { message?: string })?.message === 'Resource is not available.'
+      );
+
+    it('refuses a Viewer on every Analytics route (D-AN-13)', async () => {
+      expect(analytics).toHaveLength(30);
+      access('viewer');
+      expect(context.memberAccess!.analytics).toMatchObject({
+        available: false,
+        reason: 'level_not_allowed',
+      });
+      for (const route of analytics) {
+        const at = `${route.verb} ${route.path}`;
+        const { status } = await call(verb(route), target(route));
+        expect([at, status]).toEqual([at, 403]);
+      }
+    });
+
+    it('lets Operator and a non-Owner Manager read and export, never write', async () => {
+      for (const level of ['operator', 'manager'] as const) {
+        access(level);
+        for (const route of analytics) {
+          const at = `${level} ${route.verb} ${route.path}`;
+          const response = await call(verb(route), target(route));
+          if (isRead(route)) expect([at, passed(response)]).toEqual([at, true]);
+          else expect([at, response.status]).toEqual([at, 403]);
+        }
+      }
+    });
+
+    it('lets the Owner through on every Analytics route', async () => {
+      access(null, 'client_owner');
+      for (const route of analytics) {
+        const at = `${route.verb} ${route.path}`;
+        const response = await call(verb(route), target(route));
+        expect([at, passed(response)]).toEqual([at, true]);
+      }
+    });
+
+    it('answers 404 for another company and for foreign ids', async () => {
+      access(null, 'client_owner');
+      for (const route of analytics) {
+        const at = `${route.verb} ${route.path}`;
+        expect([
+          at,
+          (await call(verb(route), target(route), {}, randomUUID())).status,
+        ]).toEqual([at, 404]);
+        const names =
+          route.path.includes('/:') ||
+          (route.verb === 'GET' &&
+            !/\/(connections|assets|dashboards|reports)$/.test(route.path));
+        if (names)
+          expect([
+            at,
+            (await call(verb(route), target(route, foreign))).status,
+          ]).toEqual([at, 404]);
+      }
+      expect(
+        (
+          await call('post', '/social/analytics/reports/pdf', {
+            dashboardId: foreign,
+          })
+        ).status,
+      ).toBe(404);
+    });
+
+    it("hides another Owner's private dashboard (D-AN-14)", async () => {
+      access(null, 'client_owner');
+      for (const verbName of ['patch', 'delete'] as const) {
+        expect(
+          (await call(verbName, `/social/analytics/dashboards/${otherOwned}`))
+            .status,
+        ).toBe(404);
+        expect(
+          passed(await call(verbName, `/social/analytics/dashboards/${own}`)),
+        ).toBe(true);
+      }
+      expect(
+        (
+          await call('post', '/social/analytics/reports/preview', {
+            dashboardId: otherOwned,
+          })
+        ).status,
+      ).toBe(404);
+    });
+
+    it('refuses the Social routes when Social is not active for the company', async () => {
+      access('operator', 'client_member', ['leadflow']);
+      for (const route of analytics.filter(isRead))
+        expect([
+          route.path,
+          (await call(verb(route), target(route))).status,
+        ]).toEqual([route.path, 403]);
+    });
+
+    it('serves a read shared with Campaigns through either module, and neither is 403', async () => {
+      const path = '/social/analytics/connections';
+      context.memberAccess = resolveMemberAccess(
+        'client_member',
+        { social_campaigns: true },
+        { social_campaigns: 'viewer' },
+      );
+      context.analyticsProducts = [];
+      expect(passed(await call('get', path))).toBe(true);
+      access('operator');
+      expect(passed(await call('get', path))).toBe(true);
+      context.memberAccess = resolveMemberAccess('client_member', {}, {});
+      expect((await call('get', path)).status).toBe(403);
+    });
   });
 });

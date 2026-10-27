@@ -25,6 +25,8 @@ export type LeadFlowClientKind =
   | 'room'
   | 'room-action'
   | 'analytics'
+  | 'analytics-dashboard'
+  | 'analytics-report'
   | 'orion';
 export type LeadFlowClientRoute = {
   method: string;
@@ -184,6 +186,27 @@ for (const path of ['commercial-journey', 'operational-overview'])
 // AI-cost action (operator/manager, company AI switch on).
 add('leadflow_agents', 'orion', 'GET', '/orion/status');
 add('leadflow_agents', 'orion', 'POST', '/orion/turns');
+// CA-AN1: the Analytics module (D-AN-13). Reads for Operator/Manager, PDF
+// preview/export as a read; dashboard writes carry Owner-only grants. Not
+// exposed: report deletion (agency only), recommendation actions, `views*`.
+const analytics = (kind: LeadFlowClientKind, method: string, path: string) =>
+  add('analytics', kind, method, `/leadflow/analytics${path}`);
+for (const path of [
+  'overview',
+  'operational-overview',
+  'commercial-journey',
+  'recommendations',
+  'timeseries',
+])
+  analytics('analytics', 'GET', `/${path}`);
+analytics('analytics-dashboard', 'GET', '/dashboards');
+analytics('analytics-dashboard', 'POST', '/dashboards');
+analytics('analytics-dashboard', 'PATCH', '/dashboards/:id');
+analytics('analytics-dashboard', 'DELETE', '/dashboards/:id');
+analytics('analytics-report', 'GET', '/reports');
+analytics('analytics-report', 'GET', '/reports/:id/file');
+analytics('analytics-report', 'POST', '/reports/preview');
+analytics('analytics-report', 'POST', '/reports/pdf');
 
 /**
  * Closed method+template contract (D-02 item 8). Controller opt-ins and the frontend transport
@@ -193,10 +216,20 @@ add('leadflow_agents', 'orion', 'POST', '/orion/turns');
  */
 export const LEADFLOW_CLIENT_AREA_ROUTES: readonly LeadFlowClientRoute[] =
   Object.freeze(routes);
-export function leadFlowClientAreaRoute(method: string, path: string) {
+/**
+ * `module` picks the entry of a route listed under several modules (CA-AN1:
+ * the OR3 KPIs serve `leadflow_agents` and `analytics`); without it, the
+ * first entry.
+ */
+export function leadFlowClientAreaRoute(
+  method: string,
+  path: string,
+  module?: ClientAreaModuleKey,
+) {
   return LEADFLOW_CLIENT_AREA_ROUTES.find(
     (route) =>
       route.method === method &&
-      route.path === path.replace(/^\/api(?=\/)/, ''),
+      route.path === path.replace(/^\/api(?=\/)/, '') &&
+      (!module || route.module === module),
   );
 }

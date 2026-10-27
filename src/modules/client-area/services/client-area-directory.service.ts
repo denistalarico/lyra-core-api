@@ -6,6 +6,7 @@ import { clientAreaUiPermissions } from '../client-area-agency-permission-projec
 import { Injectable } from '@nestjs/common';
 import {
   AGENCY_SELF_CONTEXT_ID,
+  type ClientAreaAnalyticsProduct,
   type ClientAreaContext,
   type ClientAreaIdentity,
   type ClientAreaRole,
@@ -35,6 +36,10 @@ export type ClientAreaContextProjection = {
   consent: NonNullable<ClientAreaContext['consent']>;
   /** CA10 — D-13 toggles of the company, so cost actions render disabled and explained (UX only). */
   costActions: { ai: boolean; media: boolean };
+  /** CA-AN1 (D-AN-9) — which product's Visão Geral comes first. */
+  analyticsOverviewFirst: ClientAreaAnalyticsProduct;
+  /** CA-AN1 — products the Analytics module shows for this company. */
+  analyticsProducts: ClientAreaAnalyticsProduct[];
   branding: Awaited<ReturnType<ClientAreaManagementService['branding']>>;
 };
 
@@ -229,7 +234,7 @@ export class ClientAreaDirectoryService {
           ...clientAreaSettingsUiPermissions(context),
           ...context.permissions,
           ...(context.memberAccess
-            ? clientAreaUiPermissions(context.memberAccess)
+            ? clientAreaUiPermissions(context.memberAccess, context.accountRole)
             : []),
         ]),
       ].sort(),
@@ -238,6 +243,8 @@ export class ClientAreaDirectoryService {
         ai: context.allowAiCostActions === true,
         media: context.allowMediaSpendActions === true,
       },
+      analyticsOverviewFirst: context.analyticsOverviewFirst ?? 'leadflow',
+      analyticsProducts: context.analyticsProducts ?? [],
       branding: await this.management.branding(
         context.tenantId,
         context.workspaceId,

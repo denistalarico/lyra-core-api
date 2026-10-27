@@ -1,5 +1,6 @@
 import type {
   ClientAreaAccessLevel,
+  ClientAreaAccountRole,
   ClientAreaModuleKey,
   ClientAreaMemberAccess,
 } from './client-area.types';
@@ -205,15 +206,46 @@ function projectSocialPermissions(
   return [];
 }
 
+/**
+ * CA-AN1 (D-AN-13) — the Analytics module over the LeadFlow/Social pages.
+ * Viewer never gets here (`resolveMemberAccess` makes the module unavailable).
+ * Operator and Manager read: the dashboards, the data behind them and the
+ * report archive, plus `POST` for preview/PDF (the route table decides which
+ * POSTs carry the key). Only the company's Owner edits, by account role, not
+ * by level: a Manager who is not the Owner reads exactly like an Operator.
+ */
+function projectAnalyticsPermissions(
+  accountRole: ClientAreaAccountRole | undefined,
+): readonly ClientAreaAgencyGrant[] {
+  const reads = [
+    // CA13 facade (metric reads) until CA-AN3.
+    grant('agency.dashboards.view.agency', read),
+    grant('social.analytics.reports.view.operational', [...read, 'POST']),
+    grant('social.analytics.organic.view.operational', read),
+    grant('leadflow.analytics.reports.view.operational', [...read, 'POST']),
+  ];
+  if (accountRole !== 'client_owner') return reads;
+  return [
+    ...reads,
+    grant('social.analytics.dashboards.manage.admin_or_explicit', [
+      'POST',
+      'PATCH',
+      'DELETE',
+    ]),
+    grant('leadflow.analytics.reports.view.full', ['POST', 'PATCH', 'DELETE']),
+  ];
+}
+
 /** Explicit, method-bound grants: several existing Projects routes reuse a key for reads and writes.
  * CA10/CA11 append audited product projections here; no wildcard/Agency Owner expansion. */
 export function projectAgencyPermissions(
   module: ClientAreaModuleKey,
   level: ClientAreaAccessLevel | null,
+  accountRole?: ClientAreaAccountRole,
 ): readonly ClientAreaAgencyGrant[] {
   if (!level) return [];
   if (module === 'analytics')
-    return [grant('agency.dashboards.view.agency', read)];
+    return level === 'viewer' ? [] : projectAnalyticsPermissions(accountRole);
   if (module.startsWith('leadflow_'))
     return projectLeadFlowPermissions(module, level);
   if (module !== 'agency_projects')
@@ -261,6 +293,7 @@ export function projectAgencyPermissions(
 /** Mutation keys reused by read endpoints must not advertise editing rights to a Viewer. */
 export function clientAreaUiPermissions(
   access: ClientAreaMemberAccess,
+  accountRole?: ClientAreaAccountRole,
 ): string[] {
   const keys = new Set<string>();
   for (const [module, state] of Object.entries(access)) {
@@ -268,6 +301,7 @@ export function clientAreaUiPermissions(
     for (const entry of projectAgencyPermissions(
       module as ClientAreaModuleKey,
       state.level,
+      accountRole,
     )) {
       if (state.level !== 'viewer' || entry.key.includes('.view.'))
         keys.add(entry.key);

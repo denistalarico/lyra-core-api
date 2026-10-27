@@ -117,14 +117,20 @@ describe('LeadFlowAnalyticsReportsController — route metadata', () => {
     ).toBeUndefined();
   });
 
-  it.each(['list', 'preview', 'renderPdf', 'file', 'remove'] as const)(
-    '%s is not exposed to the Client Area yet (CA-AN1)',
+  it.each(['list', 'preview', 'renderPdf', 'file'] as const)(
+    '%s is exposed to the Client Area Analytics module (CA-AN1)',
     (name) => {
       expect(
         Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, handler(name)),
-      ).toBeUndefined();
+      ).toEqual(['analytics']);
     },
   );
+
+  it('remove stays agency-only (CA-AN1, Q-AN-9)', () => {
+    expect(
+      Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, handler('remove')),
+    ).toBeUndefined();
+  });
 });
 
 describe('LeadFlowAnalyticsReportsController — scope and requests', () => {

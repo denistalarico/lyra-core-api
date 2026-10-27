@@ -6,7 +6,10 @@ import { BrandKitController } from '../brand-kit/brand-kit.controller';
  */
 import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
-import { CLIENT_AREA_EXPOSED_METADATA } from '../../common/client-area-bridge/client-area-bridge.registry';
+import {
+  CLIENT_AREA_EXPOSED_METADATA,
+  clientAreaExposedModules,
+} from '../../common/client-area-bridge/client-area-bridge.registry';
 import { MediaAssetController } from '../../common/media-assets/media-asset.controller';
 import type { ClientAreaModuleKey } from '../client-area/client-area.types';
 import {
@@ -27,6 +30,9 @@ import {
   CreativeVideoGenerationController,
 } from '../social-creative-studio/creative-video-generation.controller';
 import { SocialAnalyticsController } from '../social-integrations/social-analytics.controller';
+import { SocialOrganicAnalyticsController } from '../social-organic/analytics/social-organic-analytics.controller';
+import { SocialAnalyticsDashboardsController } from '../social-analytics-dashboards/social-analytics-dashboards.controller';
+import { SocialAnalyticsReportsController } from '../social-analytics-dashboards/social-analytics-reports.controller';
 import { DestinationCreativeController } from '../social-organic/publication/destination-creative.controller';
 import { SocialPublicationController } from '../social-organic/publication/social-publication.controller';
 import { SocialContentReferenceController } from '../social-planner/social-content-reference.controller';
@@ -49,6 +55,10 @@ export const SOCIAL_CLIENT_AREA_CONTROLLERS = [
   CreativeCostController,
   SocialCampaignsController,
   SocialAnalyticsController,
+  // CA-AN1 — the Analytics module.
+  SocialOrganicAnalyticsController,
+  SocialAnalyticsDashboardsController,
+  SocialAnalyticsReportsController,
 ];
 
 const VERBS: Partial<Record<RequestMethod, string>> = {
@@ -68,7 +78,11 @@ export type SocialExposedRoute = {
   handler: string;
 };
 
-/** Every Social handler as Nest sees it, opted in or not. */
+/**
+ * Every Social handler as Nest sees it, opted in or not: one entry per
+ * exposed module (CA-AN1 — a read shared by Campaigns and Analytics appears
+ * twice), one unexposed entry otherwise.
+ */
 export function socialRoutes(): (SocialExposedRoute & { exposed: boolean })[] {
   return SOCIAL_CLIENT_AREA_CONTROLLERS.flatMap((controller) =>
     Object.getOwnPropertyNames(controller.prototype).flatMap((name) => {
@@ -83,10 +97,9 @@ export function socialRoutes(): (SocialExposedRoute & { exposed: boolean })[] {
         .replace(/\/+/g, '/')
         .replace(/\/$/, '');
       const verb = VERBS[method]!;
-      const module = Reflect.getMetadata(
-        CLIENT_AREA_EXPOSED_METADATA,
-        handler,
-      ) as ClientAreaModuleKey | undefined;
+      const modules = clientAreaExposedModules(
+        Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, handler),
+      );
       const required =
         (Reflect.getMetadata(PERMISSION_KEY_METADATA, handler) as
           | string
@@ -98,17 +111,24 @@ export function socialRoutes(): (SocialExposedRoute & { exposed: boolean })[] {
         (Reflect.getMetadata(ANY_PERMISSION_KEYS_METADATA, handler) as
           | string[]
           | undefined) ?? [];
-      return [
-        {
-          key: `${verb} ${path}`,
-          verb,
-          path,
-          module: module!,
-          permissions: [...(required ? [required] : []), ...any],
-          handler: `${controller.name}.${name}`,
-          exposed: module !== undefined,
-        },
-      ];
+      const entry = {
+        key: `${verb} ${path}`,
+        verb,
+        path,
+        permissions: [...(required ? [required] : []), ...any],
+        handler: `${controller.name}.${name}`,
+      };
+      const routes: (SocialExposedRoute & { exposed: boolean })[] =
+        modules.length
+          ? modules.map((module) => ({ ...entry, module, exposed: true }))
+          : [
+              {
+                ...entry,
+                module: undefined as unknown as ClientAreaModuleKey,
+                exposed: false,
+              },
+            ];
+      return routes;
     }),
   );
 }

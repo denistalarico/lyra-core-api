@@ -17,6 +17,7 @@ import {
 import type { PermissionScopeRequest } from '../permissions/types/permission-context.types';
 import {
   socialClientAreaRule,
+  socialRuleModules,
   type SocialClientAreaRef,
 } from './social-client-area.routes';
 
@@ -27,6 +28,11 @@ export const SOCIAL_CLIENT_AREA_MODULES = [
   'social_creative_studio',
   'social_campaigns',
 ] as const satisfies readonly ClientAreaModuleKey[];
+/** CA-AN1 — modules whose Social routes this adapter resolves. */
+const RESOLVED_MODULES = [
+  ...SOCIAL_CLIENT_AREA_MODULES,
+  'analytics',
+] as const satisfies readonly ClientAreaModuleKey[];
 
 type Row = {
   id: string;
@@ -34,6 +40,8 @@ type Row = {
   company: string | null;
   creator: string | null;
   parent: string | null;
+  /** CA-AN1 — private Owner dashboard: visible to that Owner only. */
+  owner?: string | null;
 };
 
 /** `alias` carries tenant/workspace; `idAlias` is the addressed row (a child without its own scope columns). */
@@ -140,6 +148,12 @@ export const SOCIAL_CLIENT_AREA_SCOPE_SQL: Record<SocialClientAreaRef, string> =
       'al',
       'al.agency_client_id AS client, ac.company_context_id AS company, NULL AS creator, al.connection_id AS parent',
     ),
+    analyticsDashboard: scoped(
+      'social_analytics_dashboards ad',
+      'ad',
+      `${own('ad')}, ad.client_area_owner_user_id AS owner`,
+    ),
+    analyticsReport: scoped('social_analytics_reports ar', 'ar', own('ar')),
   };
 
 /** Values of `field`, or of `items[].field` across an array of objects. */
@@ -179,7 +193,7 @@ export class SocialClientAreaScopeService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    for (const module of SOCIAL_CLIENT_AREA_MODULES)
+    for (const module of RESOLVED_MODULES)
       this.registry.registerScopeResolver(module, (context, key, request) =>
         this.resolve(module, context, key, request),
       );
@@ -192,7 +206,7 @@ export class SocialClientAreaScopeService implements OnModuleInit {
     request: PermissionScopeRequest,
   ): Promise<ClientAreaScopedResource | null> {
     const rule = socialClientAreaRule(request.method, request.routePath);
-    if (!rule || rule.module !== module) return null;
+    if (!rule || !socialRuleModules(rule).includes(module)) return null;
     const level = context.memberAccess?.[module]?.level ?? null;
     if (!level) return null;
     const body = request.body ?? {};
@@ -222,8 +236,18 @@ export class SocialClientAreaScopeService implements OnModuleInit {
       [body, rule.body],
       [query, rule.query],
     ] as const)
-      for (const [field, ref] of Object.entries(refs ?? {}))
-        if (!want(ref, readIds(source, field))) return null;
+      for (const [field, ref] of Object.entries(refs ?? {})) {
+        const ids = readIds(source, field);
+        // Guards see the raw query: `?ids=a,b` is still one value there
+        // (CA-AN1, `publicationIds`); every part must be proven.
+        const values =
+          source === query
+            ? ids.flatMap((id) =>
+                typeof id === 'string' ? id.split(',').filter(Boolean) : [id],
+              )
+            : ids;
+        if (!want(ref, values)) return null;
+      }
 
     const found = new Map<string, Row>();
     for (const [ref, ids] of wanted) {
@@ -234,7 +258,8 @@ export class SocialClientAreaScopeService implements OnModuleInit {
       for (const row of rows)
         if (
           row.client === context.agencyClientId &&
-          row.company === context.companyContextId
+          row.company === context.companyContextId &&
+          (!row.owner || row.owner === context.userId)
         )
           found.set(`${ref}:${String(row.id).toLowerCase()}`, row);
       for (const id of ids) if (!found.has(`${ref}:${id}`)) return null;

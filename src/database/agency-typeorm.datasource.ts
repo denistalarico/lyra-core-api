@@ -8,6 +8,7 @@ import { CreateLeadFlowAnalyticsReports1800900000000 } from './migrations/180090
 import { RemoveLeadflowRecommendationsTab1801000000000 } from './migrations/1801000000000-remove-leadflow-recommendations-tab';
 import { ApplySocialChannelDefaultLayouts1801100000000 } from './migrations/1801100000000-apply-social-channel-default-layouts';
 import { CreateAnalyticsOverviewHeaders1801200000000 } from './migrations/1801200000000-create-analytics-overview-headers';
+import { AddClientAreaAnalyticsAccess1801300000000 } from './migrations/1801300000000-add-client-area-analytics-access';
 import { AddSurfaceToTrustedDevices1800200000000 } from './migrations/1800200000000-add-surface-to-trusted-devices';
 import { CreateClientAreaAnalyticsDashboards1800100000000 } from './migrations/1800100000000-create-client-area-analytics-dashboards';
 import { CreateFinanceReceivableWriteOffs1799900000000 } from './migrations/1799900000000-create-finance-receivable-write-offs';
@@ -576,5 +577,6 @@ export const AgencyDataSource = new DataSource({
     RemoveLeadflowRecommendationsTab1801000000000,
     ApplySocialChannelDefaultLayouts1801100000000,
     CreateAnalyticsOverviewHeaders1801200000000,
+    AddClientAreaAnalyticsAccess1801300000000,
   ],
 });

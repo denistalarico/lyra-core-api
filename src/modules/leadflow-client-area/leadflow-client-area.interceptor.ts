@@ -86,6 +86,7 @@ export class LeadFlowClientAreaInterceptor implements NestInterceptor {
     const route = leadFlowClientAreaRoute(
       request.method,
       (request.route as { path?: string })?.path ?? '',
+      request.clientAreaModule,
     );
     if (!route) return next.handle();
     // Guards predate Multer; parsed media intent is checked again in its product controller.

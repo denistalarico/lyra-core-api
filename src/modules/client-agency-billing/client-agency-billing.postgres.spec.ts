@@ -545,8 +545,11 @@ describePostgresIntegration()(
         db.getRepository(AgencyClient),
         {
           assertAgencyEnabled: () => Promise.resolve(),
-          resolveCompanyModules: () =>
-            Promise.resolve({ agency_billing: true, agency_projects: true }),
+          resolveCompanyAccess: () =>
+            Promise.resolve({
+              modules: { agency_billing: true, agency_projects: true },
+              analyticsProducts: [],
+            }),
         } as never,
         new ClientAreaEligibilityService(),
       );

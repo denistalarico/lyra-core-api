@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -59,6 +60,7 @@ export class SocialAnalyticsReportsController {
 
   constructor(private readonly service: SocialAnalyticsReportService) {}
 
+  @ClientAreaExposed('analytics')
   @Get()
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -77,6 +79,7 @@ export class SocialAnalyticsReportsController {
    * only in print, so an HTML preview shows one endless sheet, with none of the
    * page breaks, margins or page footers the operator is deciding on.
    */
+  @ClientAreaExposed('analytics')
   @Post('preview')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -97,6 +100,7 @@ export class SocialAnalyticsReportsController {
     return response.send(report.buffer);
   }
 
+  @ClientAreaExposed('analytics')
   @Post('pdf')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -118,6 +122,7 @@ export class SocialAnalyticsReportsController {
   }
 
   /** The original emitted bytes, never a re-render of today's dashboard. */
+  @ClientAreaExposed('analytics')
   @Get(':id/file')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

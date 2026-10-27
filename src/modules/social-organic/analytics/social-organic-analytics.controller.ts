@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { RequestContextData } from '../../../common/context/request-context.decorator';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import { resolveCompanyAwareScope } from '../../../common/context/company-aware-scope';
+import { ClientAreaExposed } from '../../client-area/client-area.decorators';
 import {
   notFound,
   streamMetaThumbnail,
@@ -68,6 +69,7 @@ export class SocialOrganicAnalyticsController {
     private readonly thumbnailService: SocialOrganicThumbnailService,
   ) {}
 
+  @ClientAreaExposed('analytics')
   @Get('assets')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -97,6 +99,7 @@ export class SocialOrganicAnalyticsController {
    * placeholder. A missing thumbnail must never fail a page whose subject is
    * the metrics beside it.
    */
+  @ClientAreaExposed('analytics')
   @Get('posts/thumbnail')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -130,6 +133,7 @@ export class SocialOrganicAnalyticsController {
    * day is an implementation detail of the sync. Each post appears once, from
    * its newest observation — see `topPosts` for why that matters.
    */
+  @ClientAreaExposed('analytics')
   @Get('posts/top')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -162,6 +166,7 @@ export class SocialOrganicAnalyticsController {
    * Only stories the hourly collector caught are here. One posted and expired
    * between two passes is absent rather than zero.
    */
+  @ClientAreaExposed('analytics')
   @Get('stories/top')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -192,6 +197,7 @@ export class SocialOrganicAnalyticsController {
    * and reactions — so one endpoint could not serve both without putting
    * unlike measurements in the same column.
    */
+  @ClientAreaExposed('analytics')
   @Get('facebook/reels')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -212,6 +218,7 @@ export class SocialOrganicAnalyticsController {
     });
   }
 
+  @ClientAreaExposed('analytics')
   @Get('overview')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -230,6 +237,7 @@ export class SocialOrganicAnalyticsController {
     });
   }
 
+  @ClientAreaExposed('analytics')
   @Get('timeseries')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -256,6 +264,7 @@ export class SocialOrganicAnalyticsController {
    * them. Folding a different shape into that response would make every caller
    * of the series carry a field none of them plot.
    */
+  @ClientAreaExposed('analytics')
   @Get('weekday')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -274,6 +283,7 @@ export class SocialOrganicAnalyticsController {
     });
   }
 
+  @ClientAreaExposed('analytics')
   @Get('freshness')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -303,6 +313,7 @@ export class SocialOrganicAnalyticsController {
    * Same permission as every other read here: it is the same act on the same
    * asset, split a different way.
    */
+  @ClientAreaExposed('analytics')
   @Get('audience')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -333,6 +344,7 @@ export class SocialOrganicAnalyticsController {
    * or five hours — a chart showing the stored hour would name the wrong time
    * to post, which is the only thing the chart is for.
    */
+  @ClientAreaExposed('analytics')
   @Get('activity')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -354,6 +366,7 @@ export class SocialOrganicAnalyticsController {
    * read over the persisted model only: it does not call Meta or trigger a
    * sync, so historical data remains readable after a credential disconnect.
    */
+  @ClientAreaExposed('analytics')
   @Get('publications')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -376,6 +389,7 @@ export class SocialOrganicAnalyticsController {
    * is `SOCIAL_ORGANIC_ANALYTICS_PERMISSION` only — the confirmed decision:
    * no new "require both" permission primitive in this task.
    */
+  @ClientAreaExposed('analytics')
   @Get('consolidated')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

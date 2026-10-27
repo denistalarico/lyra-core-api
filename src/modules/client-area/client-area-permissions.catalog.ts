@@ -76,7 +76,11 @@ export function resolveMemberAccess(
     CLIENT_AREA_MODULE_KEYS.map((key) => {
       const level = role === 'client_owner' ? 'manager' : (levels[key] ?? null);
       const allowed = key !== 'agency_billing' || role === 'client_owner';
-      const available = modules[key] === true && allowed && level !== null;
+      // CA-AN1 (D-AN-13): a Viewer never reaches Analytics — it may hold
+      // numbers outside what that person should see.
+      const levelAllowed = key !== 'analytics' || level !== 'viewer';
+      const available =
+        modules[key] === true && allowed && level !== null && levelAllowed;
       return [
         key,
         available
@@ -88,7 +92,9 @@ export function resolveMemberAccess(
                 ? 'module_unavailable'
                 : !allowed
                   ? 'owner_required'
-                  : 'no_access',
+                  : level === null
+                    ? 'no_access'
+                    : 'level_not_allowed',
             },
       ];
     }),

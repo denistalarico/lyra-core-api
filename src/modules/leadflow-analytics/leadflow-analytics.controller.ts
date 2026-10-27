@@ -49,6 +49,7 @@ export class LeadFlowAnalyticsController {
     private readonly views: LeadFlowAnalyticsViewsService,
   ) {}
 
+  @ClientAreaExposed('analytics')
   @Get('timeseries')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
@@ -107,6 +108,7 @@ export class LeadFlowAnalyticsController {
     return this.views.remove(ctx, id);
   }
 
+  @ClientAreaExposed('analytics')
   @Get('overview')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
@@ -121,7 +123,7 @@ export class LeadFlowAnalyticsController {
 
   // OR3: the Operations Room chat KPIs reach the Client Area company-scoped
   // (`resolveCompanyAwareScope`); the bridge proves level and references.
-  @ClientAreaExposed('leadflow_agents')
+  @ClientAreaExposed('leadflow_agents', 'analytics')
   @Get('commercial-journey')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
@@ -134,7 +136,7 @@ export class LeadFlowAnalyticsController {
     return this.analytics.getCommercialJourney(ctx, query);
   }
 
-  @ClientAreaExposed('leadflow_agents')
+  @ClientAreaExposed('leadflow_agents', 'analytics')
   @Get('operational-overview')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
@@ -147,6 +149,7 @@ export class LeadFlowAnalyticsController {
     return this.operationalAnalytics.getOverview(ctx, query);
   }
 
+  @ClientAreaExposed('analytics')
   @Get('recommendations')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,

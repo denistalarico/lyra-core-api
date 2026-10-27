@@ -97,20 +97,23 @@ describe('AnalyticsOverviewHeaderController — route metadata', () => {
   it.each([
     ['get', handler('get')],
     ['update', handler('update')],
-  ])(
-    '%s pins no single product, single permission or Client Area exposure',
-    (_name, handler) => {
-      expect(
-        Reflect.getMetadata(PRODUCT_ENTITLEMENT_METADATA, handler),
-      ).toBeUndefined();
-      expect(
-        Reflect.getMetadata(PERMISSION_KEY_METADATA, handler),
-      ).toBeUndefined();
-      expect(
-        Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, handler),
-      ).toBeUndefined();
-    },
-  );
+  ])('%s pins no single product or single permission', (_name, handler) => {
+    expect(
+      Reflect.getMetadata(PRODUCT_ENTITLEMENT_METADATA, handler),
+    ).toBeUndefined();
+    expect(
+      Reflect.getMetadata(PERMISSION_KEY_METADATA, handler),
+    ).toBeUndefined();
+  });
+
+  it('exposes only the GET to the Client Area Analytics module (CA-AN1)', () => {
+    expect(
+      Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, handler('get')),
+    ).toEqual(['analytics']);
+    expect(
+      Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, handler('update')),
+    ).toBeUndefined();
+  });
 });
 
 describe('AnalyticsOverviewHeaderController — product scope', () => {

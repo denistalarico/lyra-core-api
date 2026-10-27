@@ -16,6 +16,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -54,6 +55,7 @@ export class LeadFlowAnalyticsReportsController {
     private readonly service: LeadFlowAnalyticsSnapshotReportService,
   ) {}
 
+  @ClientAreaExposed('analytics')
   @Get()
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
@@ -66,6 +68,7 @@ export class LeadFlowAnalyticsReportsController {
   }
 
   /** The preview overlay's content: the export's PDF, inline, never recorded. */
+  @ClientAreaExposed('analytics')
   @Post('preview')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
@@ -87,6 +90,7 @@ export class LeadFlowAnalyticsReportsController {
     return response.send(report.buffer);
   }
 
+  @ClientAreaExposed('analytics')
   @Post('pdf')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,
@@ -109,6 +113,7 @@ export class LeadFlowAnalyticsReportsController {
   }
 
   /** The original emitted bytes, never a re-render of today's dashboard. */
+  @ClientAreaExposed('analytics')
   @Get(':id/file')
   @RequireAnyPermission(
     LEADFLOW_ANALYTICS_PERMISSIONS.operationalView,

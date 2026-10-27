@@ -283,10 +283,15 @@ describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', ()
           CLIENT_AREA_MODULE_KEYS.map((key) => [key, true]),
         ),
       },
+      // CA-AN1 (D-AN-13): a Viewer never reaches Analytics, so the module
+      // itself is held at Operator (read-only, like the Viewer it replaced).
       memberAccess: Object.fromEntries(
         CLIENT_AREA_MODULE_KEYS.map((key) => [
           key,
-          { available: true, level: 'viewer' },
+          {
+            available: true,
+            level: key === 'analytics' ? 'operator' : 'viewer',
+          },
         ]),
       ) as ClientAreaContext['memberAccess'],
     } as ClientAreaContext;

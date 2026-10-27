@@ -70,6 +70,14 @@ export class LeadFlowAnalyticsDashboardEntity {
   @Column({ name: 'created_by_id', type: 'uuid', nullable: true })
   createdById!: string | null;
 
+  /**
+   * CA-AN1 (D-AN-14) — set only on a Client Area Owner's private dashboard,
+   * visible to that Owner alone (not to other members, not to the agency).
+   * Null = a company/agency row. Never serialized: views expose `ownedByMe`.
+   */
+  @Column({ name: 'client_area_owner_user_id', type: 'uuid', nullable: true })
+  clientAreaOwnerUserId!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

@@ -1,25 +1,69 @@
 import { projectAgencyPermissions } from '../client-area/client-area-agency-permission-projection';
-import { SOCIAL_CLIENT_AREA_ROUTES } from './social-client-area.routes';
+import {
+  SOCIAL_CLIENT_AREA_ROUTES,
+  socialRuleModules,
+} from './social-client-area.routes';
 import { socialRoutes } from './social-client-area.routes.inventory';
+import { SOCIAL_CLIENT_AREA_MODULES } from './social-client-area-scope.service';
 
 describe('CA10 Social routes on the Surface Bridge', () => {
   const routes = socialRoutes();
   const exposed = routes.filter((route) => route.exposed);
+  // CA-AN1: one entry per module; the CA10 modules keep their own checks and
+  // the Analytics module is checked below with its Owner rule.
+  const ca10 = exposed.filter((route) =>
+    (SOCIAL_CLIENT_AREA_MODULES as readonly string[]).includes(route.module),
+  );
+  const analytics = exposed.filter((route) => route.module === 'analytics');
 
-  it('keeps the decorator opt-ins and the adapter table identical', () => {
-    expect(exposed).toHaveLength(123);
-    expect(exposed.map((route) => route.key).sort()).toEqual(
-      Object.keys(SOCIAL_CLIENT_AREA_ROUTES).sort(),
+  it('keeps the decorator opt-ins and the adapter table identical, module by module', () => {
+    expect(ca10).toHaveLength(123);
+    expect(analytics).toHaveLength(30);
+    expect(
+      exposed.map((route) => `${route.key} ${route.module}`).sort(),
+    ).toEqual(
+      Object.entries(SOCIAL_CLIENT_AREA_ROUTES)
+        .flatMap(([key, rule]) =>
+          socialRuleModules(rule).map((module) => `${key} ${module}`),
+        )
+        .sort(),
     );
-    for (const route of exposed)
-      expect([route.handler, route.module]).toEqual([
-        route.handler,
-        SOCIAL_CLIENT_AREA_ROUTES[route.key].module,
+  });
+
+  it('reaches Analytics reads with Operator, writes only with the Owner, nothing with Viewer (D-AN-13)', () => {
+    const reaches = (
+      route: (typeof analytics)[number],
+      level: 'viewer' | 'operator' | 'manager',
+      role: 'client_owner' | 'client_member',
+    ) =>
+      projectAgencyPermissions('analytics', level, role).some(
+        (grant) =>
+          grant.methods.includes(route.verb) &&
+          route.permissions.includes(grant.key),
+      );
+    for (const route of analytics) {
+      const at = `${route.verb} ${route.path}`;
+      const read =
+        route.verb === 'GET' || /\/reports\/(preview|pdf)$/.test(route.path);
+      expect([at, reaches(route, 'viewer', 'client_member')]).toEqual([
+        at,
+        false,
       ]);
+      for (const level of ['operator', 'manager'] as const)
+        expect([at, level, reaches(route, level, 'client_member')]).toEqual([
+          at,
+          level,
+          read,
+        ]);
+      expect([at, reaches(route, 'manager', 'client_owner')]).toEqual([
+        at,
+        true,
+      ]);
+    }
   });
 
   it('reaches every opt-in with the Manager projection of its module, reads with Viewer', () => {
-    for (const route of exposed) {
+    for (const route of ca10) {
       const grants = (level: 'viewer' | 'manager') =>
         projectAgencyPermissions(route.module, level).filter(
           (grant) =>
@@ -93,13 +137,17 @@ describe('CA10 Social routes on the Surface Bridge', () => {
         ]);
     for (const route of exposed)
       expect(route.verb === 'DELETE' ? route.path : 'ok').toMatch(
-        /^ok$|\/references\/:referenceId$|\/destinations\/:destinationId\/creative$/,
+        /^ok$|\/references\/:referenceId$|\/destinations\/:destinationId\/creative$|^\/social\/analytics\/dashboards\/:id$/,
       );
+    // CA-AN1: the report archive is deleted by the agency only; the Orion
+    // insights stay out.
+    for (const route of exposed)
+      expect(route.path).not.toMatch(/\/insights|reports\/:id$/);
   });
 
   it('exposes only the two read routes of Social Analytics the Campaigns page needs', () => {
     expect(
-      exposed
+      ca10
         .filter((route) =>
           route.handler.startsWith('SocialAnalyticsController.'),
         )

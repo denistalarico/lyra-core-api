@@ -74,7 +74,7 @@ export class SocialAnalyticsController {
    * Takes no query parameters at all. The scope is the authenticated context,
    * and there is nothing else to ask.
    */
-  @ClientAreaExposed('social_campaigns')
+  @ClientAreaExposed('social_campaigns', 'analytics')
   @Get('connections')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -96,6 +96,7 @@ export class SocialAnalyticsController {
    * another client is simply not found. Nothing in the query can widen what the
    * caller sees.
    */
+  @ClientAreaExposed('analytics')
   @Get('overview')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -122,7 +123,7 @@ export class SocialAnalyticsController {
    * day of no delivery from a day never synced, and would draw the same line
    * through both.
    */
-  @ClientAreaExposed('social_campaigns')
+  @ClientAreaExposed('social_campaigns', 'analytics')
   @Get('timeseries')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -152,6 +153,7 @@ export class SocialAnalyticsController {
    *
    * Only campaigns with delivery inside the period appear.
    */
+  @ClientAreaExposed('analytics')
   @Get('campaigns')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -181,6 +183,7 @@ export class SocialAnalyticsController {
    * its parent campaign's external id, so a caller can group without a second
    * request.
    */
+  @ClientAreaExposed('analytics')
   @Get('ad-sets')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -213,6 +216,7 @@ export class SocialAnalyticsController {
    * thumbnail route below turns into a picture. Only ads with delivery inside
    * the period appear.
    */
+  @ClientAreaExposed('analytics')
   @Get('ads')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -254,6 +258,7 @@ export class SocialAnalyticsController {
    * answer. The client draws a placeholder, because the row is about the
    * numbers beside it.
    */
+  @ClientAreaExposed('analytics')
   @Get('ads/thumbnail')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -293,6 +298,7 @@ export class SocialAnalyticsController {
    * so a UI that read emptiness as "no audience" would be wrong on most
    * deployments.
    */
+  @ClientAreaExposed('analytics')
   @Get('breakdown')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -319,6 +325,7 @@ export class SocialAnalyticsController {
    * screen. Derived from the run log using the planner's own chunk logic, and
    * enqueues nothing — loading a dashboard must not queue provider work.
    */
+  @ClientAreaExposed('analytics')
   @Get('freshness')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

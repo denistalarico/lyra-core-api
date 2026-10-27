@@ -1,6 +1,9 @@
 import { Optional, NotFoundException } from '@nestjs/common';
 import { PermissionScopeEvaluatorService } from '../services/permission-scope-evaluator.service';
-import { CLIENT_AREA_EXPOSED_METADATA } from '../../../common/client-area-bridge/client-area-bridge.registry';
+import {
+  CLIENT_AREA_EXPOSED_METADATA,
+  clientAreaExposedModules,
+} from '../../../common/client-area-bridge/client-area-bridge.registry';
 import { projectAgencyPermissions } from '../../client-area/client-area-agency-permission-projection';
 import type {
   ClientAreaContext,
@@ -274,15 +277,26 @@ export class PermissionsGuard implements CanActivate {
     execution: ExecutionContext,
     request: AuthenticatedRequest,
   ): Promise<boolean> {
-    const context = (
+    const { clientAreaContext: context, clientAreaModule } =
       request as AuthenticatedRequest & {
         clientAreaContext?: ClientAreaContext;
-      }
-    ).clientAreaContext;
-    const module = this.reflector.get<ClientAreaModuleKey | undefined>(
-      CLIENT_AREA_EXPOSED_METADATA,
-      execution.getHandler(),
+        clientAreaModule?: ClientAreaModuleKey;
+      };
+    // CA-AN1: the Bridge already chose the module among the exposed ones; the
+    // guard uses that choice and never re-picks. A single-module route needs
+    // no choice.
+    const exposed = clientAreaExposedModules(
+      this.reflector.get<unknown>(
+        CLIENT_AREA_EXPOSED_METADATA,
+        execution.getHandler(),
+      ),
     );
+    const module =
+      clientAreaModule && exposed.includes(clientAreaModule)
+        ? clientAreaModule
+        : exposed.length === 1
+          ? exposed[0]
+          : undefined;
     const targets = [execution.getHandler(), execution.getClass()];
     const required = this.reflector.getAllAndOverride<string | undefined>(
       PERMISSION_KEY_METADATA,
@@ -335,6 +349,7 @@ export class PermissionsGuard implements CanActivate {
     const grants = projectAgencyPermissions(
       module,
       context.memberAccess[module].level,
+      context.accountRole,
     ).filter((grant) => grant.methods.includes(request.method));
     const route = request.route as { path?: string } | undefined;
     const scopeRequest = {

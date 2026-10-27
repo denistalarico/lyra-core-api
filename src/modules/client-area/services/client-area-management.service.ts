@@ -6,7 +6,9 @@ import { permissionsForMemberAccess } from '../client-area-permissions.catalog';
 import { Optional } from '@nestjs/common';
 import { ClientAreaConsentService } from './client-area-consent.service';
 import {
+  CLIENT_AREA_ANALYTICS_PRODUCTS,
   CLIENT_AREA_MODULE_KEYS,
+  type ClientAreaAnalyticsProduct,
   type ClientAreaModuleSettings,
 } from '../client-area.types';
 import {
@@ -283,6 +285,24 @@ export class ClientAreaManagementService {
     companyContextId: string;
     now?: Date;
   }) {
+    return (await this.resolveCompanyAccess(input)).modules;
+  }
+
+  /**
+   * The company's modules plus the products the `analytics` module reaches
+   * (CA-AN1): a product counts with the same rule that gates its own modules —
+   * Client Area on, product active on the company, entitled and consented.
+   */
+  async resolveCompanyAccess(input: {
+    tenantId: string;
+    workspaceId: string;
+    agencyClientId: string;
+    companyContextId: string;
+    now?: Date;
+  }): Promise<{
+    modules: ClientAreaModules;
+    analyticsProducts: ClientAreaAnalyticsProduct[];
+  }> {
     const [settings, companySettings, client] = await Promise.all([
       this.findSettings(input.tenantId, input.workspaceId),
       this.companySettingsRepo.findOne({
@@ -310,7 +330,7 @@ export class ClientAreaManagementService {
       !companySettings?.enabled ||
       !isActiveClient(client)
     )
-      return modules;
+      return { modules, analyticsProducts: [] };
     const moduleSettings = companySettings.moduleSettings ?? {};
     for (const key of CLIENT_AREA_MODULE_KEYS)
       modules[key] =
@@ -337,6 +357,17 @@ export class ClientAreaManagementService {
         : Promise.resolve([]),
       this.consents?.state(input),
     ]);
+    const productReady = (product: ClientAreaAnalyticsProduct) =>
+      Boolean(
+        client.managedTenantId &&
+        products.some((row) => row.productKey === product) &&
+        entitlements.some(
+          (row) =>
+            String(row.productKey) === product &&
+            isActiveProductEntitlement(row, input.now ?? new Date()),
+        ) &&
+        consent?.status === 'accepted',
+      );
     for (const key of CLIENT_AREA_MODULE_KEYS) {
       const product =
         key === 'approvals' || key.startsWith('social_')
@@ -345,19 +376,12 @@ export class ClientAreaManagementService {
             ? 'leadflow'
             : null;
       if (product)
-        modules[key] = Boolean(
-          modules[key] &&
-          client.managedTenantId &&
-          products.some((row) => row.productKey === product) &&
-          entitlements.some(
-            (row) =>
-              String(row.productKey) === product &&
-              isActiveProductEntitlement(row, input.now ?? new Date()),
-          ) &&
-          consent?.status === 'accepted',
-        );
+        modules[key] = Boolean(modules[key] && productReady(product));
     }
-    return modules;
+    return {
+      modules,
+      analyticsProducts: CLIENT_AREA_ANALYTICS_PRODUCTS.filter(productReady),
+    };
   }
 
   async getCompanySettings(
@@ -402,6 +426,7 @@ export class ClientAreaManagementService {
         ),
         allowAiCostActions: false,
         allowMediaSpendActions: false,
+        analyticsOverviewFirst: 'leadflow',
       })
     );
   }
@@ -467,6 +492,9 @@ export class ClientAreaManagementService {
           conversationsEnabled:
             moduleSettings.conversations?.enabled ??
             current.conversationsEnabled,
+          // An absent key keeps the stored order (never the column default).
+          analyticsOverviewFirst:
+            dto.analyticsOverviewFirst ?? current.analyticsOverviewFirst,
           tenantId,
           workspaceId,
           agencyClientId,

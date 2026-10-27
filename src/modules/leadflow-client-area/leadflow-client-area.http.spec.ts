@@ -16,6 +16,7 @@ import request from 'supertest';
 import type { DataSource } from 'typeorm';
 import {
   CLIENT_AREA_EXPOSED_METADATA,
+  clientAreaExposedModules,
   ClientAreaBridgeRegistry,
   ClientAreaBridgeRegistryModule,
 } from '../../common/client-area-bridge/client-area-bridge.registry';
@@ -52,6 +53,8 @@ import { AgencyContactsController } from '../agency/agency-contacts.controller';
 import { LeadFlowAgendaController } from '../leadflow-agenda/leadflow-agenda.controller';
 import { LeadFlowAgentsController } from '../leadflow-agents/leadflow-agents.controller';
 import { LeadFlowAnalyticsController } from '../leadflow-analytics/leadflow-analytics.controller';
+import { LeadFlowAnalyticsDashboardsController } from '../leadflow-analytics/dashboards/leadflow-analytics-dashboards.controller';
+import { LeadFlowAnalyticsReportsController } from '../leadflow-analytics/leadflow-analytics-reports.controller';
 import { OrionController } from '../orion/orion.controller';
 import { LeadFlowClientAreaScopeService } from './leadflow-client-area-scope.service';
 import { LeadFlowClientAreaInterceptor } from './leadflow-client-area.interceptor';
@@ -68,7 +71,9 @@ const tenant = randomUUID(),
   session = randomUUID();
 const own = randomUUID(),
   foreign = randomUUID(),
-  otherCreator = randomUUID();
+  otherCreator = randomUUID(),
+  // CA-AN1: a private dashboard of another Owner of the same company.
+  otherOwned = randomUUID();
 const secret = 'ca11-client-secret-012345678901234567890',
   agencySecret = 'ca11-agency-secret-012345678901234567890';
 // The Agency serializer output the client must receive unchanged (CA11.1, D-02 revisada).
@@ -85,6 +90,10 @@ const fixtureResult = () => ({
   // OR3: `room/state` and `room/events` read the visible agents first.
   items: [],
 });
+/** CA11 modules only; the `analytics` entries have their own HTTP spec. */
+const CA11_ROUTES = LEADFLOW_CLIENT_AREA_ROUTES.filter(
+  (route) => route.module !== 'analytics',
+);
 const controllers = [
   InboxController,
   InboxSettingsController,
@@ -101,11 +110,17 @@ const controllers = [
   LeadFlowAgendaController,
   LeadFlowAgentsController,
   LeadFlowAnalyticsController,
+  // CA-AN1 — the Analytics module.
+  LeadFlowAnalyticsDashboardsController,
+  LeadFlowAnalyticsReportsController,
   OrionController,
 ];
 describe('CA11 actual product controllers through the real HTTP bridge', () => {
   let app: INestApplication, jwt: JwtService, level: ClientAreaAccessLevel;
   let accountRole: 'client_owner' | 'client_member';
+  // CA-AN1: the Analytics module level and the company's active products.
+  let analyticsLevel: ClientAreaAccessLevel;
+  let analyticsProducts: ('leadflow' | 'social')[];
   // OR4: the company's switch for AI-cost actions (an Orion turn is one).
   let allowAiCostActions: boolean;
   const saved = { ...process.env },
@@ -150,6 +165,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
           parent: own,
           channel: own,
           external: 'recipient',
+          owner: id === otherOwned ? randomUUID() : null,
         },
       ]);
     });
@@ -238,6 +254,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
                 leadflow_crm: true,
                 leadflow_appointments: true,
                 leadflow_agents: true,
+                analytics: true,
               };
               return Promise.resolve({
                 surface: 'client_area',
@@ -252,6 +269,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
                 role: 'client_member',
                 accountRole,
                 allowAiCostActions,
+                analyticsProducts,
                 modules,
                 permissions: new Set(),
                 memberAccess: resolveMemberAccess('client_member', modules, {
@@ -259,6 +277,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
                   leadflow_crm: level,
                   leadflow_appointments: level,
                   leadflow_agents: level,
+                  analytics: analyticsLevel,
                 }),
               } as ClientAreaContext);
             },
@@ -301,6 +320,8 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
   });
   beforeEach(() => {
     level = 'manager';
+    analyticsLevel = 'manager';
+    analyticsProducts = ['leadflow', 'social'];
     // Owner: the only account role a Danger Zone route admits (IX3).
     accountRole = 'client_owner';
     allowAiCostActions = true;
@@ -316,11 +337,12 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
           name,
         )?.value;
         if (typeof method !== 'function') continue;
-        const module = Reflect.getMetadata(
-          CLIENT_AREA_EXPOSED_METADATA,
-          method,
-        ) as string | undefined;
-        if (!module?.startsWith('leadflow_')) continue;
+        // CA-AN1: a route may serve several modules; the CA11 modules are
+        // checked here, `analytics` in `analytics-client-area.http.spec.ts`.
+        const module = clientAreaExposedModules(
+          Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, method),
+        ).find((key) => key.startsWith('leadflow_'));
+        if (!module) continue;
         const base = Reflect.getMetadata(PATH_METADATA, controller) as string;
         const leaf = Reflect.getMetadata(PATH_METADATA, method) as string;
         const path = `/${base}/${leaf}`.replace(/\/+/g, '/').replace(/\/$/, '');
@@ -331,9 +353,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
         actual.push(`${verb} ${path} ${module}`);
       }
     expect(actual.sort()).toEqual(
-      LEADFLOW_CLIENT_AREA_ROUTES.map(
-        (r) => `${r.method} ${r.path} ${r.module}`,
-      ).sort(),
+      CA11_ROUTES.map((r) => `${r.method} ${r.path} ${r.module}`).sort(),
     );
   });
   const call = (
@@ -373,7 +393,7 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     return route.method === 'GET' ? req : req.send(body);
   };
   it.each(
-    LEADFLOW_CLIENT_AREA_ROUTES.map(
+    CA11_ROUTES.map(
       (route) => [`${route.method} ${route.path}`, route] as const,
     ),
   )('forces company membership on %s', async (_name, route) => {
@@ -407,9 +427,9 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
     expect(ctx.managedContext.companyContextId).toBe(company);
   });
   it.each(
-    LEADFLOW_CLIENT_AREA_ROUTES.filter((route) =>
-      route.path.includes('/:'),
-    ).map((route) => [`${route.method} ${route.path}`, route] as const),
+    CA11_ROUTES.filter((route) => route.path.includes('/:')).map(
+      (route) => [`${route.method} ${route.path}`, route] as const,
+    ),
   )('returns 404 for another company resource on %s', async (_name, route) => {
     await call(route, company, foreign).expect(404);
     expect(calls).toHaveLength(0);
@@ -603,5 +623,138 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
       .expect(401);
     process.env.CLIENT_AREA_BRIDGE_ENABLED = 'false';
     await call(patch).expect(401);
+  });
+
+  describe('CA-AN1 Analytics module over the LeadFlow routes', () => {
+    const analytics = LEADFLOW_CLIENT_AREA_ROUTES.filter(
+      (route) => route.module === 'analytics',
+    );
+    // Routes the Agents module does not also serve (the OR3 KPIs are shared).
+    const analyticsOnly = analytics.filter(
+      (route) =>
+        !LEADFLOW_CLIENT_AREA_ROUTES.some(
+          (other) =>
+            other.module !== 'analytics' &&
+            other.method === route.method &&
+            other.path === route.path,
+        ),
+    );
+    const isRead = (route: LeadFlowClientRoute) =>
+      route.method === 'GET' || /\/reports\/(preview|pdf)$/.test(route.path);
+    // Through the guards: only the evaluator's 404 counts as a refusal.
+    const passed = ({ status, body }: { status: number; body: unknown }) =>
+      ![401, 403].includes(status) &&
+      !(
+        status === 404 &&
+        (body as { message?: string })?.message === 'Resource is not available.'
+      );
+
+    it('keeps the analytics opt-ins equal to the closed contract', () => {
+      const actual: string[] = [];
+      for (const controller of controllers)
+        for (const name of Object.getOwnPropertyNames(controller.prototype)) {
+          const method: unknown = Object.getOwnPropertyDescriptor(
+            controller.prototype,
+            name,
+          )?.value;
+          if (typeof method !== 'function') continue;
+          const modules = clientAreaExposedModules(
+            Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, method),
+          );
+          if (!modules.includes('analytics')) continue;
+          const base = Reflect.getMetadata(PATH_METADATA, controller) as string;
+          const leaf = Reflect.getMetadata(PATH_METADATA, method) as string;
+          const path = `/${base}/${leaf}`
+            .replace(/\/+/g, '/')
+            .replace(/\/$/, '');
+          const verb =
+            RequestMethod[
+              Reflect.getMetadata(METHOD_METADATA, method) as RequestMethod
+            ];
+          actual.push(`${verb} ${path}`);
+        }
+      expect(actual.sort()).toEqual(
+        analytics.map((r) => `${r.method} ${r.path}`).sort(),
+      );
+      expect(analytics).toHaveLength(13);
+    });
+
+    it('refuses a Viewer on every Analytics route (D-AN-13)', async () => {
+      analyticsLevel = 'viewer';
+      accountRole = 'client_member';
+      expect(analyticsOnly).toHaveLength(11);
+      for (const route of analyticsOnly)
+        expect([route.path, (await call(route)).status]).toEqual([
+          route.path,
+          403,
+        ]);
+    });
+
+    it('lets Operator and a non-Owner Manager read and export, never write', async () => {
+      accountRole = 'client_member';
+      for (const value of ['operator', 'manager'] as const) {
+        analyticsLevel = value;
+        for (const route of analytics) {
+          const at = `${value} ${route.method} ${route.path}`;
+          const response = await call(route);
+          if (isRead(route)) expect([at, passed(response)]).toEqual([at, true]);
+          else expect([at, response.status]).toEqual([at, 403]);
+        }
+      }
+    });
+
+    it('lets the Owner through, company-scoped, and 404s another company or row', async () => {
+      for (const route of analytics) {
+        const at = `${route.method} ${route.path}`;
+        calls.length = 0;
+        expect([at, passed(await call(route))]).toEqual([at, true]);
+        const ctx = calls[0]?.[0] as
+          | { managedContext?: { companyContextId: string } }
+          | undefined;
+        if (ctx?.managedContext)
+          expect(ctx.managedContext.companyContextId).toBe(company);
+        expect([at, (await call(route, foreign)).status]).toEqual([at, 404]);
+        if (route.path.includes('/:'))
+          expect([at, (await call(route, company, foreign)).status]).toEqual([
+            at,
+            404,
+          ]);
+      }
+    });
+
+    it("hides another Owner's private dashboard (D-AN-14)", async () => {
+      for (const route of analytics.filter((r) =>
+        r.path.endsWith('/dashboards/:id'),
+      ))
+        expect([
+          route.method,
+          (await call(route, company, otherOwned)).status,
+        ]).toEqual([route.method, 404]);
+      const pdf = analytics.find((r) => r.path.endsWith('/reports/pdf'))!;
+      expect(
+        (await call(pdf, company, own, { dashboardId: otherOwned })).status,
+      ).toBe(404);
+    });
+
+    it('refuses the LeadFlow routes when LeadFlow is not active for the company', async () => {
+      analyticsProducts = ['social'];
+      for (const route of analyticsOnly)
+        expect([route.path, (await call(route)).status]).toEqual([
+          route.path,
+          403,
+        ]);
+    });
+
+    it('keeps the Operations Room KPIs on the Agents module', async () => {
+      // `leadflow_agents` comes first in the decorator: an Owner with both
+      // modules is authorized by Agents, and losing Analytics changes nothing.
+      analyticsLevel = 'viewer';
+      const kpis = LEADFLOW_CLIENT_AREA_ROUTES.find(
+        (r) =>
+          r.module === 'leadflow_agents' &&
+          r.path === '/leadflow/analytics/operational-overview',
+      )!;
+      expect(passed(await call(kpis))).toBe(true);
+    });
   });
 });

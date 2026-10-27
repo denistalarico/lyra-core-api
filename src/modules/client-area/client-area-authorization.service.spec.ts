@@ -74,7 +74,10 @@ describe('CA4.1 ClientAreaAuthorizationService.resolveMembershipContext eligibil
     const clientsRepo = { findOne: jest.fn().mockResolvedValue(client) };
     const management = {
       assertAgencyEnabled: jest.fn().mockResolvedValue(undefined),
-      resolveCompanyModules: jest.fn().mockResolvedValue({ approvals: false }),
+      resolveCompanyAccess: jest.fn().mockResolvedValue({
+        modules: { approvals: false },
+        analyticsProducts: [],
+      }),
     };
     const eligibilityService = {
       isMembershipEligible: jest.fn().mockResolvedValue(eligible),

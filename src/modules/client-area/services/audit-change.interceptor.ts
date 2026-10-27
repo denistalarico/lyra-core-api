@@ -11,7 +11,10 @@ import { concatMap } from 'rxjs';
 import type { AuthenticatedRequest } from '../../auth/types/authenticated-request.type';
 import type { ClientAreaRequest } from '../client-area.types';
 import { isUuid } from '../client-area.types';
-import { CLIENT_AREA_EXPOSED_METADATA } from '../../../common/client-area-bridge/client-area-bridge.registry';
+import {
+  CLIENT_AREA_EXPOSED_METADATA,
+  clientAreaExposedModules,
+} from '../../../common/client-area-bridge/client-area-bridge.registry';
 import { AuditChangeService } from './audit-change.service';
 
 @Injectable()
@@ -24,10 +27,15 @@ export class AuditChangeInterceptor implements NestInterceptor {
     const req = execution
       .switchToHttp()
       .getRequest<AuthenticatedRequest & ClientAreaRequest>();
-    const exposed = this.reflector.get<string | undefined>(
-      CLIENT_AREA_EXPOSED_METADATA,
-      execution.getHandler(),
+    // CA-AN1: the module the Bridge chose; the first exposed one otherwise
+    // (an Agency call on a route shared by two modules).
+    const modules = clientAreaExposedModules(
+      this.reflector.get<unknown>(
+        CLIENT_AREA_EXPOSED_METADATA,
+        execution.getHandler(),
+      ),
     );
+    const exposed = req.clientAreaModule ?? modules[0];
     const prefix =
       this.reflector.get<string | undefined>(
         PATH_METADATA,

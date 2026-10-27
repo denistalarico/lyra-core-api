@@ -54,10 +54,13 @@ export type SocialClientAreaRef =
   | 'connection'
   | 'adAction'
   | 'alert'
-  | 'brandKitAsset';
+  | 'brandKitAsset'
+  | 'analyticsDashboard'
+  | 'analyticsReport';
 
 export type SocialClientAreaRule = {
-  module: ClientAreaModuleKey;
+  /** CA-AN1: a read shared by two modules lists both (Campaigns + Analytics). */
+  module: ClientAreaModuleKey | readonly ClientAreaModuleKey[];
   subject?: { ref: SocialClientAreaRef; param: string };
   nested?: { ref: SocialClientAreaRef; param: string };
   body?: Record<string, SocialClientAreaRef>;
@@ -88,6 +91,23 @@ const campaigns = (rule: Omit<SocialClientAreaRule, 'module'> = {}) => ({
   module: 'social_campaigns' as const,
   ...rule,
 });
+/**
+ * CA-AN1 — the Analytics module (D-AN-13): data, dashboards and the report
+ * archive. Reads for Operator/Manager (PDF preview/export is a read); dashboard
+ * writes carry Owner-only grants. Not exposed: report deletion (agency only),
+ * the Orion insights, `/social/analytics/insights*`.
+ */
+const analytics = (rule: Omit<SocialClientAreaRule, 'module'> = {}) => ({
+  module: 'analytics' as const,
+  ...rule,
+});
+/** Read by Campaigns and by Analytics. */
+const campaignsAndAnalytics = (
+  rule: Omit<SocialClientAreaRule, 'module'> = {},
+) => ({
+  module: ['social_campaigns', 'analytics'] as const,
+  ...rule,
+});
 const plan = { ref: 'plan', param: 'planId' } as const;
 const content = { ref: 'content', param: 'contentId' } as const;
 const contentRefs = {
@@ -107,6 +127,11 @@ const promoteAsVersion = {
   revisesVersionId: 'creativeVersion',
 } as const;
 const connection = { connectionId: 'connection' } as const;
+const organicAsset = { assetId: 'organicAsset' } as const;
+const SA = '/social/analytics';
+const dashboard = { ref: 'analyticsDashboard', param: 'id' } as const;
+const reportDashboard = { dashboardId: 'analyticsDashboard' } as const;
+const OA = '/social/organic/analytics';
 const adAction = { ref: 'adAction', param: 'actionId' } as const;
 
 export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
@@ -445,10 +470,63 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
   [`GET ${M}/hierarchy`]: campaigns({ query: connection }),
   ['GET /social/campaigns/boost-templates']: campaigns(),
   // Read-only analytics the Campaigns page needs (social-integrations,
-  // decorator-only opt-in authorized by the user, 2026-10-19).
-  ['GET /social/analytics/connections']: campaigns(),
-  ['GET /social/analytics/timeseries']: campaigns({ query: connection }),
+  // decorator-only opt-in authorized by the user, 2026-10-19); CA-AN1 shares
+  // them with the Analytics module.
+  [`GET ${SA}/connections`]: campaignsAndAnalytics(),
+  [`GET ${SA}/timeseries`]: campaignsAndAnalytics({ query: connection }),
+  // CA-AN1 — Analytics: paid data (every read names its connection).
+  ...Object.fromEntries(
+    [
+      'overview',
+      'campaigns',
+      'ad-sets',
+      'ads',
+      'ads/thumbnail',
+      'breakdown',
+      'freshness',
+    ].map((path) => [`GET ${SA}/${path}`, analytics({ query: connection })]),
+  ),
+  // Organic data (every read but the asset list names its asset).
+  [`GET ${OA}/assets`]: analytics(),
+  ...Object.fromEntries(
+    [
+      'overview',
+      'timeseries',
+      'audience',
+      'activity',
+      'weekday',
+      'posts/top',
+      'stories/top',
+      'facebook/reels',
+      'posts/thumbnail',
+      'freshness',
+    ].map((path) => [`GET ${OA}/${path}`, analytics({ query: organicAsset })]),
+  ),
+  [`GET ${OA}/consolidated`]: analytics({
+    query: { paidConnectionId: 'connection', organicAssetId: 'organicAsset' },
+  }),
+  [`GET ${OA}/publications`]: analytics({
+    query: { publicationIds: 'publication' },
+  }),
+  // Dashboards: a private Owner row answers only to its Owner (scope SQL).
+  [`GET ${SA}/dashboards`]: analytics(),
+  [`POST ${SA}/dashboards`]: analytics(),
+  [`PATCH ${SA}/dashboards/:id`]: analytics({ subject: dashboard }),
+  [`DELETE ${SA}/dashboards/:id`]: analytics({ subject: dashboard }),
+  // Report archive: list, original file, preview and export (reads).
+  [`GET ${SA}/reports`]: analytics(),
+  [`GET ${SA}/reports/:id/file`]: analytics({
+    subject: { ref: 'analyticsReport', param: 'id' },
+  }),
+  [`POST ${SA}/reports/preview`]: analytics({ body: reportDashboard }),
+  [`POST ${SA}/reports/pdf`]: analytics({ body: reportDashboard }),
 };
+
+/** The modules a rule serves. */
+export const socialRuleModules = (
+  rule: SocialClientAreaRule,
+): readonly ClientAreaModuleKey[] =>
+  typeof rule.module === 'string' ? [rule.module] : rule.module;
 
 export const socialClientRoutePath = (path: string) =>
   path.startsWith('/api/') ? path.slice(4) : path;

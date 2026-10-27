@@ -213,7 +213,20 @@ export interface ClientAreaContext {
   consent?: ClientAreaConsentState;
   allowAiCostActions?: boolean;
   allowMediaSpendActions?: boolean;
+  /**
+   * CA-AN1 — products the `analytics` module reaches for this company: active
+   * on the company, entitled and consented, the same rule that gates the
+   * `social_*`/`leadflow_*` modules. The module itself is not product-gated
+   * (it also carries the CA13 facade), so each product route is.
+   */
+  analyticsProducts?: ClientAreaAnalyticsProduct[];
+  /** CA-AN1 (D-AN-9) — `client_area_company_settings.analytics_overview_first`. */
+  analyticsOverviewFirst?: ClientAreaAnalyticsProduct;
 }
+
+export const CLIENT_AREA_ANALYTICS_PRODUCTS = ['leadflow', 'social'] as const;
+export type ClientAreaAnalyticsProduct =
+  (typeof CLIENT_AREA_ANALYTICS_PRODUCTS)[number];
 
 /**
  * PD3 — the agency acting as its own client.
@@ -269,6 +282,8 @@ export interface ClientAreaRequest extends Request {
   clientAreaIdentity?: ClientAreaIdentity;
   clientAreaContext?: ClientAreaContext;
   clientAreaSelfContext?: ClientAreaSelfContext;
+  /** CA-AN1 — the exposed module the Bridge chose for this request. */
+  clientAreaModule?: ClientAreaModuleKey;
 }
 
 /** Stable, machine-readable error codes of the Client Area surface. */

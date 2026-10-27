@@ -9,9 +9,11 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
-import type {
-  ClientAreaRole,
-  ClientAreaModuleSettings,
+import {
+  CLIENT_AREA_ANALYTICS_PRODUCTS,
+  type ClientAreaAnalyticsProduct,
+  type ClientAreaRole,
+  type ClientAreaModuleSettings,
 } from '../client-area.types';
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -76,4 +78,8 @@ export class PatchClientAreaCompanySettingsDto {
   @IsOptional()
   @IsIn(['client_admin', 'client_operator', 'client_viewer'])
   defaultRole?: ClientAreaRole;
+  /** CA-AN1 (D-AN-9) — order of the unified Visão Geral. */
+  @IsOptional()
+  @IsIn(CLIENT_AREA_ANALYTICS_PRODUCTS)
+  analyticsOverviewFirst?: ClientAreaAnalyticsProduct;
 }

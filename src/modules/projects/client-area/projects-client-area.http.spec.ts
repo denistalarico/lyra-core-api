@@ -1,6 +1,9 @@
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants';
 import { RequestMethod } from '@nestjs/common';
-import { CLIENT_AREA_EXPOSED_METADATA } from '../../../common/client-area-bridge/client-area-bridge.registry';
+import {
+  CLIENT_AREA_EXPOSED_METADATA,
+  clientAreaExposedModules,
+} from '../../../common/client-area-bridge/client-area-bridge.registry';
 import { TaskWorkspaceController } from '../controllers/task-workspace.controller';
 import { ProjectEventsController } from '../controllers/project-events.controller';
 import { ProjectFollowersAttachmentsController } from '../controllers/project-followers-attachments.controller';
@@ -460,8 +463,9 @@ describe('CA9 production Projects controllers through the real HTTP bridge', () 
       Object.getOwnPropertyNames(controller.prototype).flatMap((name) => {
         const handler = Reflect.get(controller.prototype, name) as object;
         if (
-          Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, handler) !==
-          'agency_projects'
+          !clientAreaExposedModules(
+            Reflect.getMetadata(CLIENT_AREA_EXPOSED_METADATA, handler),
+          ).includes('agency_projects')
         )
           return [];
         const verb =

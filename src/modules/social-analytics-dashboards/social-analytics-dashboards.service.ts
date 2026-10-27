@@ -24,6 +24,11 @@ import {
   UpdateSocialAnalyticsDashboardDto,
 } from './dto/social-analytics-dashboard.dto';
 import { SocialAnalyticsDashboardEntity } from './entities';
+import {
+  AGENCY_DASHBOARD_PRINCIPAL as AGENCY_PRINCIPAL,
+  assertClientAreaMayChange,
+  type AnalyticsDashboardPrincipal,
+} from '../analytics-overview/analytics-dashboard-client-area.policy';
 
 /**
  * The id the frontend has been emitting for the built-in dashboard since Etapa
@@ -64,11 +69,16 @@ export type SocialAnalyticsDashboardView = {
   channelKey: DashboardChannelId | null;
   channels: DashboardChannelId[];
   layout: DashboardLayout;
+  /** CA-AN1 — a private dashboard of the requesting Client Area Owner. */
+  ownedByMe: boolean;
   createdAt: string;
   updatedAt: string;
 };
 
+/** Shared (company/agency) rows only; private Owner rows count apart. */
 const MAX_DASHBOARDS_PER_SCOPE = 40;
+/** CA-AN1 (D-AN-14) — private dashboards per Client Area Owner. */
+const MAX_OWNER_DASHBOARDS = 20;
 
 @Injectable()
 export class SocialAnalyticsDashboardsService {
@@ -88,12 +98,13 @@ export class SocialAnalyticsDashboardsService {
   async list(
     scope: CompanyAwareScope,
     actorId: string | null,
+    principal: AnalyticsDashboardPrincipal = AGENCY_PRINCIPAL,
   ): Promise<SocialAnalyticsDashboardView[]> {
     await this.ensureDefault(scope, actorId);
     await this.ensureChannelDashboards(scope, actorId);
 
     const rows = await this.dashboards.find({
-      where: this.where(scope),
+      where: this.visible(scope, principal),
       // The built-in one first, then oldest to newest: the tab strip's order is
       // the creation order, so a new dashboard appears at the end rather than
       // displacing the tabs the operator already knows.
@@ -106,7 +117,7 @@ export class SocialAnalyticsDashboardsService {
     // a fresh scope, so two operators opening Analytics at the same moment
     // could otherwise end up looking at differently ordered tabs.
     return rows
-      .map((row) => this.toView(row))
+      .map((row) => this.toView(row, principal))
       .sort((left, right) => this.tabRank(left) - this.tabRank(right));
   }
 
@@ -130,6 +141,7 @@ export class SocialAnalyticsDashboardsService {
     scope: CompanyAwareScope,
     actorId: string | null,
     dto: CreateSocialAnalyticsDashboardDto,
+    principal: AnalyticsDashboardPrincipal = AGENCY_PRINCIPAL,
   ): Promise<SocialAnalyticsDashboardView> {
     const name = dto.name.trim();
 
@@ -139,8 +151,14 @@ export class SocialAnalyticsDashboardsService {
 
     const channels = this.normalizeChannels(dto.channels);
 
-    const total = await this.dashboards.count({ where: this.where(scope) });
-    if (total >= MAX_DASHBOARDS_PER_SCOPE) {
+    // A Client Area principal only ever creates its own private dashboard.
+    const owner = principal.clientAreaUserId;
+    const total = await this.dashboards.count({
+      where: owner
+        ? { ...this.scoped(scope), clientAreaOwnerUserId: owner }
+        : this.where(scope),
+    });
+    if (total >= (owner ? MAX_OWNER_DASHBOARDS : MAX_DASHBOARDS_PER_SCOPE)) {
       throw new BadRequestException(
         'Este contexto já atingiu o limite de dashboards.',
       );
@@ -153,9 +171,10 @@ export class SocialAnalyticsDashboardsService {
       channels,
       layout: emptyDashboardLayout(channels),
       createdById: actorId,
+      clientAreaOwnerUserId: owner,
     });
 
-    return this.toView(await this.saveUnique(entity));
+    return this.toView(await this.saveUnique(entity), principal);
   }
 
   /**
@@ -170,8 +189,10 @@ export class SocialAnalyticsDashboardsService {
     scope: CompanyAwareScope,
     id: string,
     dto: UpdateSocialAnalyticsDashboardDto,
+    principal: AnalyticsDashboardPrincipal = AGENCY_PRINCIPAL,
   ): Promise<SocialAnalyticsDashboardView> {
-    const dashboard = await this.find(scope, id);
+    const dashboard = await this.find(scope, id, principal);
+    assertClientAreaMayChange(dashboard, principal, dto);
 
     if (dto.name !== undefined) {
       const name = dto.name.trim();
@@ -220,11 +241,16 @@ export class SocialAnalyticsDashboardsService {
       }
     }
 
-    return this.toView(await this.saveUnique(dashboard));
+    return this.toView(await this.saveUnique(dashboard), principal);
   }
 
-  async remove(scope: CompanyAwareScope, id: string): Promise<void> {
-    const dashboard = await this.find(scope, id);
+  async remove(
+    scope: CompanyAwareScope,
+    id: string,
+    principal: AnalyticsDashboardPrincipal = AGENCY_PRINCIPAL,
+  ): Promise<void> {
+    const dashboard = await this.find(scope, id, principal);
+    assertClientAreaMayChange(dashboard, principal, null);
 
     // The built-in dashboard is the one every scope is guaranteed to have, and
     // the frontend routes to it whenever no other is selected. Deleting it
@@ -249,9 +275,11 @@ export class SocialAnalyticsDashboardsService {
   async find(
     scope: CompanyAwareScope,
     id: string,
+    principal: AnalyticsDashboardPrincipal = AGENCY_PRINCIPAL,
   ): Promise<SocialAnalyticsDashboardEntity> {
+    // Another Owner's private row is as absent as a row of another company.
     const dashboard = await this.dashboards.findOne({
-      where: { ...this.where(scope), id },
+      where: this.visible(scope, principal).map((where) => ({ ...where, id })),
     });
 
     if (!dashboard) {
@@ -391,7 +419,26 @@ export class SocialAnalyticsDashboardsService {
     return [...normalized];
   }
 
+  /** Shared rows of the scope: what the Agency sees and what seeding checks. */
   private where(scope: CompanyAwareScope) {
+    return { ...this.scoped(scope), clientAreaOwnerUserId: IsNull() };
+  }
+
+  /** Shared rows, plus the principal's own private ones. */
+  private visible(
+    scope: CompanyAwareScope,
+    principal: AnalyticsDashboardPrincipal,
+  ) {
+    const owner = principal.clientAreaUserId;
+    return owner
+      ? [
+          this.where(scope),
+          { ...this.scoped(scope), clientAreaOwnerUserId: owner },
+        ]
+      : [this.where(scope)];
+  }
+
+  private scoped(scope: CompanyAwareScope) {
     return {
       tenantId: scope.tenantId,
       workspaceId: scope.workspaceId,
@@ -413,6 +460,7 @@ export class SocialAnalyticsDashboardsService {
 
   private toView(
     row: SocialAnalyticsDashboardEntity,
+    principal: AnalyticsDashboardPrincipal,
   ): SocialAnalyticsDashboardView {
     return {
       id: row.id,
@@ -422,6 +470,9 @@ export class SocialAnalyticsDashboardsService {
       channelKey: row.channelKey ?? null,
       channels: row.channels ?? [],
       layout: row.layout ?? emptyDashboardLayout([]),
+      ownedByMe:
+        row.clientAreaOwnerUserId != null &&
+        row.clientAreaOwnerUserId === principal.clientAreaUserId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };

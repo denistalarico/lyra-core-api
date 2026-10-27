@@ -28,6 +28,7 @@ import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import {
   DangerousAction,
+  RequireAnyPermission,
   RequirePermission,
 } from '../permissions/decorators/permissions.decorators';
 import { PermissionScopeEvaluatorService } from '../permissions/services/permission-scope-evaluator.service';
@@ -46,6 +47,7 @@ import { resolveSelfMemberAccess } from './client-area-self-modules';
 import type { AuthenticatedRequest } from '../auth/types/authenticated-request.type';
 import type {
   ClientAreaContext,
+  ClientAreaRequest,
   ClientAreaSelfContext,
 } from './client-area.types';
 
@@ -93,6 +95,19 @@ class BridgeProbe {
   }
   @Get('no-permission') @ClientAreaExposed('agency_projects') noPermission() {
     return { ok: true };
+  }
+  // CA-AN1: a product-less shared Analytics read (like the Visão Geral header).
+  @Get('analytics-shared')
+  @ClientAreaExposed('analytics')
+  @RequireAnyPermission(
+    'leadflow.analytics.reports.view.operational',
+    'social.analytics.reports.view.operational',
+  )
+  analyticsShared(@Req() req: AuthenticatedRequest & ClientAreaRequest) {
+    return {
+      productKey: req.managedContext?.productKey,
+      module: req.clientAreaModule,
+    };
   }
   @Get('dangerous')
   @ClientAreaExposed('agency_projects')
@@ -234,6 +249,21 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
           createdById: row.createdById,
         };
       });
+    mod
+      .get(ClientAreaBridgeRegistry)
+      .registerScopeResolver('analytics', (ctx, _key, req) =>
+        Promise.resolve(
+          req.routePath === '/ca7-probe/analytics-shared'
+            ? {
+                tenantId: ctx.tenantId,
+                workspaceId: ctx.workspaceId,
+                agencyClientId: ctx.agencyClientId,
+                companyContextId: ctx.companyContextId,
+                createdById: null,
+              }
+            : null,
+        ),
+      );
     app = mod.createNestApplication();
     await app.init();
     jwt = mod.get(JwtService);
@@ -319,6 +349,34 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
       .get(path)
       .set('Authorization', `Bearer ${await token()}`)
       .set('x-lyra-client-area-company', company);
+  describe('CA-AN1 product-less Analytics route', () => {
+    const analyticsMember = (
+      level: 'viewer' | 'operator',
+      products: ('leadflow' | 'social')[],
+    ) => {
+      context.memberAccess = resolveMemberAccess(
+        'client_member',
+        { analytics: true },
+        { analytics: level },
+      );
+      context.analyticsProducts = products;
+    };
+    it('runs in the context of a product the company has', async () => {
+      analyticsMember('operator', ['social', 'leadflow']);
+      const response = await get('/ca7-probe/analytics-shared');
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        productKey: 'social',
+        module: 'analytics',
+      });
+    });
+    it('is 403 without an active product, and for a Viewer', async () => {
+      analyticsMember('operator', []);
+      expect((await get('/ca7-probe/analytics-shared')).status).toBe(403);
+      analyticsMember('viewer', ['leadflow']);
+      expect((await get('/ca7-probe/analytics-shared')).status).toBe(403);
+    });
+  });
   it('token on an unexposed Agency route is still 401', async () => {
     const result = await get('/ca7-probe/unexposed');
     expect(result.status).toBe(401);

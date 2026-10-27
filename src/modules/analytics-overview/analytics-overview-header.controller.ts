@@ -10,6 +10,7 @@ import { resolveCompanyAwareScope } from '../../common/context/company-aware-sco
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   PermissionsGuard,
   PlatformPermissionService,
@@ -43,8 +44,9 @@ export const OVERVIEW_HEADER_MANAGE_PERMISSIONS = [
  * - agency mode — the guard checks no product at all, so the tenant must own
  *   at least one of the two.
  *
- * Not exposed to the Client Area (no `ExposeToClientArea`): the guard refuses
- * every client-area call until CA-AN1 exposes the `GET`.
+ * CA-AN1: the `GET` is exposed to the Client Area `analytics` module; the
+ * Bridge runs it in the context of a product the company has (client mode),
+ * so the check above holds there too. The `PATCH` stays agency-only.
  */
 @Controller('analytics/overview-header')
 export class AnalyticsOverviewHeaderController {
@@ -53,6 +55,7 @@ export class AnalyticsOverviewHeaderController {
     private readonly permissions: PlatformPermissionService,
   ) {}
 
+  @ClientAreaExposed('analytics')
   @Get()
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireAnyPermission(...OVERVIEW_HEADER_READ_PERMISSIONS)

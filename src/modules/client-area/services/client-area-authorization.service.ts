@@ -223,13 +223,14 @@ export class ClientAreaAuthorizationService {
       return null;
     }
 
-    const modules = await this.management.resolveCompanyModules({
-      tenantId: membership.tenantId,
-      workspaceId: membership.workspaceId,
-      agencyClientId: membership.agencyClientId,
-      companyContextId: membership.companyContextId,
-      now,
-    });
+    const { modules, analyticsProducts } =
+      await this.management.resolveCompanyAccess({
+        tenantId: membership.tenantId,
+        workspaceId: membership.workspaceId,
+        agencyClientId: membership.agencyClientId,
+        companyContextId: membership.companyContextId,
+        now,
+      });
     const memberAccess = this.access
       ? await this.access.resolveMemberAccess(membership, modules)
       : resolveMemberAccess(membership.role, modules, {});
@@ -273,6 +274,8 @@ export class ClientAreaAuthorizationService {
       },
       allowAiCostActions: settings?.allowAiCostActions === true,
       allowMediaSpendActions: settings?.allowMediaSpendActions === true,
+      analyticsProducts,
+      analyticsOverviewFirst: settings?.analyticsOverviewFirst ?? 'leadflow',
     };
   }
 }

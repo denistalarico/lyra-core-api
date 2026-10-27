@@ -42,13 +42,21 @@ run('CA12 dashboards and daily company isolation (Agency test only)', () => {
   afterAll(async () => {
     if (AgencyDataSource.isInitialized) await AgencyDataSource.destroy();
   });
+  // CA-AN1 (1801300000000) added the private-owner column the entity reads;
+  // the isolated schema gets it right after the CA12 table.
+  const upCurrent = async () => {
+    await migration.up(runner);
+    await runner.query(
+      'ALTER TABLE leadflow_analytics_dashboards ADD COLUMN IF NOT EXISTS client_area_owner_user_id uuid',
+    );
+  };
   beforeEach(async () => {
     runner = AgencyDataSource.createQueryRunner();
     await runner.connect();
     schema = `ca12_${randomUUID().replaceAll('-', '')}`;
     await runner.query(`CREATE SCHEMA "${schema}"`);
     await runner.query(`SET search_path TO "${schema}", public`);
-    await migration.up(runner);
+    await upCurrent();
     service = new LeadFlowAnalyticsDashboardsService(
       runner.manager.getRepository(LeadFlowAnalyticsDashboardEntity),
     );
@@ -63,9 +71,9 @@ run('CA12 dashboards and daily company isolation (Agency test only)', () => {
       'CREATE TABLE leadflow_analytics_views(id int PRIMARY KEY)',
     );
     await runner.query('INSERT INTO leadflow_analytics_views VALUES (1)');
-    await migration.up(runner);
+    await upCurrent();
     await migration.down(runner);
-    await migration.up(runner);
+    await upCurrent();
     expect(
       await runner.query('SELECT id FROM leadflow_analytics_views'),
     ).toEqual([{ id: 1 }]);

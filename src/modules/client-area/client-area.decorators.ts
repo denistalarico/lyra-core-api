@@ -1,8 +1,13 @@
 import { CLIENT_AREA_EXPOSED_METADATA } from '../../common/client-area-bridge/client-area-bridge.registry';
 export { CLIENT_AREA_EXPOSED_METADATA };
-/** Route-only opt-in. CA7 does not expose any production product route. */
-export const ClientAreaExposed = (module: ClientAreaModuleKey) =>
-  SetMetadata(CLIENT_AREA_EXPOSED_METADATA, module);
+/**
+ * Route-only opt-in. CA-AN1: a route may serve several modules (e.g. a Social
+ * read used by Campaigns and by Analytics); the Bridge picks the first one
+ * the member can use for the route's product.
+ */
+export const ClientAreaExposed = (
+  ...modules: [ClientAreaModuleKey, ...ClientAreaModuleKey[]]
+) => SetMetadata(CLIENT_AREA_EXPOSED_METADATA, modules);
 import {
   createParamDecorator,
   SetMetadata,

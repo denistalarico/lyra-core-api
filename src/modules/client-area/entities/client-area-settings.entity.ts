@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import type {
+  ClientAreaAnalyticsProduct,
   ClientAreaRole,
   ClientAreaModuleSettings,
 } from '../client-area.types';
@@ -198,6 +199,18 @@ export class ClientAreaCompanySettingsEntity {
     default: false,
   })
   allowMediaSpendActions!: boolean;
+  /**
+   * CA-AN1 (D-AN-9) — which product's Visão Geral comes first in the Client
+   * Area's unified Visão Geral. Order only: each Visão Geral is still edited
+   * on its product page.
+   */
+  @Column({
+    name: 'analytics_overview_first',
+    type: 'varchar',
+    length: 16,
+    default: 'leadflow',
+  })
+  analyticsOverviewFirst!: ClientAreaAnalyticsProduct;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
