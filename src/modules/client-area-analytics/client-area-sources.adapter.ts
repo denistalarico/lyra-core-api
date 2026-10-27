@@ -15,10 +15,7 @@ import { SocialAnalyticsReadService } from '../social-integrations/services/soci
 import { InboxService } from '../inbox/inbox.service';
 import { LeadFlowAgendaService } from '../leadflow-agenda/leadflow-agenda.service';
 import { LeadFlowOverviewService } from '../leadflow-analytics/services/leadflow-overview.service';
-import { LeadFlowOperationalAnalyticsService } from '../leadflow-analytics/services/leadflow-operational-analytics.service';
 import { LeadFlowAnalyticsService } from '../leadflow-analytics/services/leadflow-analytics.service';
-import { LeadFlowTimeseriesService } from '../leadflow-analytics/services/leadflow-timeseries.service';
-import { LeadFlowIntelligenceService } from '../leadflow-analytics/services/leadflow-intelligence.service';
 import {
   ClientAreaSourcesRegistry,
   AnalyticsSourceUnavailable,
@@ -45,117 +42,6 @@ export function analyticsDomainContext(
     },
   };
 }
-const asRecord = (value: unknown): Record<string, unknown> =>
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-/** Canonical scalar fields/rows only: no dataQuality, config, evidence, worker or developer material. */
-export function projectMetricValue(value: unknown): unknown {
-  if (value === null || ['number', 'string', 'boolean'].includes(typeof value))
-    return value;
-  if (Array.isArray(value)) return value.map(projectMetricValue);
-  const allowed = [
-    'id',
-    'name',
-    'label',
-    'currency',
-    'amount',
-    'value',
-    'count',
-    'total',
-    'day',
-    'band',
-    'share',
-    'pipelineId',
-    'stageId',
-    'channelId',
-    'agentId',
-    'type',
-    'businessMode',
-    'recipeKey',
-    'automationName',
-    'status',
-    'mode',
-    'createdAt',
-    'startedAt',
-    'finishedAt',
-    'durationMs',
-    'policyVersion',
-    'calculations',
-    'opportunities',
-    'calculatedAt',
-    'averageScore',
-    'averageAttainmentRate',
-    'averageDelta',
-    'hot',
-    'runs',
-    'live',
-    'shadow',
-    'dryRun',
-    'succeeded',
-    'skipped',
-    'failed',
-    'cancelled',
-    'successRate',
-    'averageDurationMs',
-    'confirmedEffects',
-    'failedAttempts',
-    'attemptCount',
-    'cohortEntries',
-    'entries',
-    'uniqueOpportunities',
-    'transfersIn',
-    'transfersOut',
-    'wins',
-    'losses',
-    'openAtEnd',
-    'averageTimeSeconds',
-    'inbound',
-    'outbound',
-    'automatedOutbound',
-    'humanOutbound',
-    'failedOutbound',
-    'conversations',
-    'inboundConversations',
-    'respondedConversations',
-    'firstResponseRate',
-    'averageFirstResponseSeconds',
-    'averageResponseSeconds',
-    'leadRepliesAfterFirstAgentReply',
-    'leadRepliesAfterFirstReply',
-    'open',
-    'won',
-    'lost',
-    'archived',
-    'winRate',
-    'transfers',
-    'transferredOpportunities',
-    'linkedConversations',
-    'handoffRequested',
-    'handoffAccepted',
-    'handoffRate',
-    'handoffTransferCompleted',
-    'handoffTransferFailed',
-    'aiInfluencedOpportunities',
-    'aiInfluencedWins',
-    'aiInfluenceRate',
-    'kind',
-    'title',
-    'rationale',
-    'confidence',
-    'expectedImpact',
-    'generatedAt',
-  ];
-  return Object.fromEntries(
-    allowed
-      .filter((key) => Object.hasOwn(asRecord(value), key))
-      .map((key) => [key, projectMetricValue(asRecord(value)[key])]),
-  );
-}
-const pathValue = (value: unknown, path: string) =>
-  path
-    .split('.')
-    .reduce<unknown>((current, key) => asRecord(current)[key], value);
 export function analyticsPeriod(input: AnalyticsSourceInput) {
   const to = input.query.to ? new Date(input.query.to) : new Date();
   const from = input.query.from
@@ -177,10 +63,7 @@ export class ClientAreaSourcesAdapter implements OnModuleInit {
     private readonly inbox: InboxService,
     private readonly agenda: LeadFlowAgendaService,
     private readonly lfOverview: LeadFlowOverviewService,
-    private readonly operational: LeadFlowOperationalAnalyticsService,
     private readonly commercial: LeadFlowAnalyticsService,
-    private readonly timeseries: LeadFlowTimeseriesService,
-    private readonly intelligence: LeadFlowIntelligenceService,
   ) {}
   onModuleInit() {
     this.registry.register({
@@ -422,115 +305,5 @@ export class ClientAreaSourcesAdapter implements OnModuleInit {
         };
       },
     });
-    for (const source of [
-      'overview',
-      'operational',
-      'commercial',
-      'recommendations',
-      'timeseries',
-    ])
-      this.registry.register({
-        key: `metric.leadflow.${source}`,
-        modules: [],
-        read: (input) => this.leadFlowMetric(input),
-      });
-  }
-
-  private async leadFlowMetric(input: AnalyticsSourceInput) {
-    const metric = input.metric!;
-    const ctx = analyticsDomainContext(input, 'leadflow'),
-      period = analyticsPeriod(input);
-    if (metric.source === 'leadflow.overview') {
-      if (
-        new Date(period.to).getTime() - new Date(period.from).getTime() >
-        90 * 86400000
-      )
-        throw new AnalyticsSourceUnavailable('overview_period_limit');
-      const response = await this.lfOverview.getOverview(ctx, period);
-      if (metric.path === 'priorities')
-        return {
-          mode: 'metric_value',
-          period: response.window,
-          value: response.priorities.map((row) => ({
-            key: row.key,
-            severity: row.severity,
-            title: row.title,
-            detail: row.detail,
-          })),
-        };
-      const kpi = response.kpis.find((k) => k.key === metric.path);
-      return {
-        mode: 'metric_value',
-        period: response.window,
-        value: kpi?.value ?? null,
-        unit: kpi?.unit,
-        limitation: kpi?.limitation,
-      };
-    }
-    if (metric.source === 'leadflow.timeseries') {
-      const result = await this.timeseries.get(ctx, {
-        ...period,
-        metrics: metric.path,
-        channelId: input.query.channelId,
-        businessMode: input.query.businessMode,
-        agentId: input.query.agentId,
-      });
-      return {
-        mode: 'metric_value',
-        period: result.period,
-        value: result.rows.map((row) => ({
-          day: row.day,
-          value: asRecord(row)[metric.path],
-        })),
-        filtersNotApplicableToCommercial:
-          result.filtersNotApplicableToCommercial,
-      };
-    }
-    if (metric.source === 'leadflow.recommendations') {
-      const result = await this.intelligence.list(ctx, {
-        businessMode: input.query.businessMode,
-      });
-      return {
-        mode: 'metric_value',
-        value: result.items.map((row) => ({
-          id: row.id,
-          kind: row.kind,
-          status: row.status,
-          title: row.title,
-          rationale: row.rationale,
-          confidence: row.confidence,
-          expectedImpact: {
-            hypothesis:
-              typeof asRecord(row.expectedImpact).hypothesis === 'string'
-                ? asRecord(row.expectedImpact).hypothesis
-                : null,
-          },
-          generatedAt: row.generatedAt,
-        })),
-      };
-    }
-    const response =
-      metric.source === 'leadflow.commercial'
-        ? await this.commercial.getCommercialJourney(ctx, period)
-        : await this.operational.getOverview(ctx, {
-            ...period,
-            channelId: input.query.channelId,
-            businessMode: input.query.businessMode,
-            agentId: input.query.agentId,
-          });
-    return {
-      mode: 'metric_value',
-      period: response.period,
-      value: projectMetricValue(pathValue(response, metric.path)),
-      ...(metric.source === 'leadflow.commercial'
-        ? {
-            filtersNotApplicableToCommercial: [
-              'channelId',
-              'agentId',
-              'businessMode',
-            ],
-          }
-        : {}),
-    };
   }
 }

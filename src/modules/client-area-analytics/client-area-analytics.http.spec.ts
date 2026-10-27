@@ -1,5 +1,3 @@
-import type { DashboardActor } from './client-area-dashboards.service';
-import type { ClientAreaCompanyScope } from '../client-area/client-area-company-hooks.registry';
 import type { Server } from 'node:http';
 import {
   NotFoundException,
@@ -43,20 +41,12 @@ import {
   type ClientAreaModuleKey,
   type ClientAreaContext,
 } from '../client-area/client-area.types';
-import {
-  ClientAreaOverviewController,
-  ClientAreaDashboardsController,
-  ClientAreaDashboardsAgencyController,
-  ClientAreaMetricDataController,
-} from './client-area-analytics.controller';
+import { ClientAreaOverviewController } from './client-area-analytics.controller';
 import { ClientAreaSourcesRegistry } from './client-area-sources.registry';
 import {
   ClientAreaOverviewService,
   OVERVIEW_SOURCES,
 } from './client-area-overview.service';
-import { ClientAreaMetricDataService } from './client-area-metric-data.service';
-import { ClientAreaDashboardsService } from './client-area-dashboards.service';
-import { ClientAreaAnalyticsModule } from './client-area-analytics.module';
 jest.mock('otplib', () => ({ verify: jest.fn() }));
 const scope = {
     tenantId: randomUUID(),
@@ -68,26 +58,15 @@ const scope = {
   session = randomUUID();
 const clientSecret = 'ca13-client-secret-012345678901234567890',
   agencySecret = 'ca13-agency-secret-012345678901234567890';
-describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', () => {
+describe('Client Area Overview over real HTTP guards (offline signed sessions)', () => {
   let app: INestApplication,
     jwt: JwtService,
     context: ClientAreaContext,
     revoked = false,
     archived = false;
   const saved = { ...process.env },
-    dataRead = jest.fn(),
     assertCan = jest.fn(),
-    audit = jest.fn(),
-    create = jest.fn();
-  const dashboards = {
-    assertCompany: jest.fn(),
-    list: jest.fn(),
-    read: jest.fn(),
-    create,
-    update: jest.fn(),
-    remove: jest.fn(),
-    duplicate: jest.fn(),
-  };
+    audit = jest.fn();
   beforeAll(async () => {
     Object.assign(process.env, {
       CLIENT_AREA_ENABLED: 'true',
@@ -118,11 +97,6 @@ describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', ()
         read: (input) =>
           Promise.resolve({ company: input.scope.companyContextId }),
       });
-    sources.register({
-      key: 'metric.social.paid',
-      modules: [],
-      read: dataRead,
-    });
     const mod = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ ignoreEnvFile: true, isGlobal: true }),
@@ -130,12 +104,7 @@ describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', ()
         JwtModule.register({}),
         ClientAreaBridgeRegistryModule,
       ],
-      controllers: [
-        ClientAreaOverviewController,
-        ClientAreaDashboardsController,
-        ClientAreaDashboardsAgencyController,
-        ClientAreaMetricDataController,
-      ],
+      controllers: [ClientAreaOverviewController],
       providers: [
         JwtStrategy,
         ClientAreaJwtStrategy,
@@ -144,7 +113,6 @@ describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', ()
         ClientAreaBridgeAuthenticator,
         PermissionsGuard,
         ClientAreaOverviewService,
-        ClientAreaMetricDataService,
         {
           provide: TenantContextAuthority,
           useValue: new TenantContextAuthority({
@@ -219,7 +187,6 @@ describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', ()
           },
         },
         { provide: ClientAreaSourcesRegistry, useValue: sources },
-        { provide: ClientAreaDashboardsService, useValue: dashboards },
         { provide: AuditChangeService, useValue: { record: audit } },
         { provide: APP_INTERCEPTOR, useClass: AuditChangeInterceptor },
       ],
@@ -227,7 +194,6 @@ describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', ()
       .overrideProvider(ClientAreaBridgeRegistry)
       .useValue(registry)
       .compile();
-    new ClientAreaAnalyticsModule(registry).onModuleInit();
     registry.register(mod.get(ClientAreaBridgeAuthenticator));
     app = mod.createNestApplication();
     app.setGlobalPrefix('api');
@@ -248,24 +214,6 @@ describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', ()
     jest.clearAllMocks();
     assertCan.mockResolvedValue(undefined);
     audit.mockResolvedValue(undefined);
-    dataRead.mockResolvedValue({
-      mode: 'canonical_sources',
-      sources: { paid: { current: { spend: '1.00' } } },
-    });
-    create.mockImplementation(
-      (
-        _scope: ClientAreaCompanyScope,
-        actor: DashboardActor,
-        body: { name: string },
-      ) =>
-        Promise.resolve({
-          id: randomUUID(),
-          name: body.name,
-          ownerSurface: actor.surface,
-        }),
-    );
-    dashboards.list.mockResolvedValue({ items: [], total: 0 });
-    dashboards.assertCompany.mockResolvedValue(undefined);
     context = {
       ...scope,
       surface: 'client_area',
@@ -342,125 +290,36 @@ describe('CA13 real HTTP facade and Bridge guards (offline signed sessions)', ()
       (await get(`/api/client-area/companies/${randomUUID()}/overview`)).status,
     ).toBe(404);
   });
-  it('lets a viewer create a personal layout, projects actor from the token, and audits the successful write', async () => {
-    const response = await request(app.getHttpServer() as Server)
-      .post(`${base()}/analytics/dashboards`)
-      .auth(await token(), { type: 'bearer' })
-      .send({ name: 'Pessoal', layout: { version: 1, sections: [] } });
-    expect(response.status).toBe(201);
-    expect(create).toHaveBeenCalledWith(
-      scope,
-      expect.objectContaining({
-        surface: 'client_area',
-        context: expect.objectContaining({ userId: user }) as ClientAreaContext,
-      }),
-      expect.objectContaining({ name: 'Pessoal' }),
-    );
-    expect(audit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actorUserId: user,
-        actorSurface: 'client_area',
-        ...scope,
-      }),
-    );
-    const bad = await request(app.getHttpServer() as Server)
-      .post(`${base()}/analytics/dashboards`)
-      .auth(await token(), { type: 'bearer' })
-      .send({
-        name: 'Forged',
-        ownerSurface: 'agency',
-        ownerUserId: randomUUID(),
-      });
-    expect(bad.status).toBe(400);
-    expect(create).toHaveBeenCalledTimes(1);
-  });
-  it('routes metrics through real read-only Bridge permission/scope checks and never Agency can()', async () => {
-    const response = await get(
-      '/api/agency/client-area-analytics/metrics/social.spend',
-    );
-    expect(response.status).toBe(200);
-    expect((response.body as { status: string }).status).toBe('available');
-    expect(dataRead).toHaveBeenCalledWith(
-      expect.objectContaining({ scope, context, userId: user }),
-    );
-    expect(assertCan).not.toHaveBeenCalled();
-    expect(
-      (
-        await get(
-          '/api/agency/client-area-analytics/metrics/leadflow.quality.operational',
-        )
-      ).status,
-    ).toBe(404);
-    expect(
-      (
-        await get(
-          '/api/agency/client-area-analytics/metrics/social.spend?agencyClientId=' +
-            randomUUID(),
-        )
-      ).status,
-    ).toBe(404);
-    expect(
-      (
-        await request(app.getHttpServer() as Server)
-          .post('/api/agency/client-area-analytics/metrics/social.spend')
-          .auth(await token(), { type: 'bearer' })
-          .send({})
-      ).status,
-    ).toBe(404);
-  });
-  it('denies data after source-module revocation and rejects invalid filters at the HTTP boundary', async () => {
-    context.memberAccess!.social_campaigns = { available: false, level: null };
-    const response = await get(
-      '/api/agency/client-area-analytics/metrics/social.spend',
-    );
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      status: 'unavailable',
-      reason: 'module_unavailable',
-    });
-    expect(dataRead).not.toHaveBeenCalled();
-    expect(
-      (
-        await get(
-          '/api/agency/client-area-analytics/metrics/social.spend?unknown=1',
-        )
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await get(
-          '/api/agency/client-area-analytics/metrics/social.spend?from=2020-01-01&to=2026-01-01',
-        )
-      ).status,
-    ).toBe(400);
-  });
-  it('keeps the Bridge kill switch independent from facades; closed Agency CRUD remains 401', async () => {
-    process.env.CLIENT_AREA_BRIDGE_ENABLED = 'false';
-    expect(
-      (await get('/api/agency/client-area-analytics/metrics/social.spend'))
-        .status,
-    ).toBe(401);
-    expect((await get(`${base()}/overview`)).status).toBe(200);
-    expect(
-      (
-        await get(
-          `/api/agency/clients/${scope.agencyClientId}/companies/${scope.companyContextId}/client-area/analytics/dashboards`,
-        )
-      ).status,
-    ).toBe(401);
-  });
-  it('rejects revoked sessions as 401 and archived/unavailable companies as 404 on every client read', async () => {
+  it('no longer serves the retired CA13 dashboards and metric routes (CA-AN3)', async () => {
+    const agency = `/api/agency/clients/${scope.agencyClientId}/companies/${scope.companyContextId}/client-area/analytics/dashboards`;
     for (const path of [
-      `${base()}/overview`,
       `${base()}/analytics/dashboards`,
+      `${base()}/analytics/dashboards/${randomUUID()}`,
+      agency,
       '/api/agency/client-area-analytics/metrics/social.spend',
-    ]) {
-      revoked = true;
-      expect((await get(path)).status).toBe(401);
-      revoked = false;
-      archived = true;
+    ])
       expect((await get(path)).status).toBe(404);
-      archived = false;
+    for (const path of [`${base()}/analytics/dashboards`, agency]) {
+      const response = await request(app.getHttpServer() as Server)
+        .post(path)
+        .auth(await token(), { type: 'bearer' })
+        .send({ name: 'Pessoal' });
+      expect(response.status).toBe(404);
     }
+    expect(assertCan).not.toHaveBeenCalled();
+    expect(audit).not.toHaveBeenCalled();
+  });
+  it('keeps the Overview independent from the Bridge kill switch', async () => {
+    process.env.CLIENT_AREA_BRIDGE_ENABLED = 'false';
+    expect((await get(`${base()}/overview`)).status).toBe(200);
+  });
+  it('rejects revoked sessions as 401 and archived/unavailable companies as 404 on the Overview', async () => {
+    const path = `${base()}/overview`;
+    revoked = true;
+    expect((await get(path)).status).toBe(401);
+    revoked = false;
+    archived = true;
+    expect((await get(path)).status).toBe(404);
+    archived = false;
   });
 });

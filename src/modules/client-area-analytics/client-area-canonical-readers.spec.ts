@@ -1,6 +1,5 @@
 import { SocialAnalyticsReadService } from '../social-integrations/services/social-analytics-read.service';
 import { projectSocialAnalyticsData } from './client-area-social-data.projection';
-import { projectMetricValue } from './client-area-sources.adapter';
 
 describe('CA13 canonical read projections', () => {
   it('selects the latest scoped campaign and keeps canonical currency/metric values', async () => {
@@ -87,29 +86,5 @@ describe('CA13 canonical read projections', () => {
         },
       ],
     });
-  });
-  it('keeps public LeadFlow statistics while omitting settings and execution payloads', () => {
-    expect(
-      projectMetricValue([
-        {
-          recipeKey: 'followup',
-          automationName: 'Follow-up',
-          runs: 3,
-          succeeded: 2,
-          failed: 1,
-          config: { secret: true },
-          evidence: { secret: true },
-          executionPayload: 'secret',
-        },
-      ]),
-    ).toEqual([
-      {
-        recipeKey: 'followup',
-        automationName: 'Follow-up',
-        runs: 3,
-        succeeded: 2,
-        failed: 1,
-      },
-    ]);
   });
 });

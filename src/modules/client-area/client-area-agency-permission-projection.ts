@@ -218,8 +218,6 @@ function projectAnalyticsPermissions(
   accountRole: ClientAreaAccountRole | undefined,
 ): readonly ClientAreaAgencyGrant[] {
   const reads = [
-    // CA13 facade (metric reads) until CA-AN3.
-    grant('agency.dashboards.view.agency', read),
     grant('social.analytics.reports.view.operational', [...read, 'POST']),
     grant('social.analytics.organic.view.operational', read),
     grant('leadflow.analytics.reports.view.operational', [...read, 'POST']),

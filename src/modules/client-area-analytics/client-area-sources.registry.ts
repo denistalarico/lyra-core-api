@@ -1,5 +1,4 @@
 import type { RequestContext } from '../../common/context/request-context.interface';
-import type { ClientAreaMetric } from './client-area-layout.contract';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import type {
   ClientAreaContext,
@@ -29,7 +28,6 @@ export type AnalyticsSourceInput = {
   context?: ClientAreaContext;
   query: AnalyticsReadQuery;
   agencyContext?: RequestContext;
-  metric?: ClientAreaMetric;
 };
 export type ClientAreaSource = {
   key: string;

@@ -1,4 +1,3 @@
-import { ClientAreaDashboardEntity } from '../modules/client-area-analytics/client-area-dashboard.entity';
 import { LeadFlowAnalyticsDashboardEntity } from '../modules/leadflow-analytics/dashboards/leadflow-analytics-dashboard.entity';
 import { ClientAreaIdentityPreferencesEntity } from '../modules/client-area/entities/client-area-identity-preferences.entity';
 import { ClientAreaMemberModuleAccessEntity } from '../modules/client-area/entities/client-area-member-module-access.entity';
@@ -443,7 +442,6 @@ import {
 } from '../modules/client-conversations/entities';
 
 export const agencyEntities = [
-  ClientAreaDashboardEntity,
   LeadFlowContactCompanyEntity,
   LeadFlowAnalyticsDashboardEntity,
   ClientAreaIdentityPreferencesEntity,
