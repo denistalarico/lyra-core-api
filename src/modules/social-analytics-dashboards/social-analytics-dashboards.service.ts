@@ -16,6 +16,10 @@ import {
   type DashboardLayout,
 } from './dashboard-layout.contract';
 import {
+  socialChannelDefaultLayout,
+  type SocialChannelDefaultId,
+} from './defaults/social-channel-default-layouts';
+import {
   CreateSocialAnalyticsDashboardDto,
   UpdateSocialAnalyticsDashboardDto,
 } from './dto/social-analytics-dashboard.dto';
@@ -35,10 +39,11 @@ export const DEFAULT_DASHBOARD_NAME = 'Visão Geral';
  *
  * `google_ads` is deliberately absent: the integration does not exist yet, and
  * a seeded tab that can only ever say "not integrated" is a promise the product
- * does not keep. It joins the list when the channel does.
+ * does not keep. It joins the list when the channel does, with a default
+ * layout of its own (SO-DEF1).
  */
 export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
-  channel: DashboardChannelId;
+  channel: SocialChannelDefaultId;
   name: string;
 }> = [
   { channel: 'facebook', name: 'Facebook' },
@@ -330,7 +335,7 @@ export class SocialAnalyticsDashboardsService {
             isDefault: false,
             channelKey: entry.channel,
             channels: [entry.channel],
-            layout: emptyDashboardLayout([entry.channel]),
+            layout: socialChannelDefaultLayout(entry.channel),
             createdById: actorId,
           }),
         );

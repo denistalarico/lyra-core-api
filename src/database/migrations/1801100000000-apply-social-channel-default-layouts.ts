@@ -1,0 +1,1959 @@
+import type { MigrationInterface, QueryRunner } from 'typeorm';
+
+/**
+ * SO-DEF1: the Social channel screens (Meta Ads, Instagram, Facebook) become
+ * the matching sections of the agency root's Visão Geral as configured on
+ * 2026-10-26. A one-time copy (D-AN-16).
+ *
+ * The sections are embedded rather than imported from
+ * `social-channel-default-layouts.ts`: that file is domain code and may change
+ * (SO-DEF2), while this migration must keep writing what it wrote today.
+ *
+ * Every channel screen's current layout is backed up first, once per
+ * dashboard, so `down()` can put the operator's work back. The backup table
+ * outlives `down()` on purpose — SO-DEF2 reuses it.
+ */
+const CHANNEL_SECTIONS: Record<string, unknown> = {
+  meta_ads: {
+    id: 'section-meta_ads',
+    cards: [
+      {
+        id: 'kpi-0805b9c6-4d96-4b9e-8ae1-32c99b68cafd',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 4,
+        },
+        title: 'Conversas iniciadas',
+        metric: 'messaging_conversations',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 0,
+        description:
+          'Conversas por mensagem iniciadas a partir dos anúncios. Não somar com Cadastros: numa campanha de mensagens a mesma pessoa costuma aparecer nas duas.',
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-4a4fcaa4-9ab6-427d-a920-6a92f11c236c',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Boost',
+        metric: 'boosted_publications',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 4,
+        description: null,
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-3d376089-65ed-4fbf-8450-657d1f44b5ff',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 4,
+        },
+        title: 'Custo por conversa',
+        metric: 'cost_per_conversation',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 2,
+        gridColumn: 6,
+        description:
+          'Investimento dividido pelas conversas iniciadas. Não é uma variação do CPR — o denominador é outro.',
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-5250ff0d-1655-4da3-96b4-d3386830a784',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Valor gasto',
+        metric: 'spend',
+        display: 'absolute',
+        gridRow: 1,
+        decimals: 2,
+        gridColumn: 0,
+        description: null,
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-b7152c06-7971-4974-bbe6-152d833e92e6',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Alcance',
+        metric: 'period_reach',
+        display: 'absolute',
+        gridRow: 1,
+        decimals: 0,
+        gridColumn: 2,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-02bda6c5-be29-4c3f-82e4-56b1cc8587ad',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Impressões',
+        metric: 'impressions',
+        display: 'absolute',
+        gridRow: 1,
+        decimals: 0,
+        gridColumn: 4,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-8606983d-9751-45ae-a935-b5d88e161a9d',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'CTR',
+        metric: 'ctr',
+        display: 'percent',
+        gridRow: 1,
+        decimals: 0,
+        gridColumn: 8,
+        description: null,
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-9c77e2b7-bf4d-458a-b6df-54f1dde4c15e',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'CPC',
+        metric: 'cpc',
+        display: 'absolute',
+        gridRow: 1,
+        decimals: 2,
+        gridColumn: 6,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'funnel-2a29acf2-e684-4f64-9745-7e4cdc6572bf',
+        kind: 'funnel',
+        size: {
+          h: 6,
+          w: 5,
+        },
+        steps: [
+          {
+            id: 'funnel-2a29acf2-e684-4f64-9745-7e4cdc6572bf-s1',
+            label: 'Valor gasto',
+            metric: 'spend',
+          },
+          {
+            id: 'funnel-2a29acf2-e684-4f64-9745-7e4cdc6572bf-s2',
+            label: 'Impressões',
+            metric: 'impressions',
+          },
+          {
+            id: 'funnel-2a29acf2-e684-4f64-9745-7e4cdc6572bf-s3',
+            label: 'Alcance',
+            metric: 'period_reach',
+          },
+          {
+            id: 'funnel-2a29acf2-e684-4f64-9745-7e4cdc6572bf-s4',
+            label: 'Cliques',
+            metric: 'clicks',
+          },
+          {
+            id: 'funnel-2a29acf2-e684-4f64-9745-7e4cdc6572bf-s5',
+            label: 'Cliques no link',
+            metric: 'link_clicks',
+          },
+          {
+            id: 'funnel-2a29acf2-e684-4f64-9745-7e4cdc6572bf-s6',
+            label: 'Resultados',
+            metric: 'conversions',
+          },
+        ],
+        title: 'Funil',
+        gridRow: 2,
+        gridColumn: 0,
+        description:
+          'Mostra a passagem entre as etapas e suas taxas de conversão.',
+        orientation: 'vertical',
+      },
+      {
+        id: 'kpi-a4b573c9-d6d9-4dbd-b157-ff3dc21ab36f',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'CPL',
+        metric: 'cpl',
+        display: 'absolute',
+        gridRow: 2,
+        decimals: 2,
+        gridColumn: 5,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-8f6bf351-08d4-4d26-8f40-2a5d1b861d11',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 3,
+        },
+        title: 'Frequência',
+        metric: 'frequency',
+        display: 'absolute',
+        gridRow: 2,
+        decimals: 2,
+        gridColumn: 7,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-ca2bc9a6-9df1-429f-8384-9a54f1b9896f',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'CPM',
+        metric: 'cpm',
+        display: 'absolute',
+        gridRow: 4,
+        decimals: 2,
+        gridColumn: 5,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-c3c2d36d-cae2-48bc-a6d9-c26e502a1242',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 3,
+        },
+        title: 'CPR',
+        metric: 'cpa',
+        display: 'absolute',
+        gridRow: 4,
+        decimals: 2,
+        gridColumn: 7,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'table-0bf567b0-65ee-4d82-92ed-fefcc0eac2b7',
+        kind: 'table',
+        size: {
+          h: 2,
+          w: 5,
+        },
+        sort: {
+          columnId: 'views',
+          direction: 'desc',
+        },
+        title: 'Interações dos anúncios',
+        source: 'ad_interactions',
+        columns: [
+          {
+            id: 'views',
+            visible: true,
+          },
+          {
+            id: 'likes',
+            visible: true,
+          },
+          {
+            id: 'comments',
+            visible: true,
+          },
+          {
+            id: 'shares',
+            visible: true,
+          },
+          {
+            id: 'saves',
+            visible: true,
+          },
+        ],
+        gridRow: 6,
+        rowLimit: 10,
+        gridColumn: 5,
+        description:
+          'Impressões dos anúncios e o que as pessoas fizeram nas publicações anunciadas: reações, comentários, compartilhamentos e salvamentos.',
+      },
+      {
+        id: 'breakdown-426bdf9e-a651-455f-8003-edae83c528f3',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 4,
+        },
+        title: 'Impressões por gênero',
+        metric: 'audience_by_gender',
+        render: 'chart',
+        gridRow: 8,
+        rowLimit: 10,
+        gridColumn: 0,
+        description:
+          'Distribuição das impressões por gênero, somando as faixas etárias.',
+      },
+      {
+        id: 'kpi-f13da4de-bb88-4d17-b7d8-0869a24296b0',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 4,
+        },
+        title: 'Valor gasto por rede',
+        metric: 'spend_by_publisher',
+        render: 'chart',
+        gridRow: 8,
+        rowLimit: 10,
+        gridColumn: 4,
+        description: null,
+      },
+      {
+        id: 'kpi-1cfed539-562a-4187-9457-0a5c09e263fa',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Thruplays',
+        metric: 'thruplays',
+        display: 'absolute',
+        gridRow: 8,
+        decimals: 0,
+        gridColumn: 8,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-03ea3bf5-0688-456b-9e8c-b19960250e13',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Tempo médio de exibição',
+        metric: 'video_avg_watch_seconds',
+        display: 'absolute',
+        gridRow: 10,
+        decimals: 2,
+        gridColumn: 8,
+        description:
+          'Quantos segundos, em média, cada visualização durou. É uma média do período inteiro, ponderada por visualizações — não a média das médias diárias.',
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-7e106449-5476-4289-83cb-cd169869cb20',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 4,
+        },
+        title: 'Impressões por rede',
+        metric: 'impressions_by_publisher',
+        render: 'chart',
+        gridRow: 12,
+        rowLimit: 10,
+        gridColumn: 0,
+        description: null,
+      },
+      {
+        id: 'breakdown-3bb09a52-5e92-489a-9984-d731406a8e5c',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 4,
+        },
+        title: 'Cliques por rede',
+        metric: 'clicks_by_publisher',
+        render: 'chart',
+        gridRow: 12,
+        rowLimit: 10,
+        gridColumn: 4,
+        description: 'Como os cliques se dividiram entre Facebook e Instagram.',
+      },
+      {
+        id: 'kpi-def4cff8-9dce-4a15-a88c-5f323de15618',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Visualizações de vídeo',
+        metric: 'video_views',
+        display: 'absolute',
+        gridRow: 12,
+        decimals: 0,
+        gridColumn: 8,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-26755c86-3e49-46a4-8323-1e19d0d210bd',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Custo por pessoa',
+        metric: 'cpp',
+        display: 'absolute',
+        gridRow: 14,
+        decimals: 2,
+        gridColumn: 8,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-b75ed5b3-6c42-450c-b76a-90e123db35a0',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 5,
+        },
+        title: 'Audiência por idade e gênero',
+        metric: 'audience_age_gender',
+        render: 'chart',
+        gridRow: 16,
+        rowLimit: 10,
+        gridColumn: 0,
+        description: null,
+      },
+      {
+        id: 'kpi-530027db-a157-4180-a5af-2817ee8720c9',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 5,
+        },
+        title: 'Alcance por dispositivo',
+        metric: 'reach_by_device',
+        render: 'chart',
+        gridRow: 16,
+        rowLimit: 10,
+        gridColumn: 5,
+        description: null,
+      },
+      {
+        id: 'breakdown-943ca9d3-8a56-478b-826e-12d360627a66',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 5,
+        },
+        title: 'Impressões por idade',
+        metric: 'audience_by_age',
+        render: 'chart',
+        gridRow: 20,
+        rowLimit: 10,
+        gridColumn: 0,
+        description:
+          'Distribuição das impressões por faixa etária, somando os gêneros.',
+      },
+      {
+        id: 'kpi-f09b4cb5-31f2-4e60-bb36-e5082febc786',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 5,
+        },
+        title: 'Alcance por rede',
+        metric: 'reach_by_publisher',
+        render: 'chart',
+        gridRow: 20,
+        rowLimit: 10,
+        gridColumn: 5,
+        description: null,
+      },
+      {
+        id: 'breakdown-61d622bf-35c4-4774-8dc7-5e4741978254',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 5,
+        },
+        title: 'Impressões por hora',
+        metric: 'impressions_by_hour',
+        render: 'chart',
+        gridRow: 24,
+        rowLimit: 10,
+        gridColumn: 0,
+        description:
+          'Distribuição das impressões por hora do dia, no fuso de quem viu o anúncio.',
+      },
+      {
+        id: 'breakdown-8590c98a-8dd5-4f43-a58e-eaf83f073a45',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 5,
+        },
+        title: 'Investimento por hora',
+        metric: 'spend_by_hour',
+        render: 'chart',
+        gridRow: 24,
+        rowLimit: 10,
+        gridColumn: 5,
+        description:
+          'Distribuição do valor investido por hora do dia, no fuso de quem viu o anúncio.',
+      },
+      {
+        id: 'table-74344720-8cdc-4593-80a4-041b2b86224d',
+        kind: 'table',
+        size: {
+          h: 5,
+          w: 10,
+        },
+        sort: {
+          columnId: 'count',
+          direction: 'desc',
+        },
+        title: 'Conversões e custo por conversão',
+        source: 'action_types',
+        columns: [
+          {
+            id: 'label',
+            visible: true,
+          },
+          {
+            id: 'count',
+            visible: true,
+          },
+          {
+            id: 'costPer',
+            visible: true,
+          },
+        ],
+        gridRow: 28,
+        rowLimit: 10,
+        gridColumn: 0,
+        description:
+          'Tudo que as pessoas fizeram depois de ver os anúncios, com a quantidade e o custo de cada tipo. O custo usa o investimento do período inteiro em cada linha, então as linhas não somam o valor investido.',
+      },
+      {
+        id: 'table-4f20ea78-dece-4ceb-a6c8-37258467c07b',
+        kind: 'table',
+        size: {
+          h: 7,
+          w: 10,
+        },
+        sort: {
+          columnId: 'spend',
+          direction: 'desc',
+        },
+        title: 'Campanhas, conjuntos e anúncios',
+        source: 'paid_hierarchy',
+        columns: [
+          {
+            id: 'name',
+            visible: true,
+          },
+          {
+            id: 'status',
+            visible: true,
+          },
+          {
+            id: 'spend',
+            visible: true,
+          },
+          {
+            id: 'leads',
+            visible: true,
+          },
+          {
+            id: 'cpl',
+            visible: true,
+          },
+          {
+            id: 'ctr',
+            visible: true,
+          },
+          {
+            id: 'clicks',
+            visible: true,
+          },
+        ],
+        rowLimit: 10,
+        description:
+          'Campanhas com conjuntos e anúncios expansíveis na coluna de nome.',
+      },
+    ],
+    title: 'Meta Ads',
+    channel: 'meta_ads',
+  },
+  instagram: {
+    id: 'section-instagram',
+    cards: [
+      {
+        id: 'kpi-a21717ac-10e2-4207-a79e-182d8e3a2d35',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Seguidores',
+        metric: 'followers_count',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 0,
+        description: null,
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-0601be57-f4f5-4baa-9b4d-bbaa088b1f68',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Variação de seguidores',
+        metric: 'followers_delta',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 2,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-af4a8ad7-172c-420c-a8a4-73315a89eefe',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Publicações',
+        metric: 'publications',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 4,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-208ef5fb-b312-4fdc-b84e-adcd0d7f1297',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Visitas ao perfil',
+        metric: 'profile_views',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 6,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-5d283a47-a6e8-4754-b181-0673c7f28e27',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Interações totais',
+        metric: 'total_interactions',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 8,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-366319f8-bef5-43cb-a72d-5b9843f861a2',
+        kind: 'breakdown',
+        size: {
+          h: 5,
+          w: 6,
+        },
+        title: 'Cidades com mais seguidores',
+        metric: 'followers_city',
+        render: 'table',
+        gridRow: 2,
+        rowLimit: 10,
+        gridColumn: 0,
+        description: null,
+      },
+      {
+        id: 'kpi-48daf1fd-c5f3-4d1e-a2c3-c17f518d88b7',
+        kind: 'breakdown',
+        size: {
+          h: 5,
+          w: 4,
+        },
+        title: 'Seguidores por gênero',
+        metric: 'followers_gender',
+        render: 'chart',
+        gridRow: 2,
+        rowLimit: 10,
+        gridColumn: 6,
+        description: null,
+      },
+      {
+        id: 'kpi-0c168f47-1e91-4aea-83ab-8213007e32fd',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 4,
+        },
+        title: 'Alcance total',
+        metric: 'total_reach',
+        display: 'absolute',
+        gridRow: 7,
+        decimals: 0,
+        gridColumn: 0,
+        description:
+          'Contas únicas que viram seu conteúdo — posts, stories, reels e anúncios — pelo menos uma vez no período. A Meta informa que a métrica ainda está em desenvolvimento e que o total pode não bater com a soma das partes: quem deixa de seguir é contado uma vez só, e quem foi alcançado de forma orgânica e paga também.',
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-a5119a02-8b3b-45e6-b876-11fc3649c2d7',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 3,
+        },
+        title: 'Alcance pago (período)',
+        metric: 'total_reach_paid',
+        display: 'absolute',
+        gridRow: 7,
+        decimals: 0,
+        gridColumn: 4,
+        description: 'Contas únicas alcançadas por anúncios no período.',
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-e6aa3382-8e6a-4f0a-b170-7a8c4864267b',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 3,
+        },
+        title: 'Alcance orgânico (período)',
+        metric: 'total_reach_organic',
+        display: 'absolute',
+        gridRow: 7,
+        decimals: 0,
+        gridColumn: 7,
+        description:
+          'Contas únicas alcançadas por conteúdo não patrocinado no período. Somada ao alcance pago, dá mais que o total: quem foi alcançado das duas formas aparece nas duas fatias e uma vez só no total.',
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-2541a525-465d-4592-8d82-b6972df706f6',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 4,
+        },
+        title: 'Visualizações totais',
+        metric: 'total_views',
+        display: 'absolute',
+        gridRow: 9,
+        decimals: 0,
+        gridColumn: 0,
+        description:
+          'Quantas vezes o conteúdo foi visto ou reproduzido no período, incluindo reels, publicações, stories e anúncios. Medido pela Meta para o período inteiro, não é a soma dos dias.',
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-59e589c0-a459-4c62-b79f-316cde8b7492',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 3,
+        },
+        title: 'Visualizações pagas',
+        metric: 'total_views_paid',
+        display: 'absolute',
+        gridRow: 9,
+        decimals: 0,
+        gridColumn: 4,
+        description:
+          'A parte das visualizações que veio de anúncios, medida pela própria Meta.',
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-12a1600b-6fab-4dea-afe3-f0770985b605',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 3,
+        },
+        title: 'Visualizações orgânicas',
+        metric: 'total_views_organic',
+        display: 'absolute',
+        gridRow: 9,
+        decimals: 0,
+        gridColumn: 7,
+        description:
+          'A parte das visualizações que veio de conteúdo não patrocinado. Não subtraia das totais para achar as pagas: a Meta conta de forma independente e as fatias se sobrepõem.',
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'breakdown-ca10c710-ff15-4ef2-b9b6-4d051df258de',
+        kind: 'breakdown',
+        size: {
+          h: 5,
+          w: 5,
+        },
+        title: 'Melhor horário para postagens',
+        metric: 'best_hour',
+        render: 'chart',
+        gridRow: 11,
+        rowLimit: 10,
+        gridColumn: 0,
+        description:
+          'Em média, em qual horário seus seguidores estiveram mais ativos no Instagram nos últimos 30 dias. O Instagram informa estes dados no fuso do Pacífico; o gráfico já converte para o fuso do perfil.',
+      },
+      {
+        id: 'breakdown-bf5fdb70-5c13-43fc-ac94-8019eff533d9',
+        kind: 'breakdown',
+        size: {
+          h: 5,
+          w: 5,
+        },
+        title: 'Melhor dia para postagem',
+        metric: 'best_weekday',
+        render: 'chart',
+        gridRow: 11,
+        rowLimit: 10,
+        gridColumn: 5,
+        description:
+          'Em média, em qual dia seus seguidores estiveram mais ativos no Instagram nos últimos 30 dias. O Instagram só devolve 30 dias retroativos deste gráfico, independentemente do período analisado.',
+      },
+      {
+        id: 'funnel-ec820679-8028-4140-a50a-69a93db40097',
+        kind: 'funnel',
+        size: {
+          h: 6,
+          w: 5,
+        },
+        steps: [
+          {
+            id: 'funnel-ec820679-8028-4140-a50a-69a93db40097-s1',
+            label: 'Alcance total',
+            metric: 'total_reach',
+          },
+          {
+            id: 'funnel-ec820679-8028-4140-a50a-69a93db40097-s2',
+            label: 'Interações totais',
+            metric: 'total_interactions',
+          },
+          {
+            id: 'funnel-ec820679-8028-4140-a50a-69a93db40097-s3',
+            label: 'Visitas ao perfil',
+            metric: 'profile_views',
+          },
+          {
+            id: 'funnel-ec820679-8028-4140-a50a-69a93db40097-s4',
+            label: 'Seguidores ganhos',
+            metric: 'followers_gained',
+          },
+        ],
+        title: 'Funil',
+        gridRow: 16,
+        gridColumn: 0,
+        description:
+          'Mostra a passagem entre as etapas e suas taxas de conversão.',
+        orientation: 'vertical',
+      },
+      {
+        id: 'table-abe58224-3b24-4acc-a60d-fa7736fcc9f5',
+        kind: 'table',
+        size: {
+          h: 2,
+          w: 5,
+        },
+        sort: {
+          columnId: 'views',
+          direction: 'desc',
+        },
+        title: 'Interações do perfil',
+        source: 'channel_interactions',
+        columns: [
+          {
+            id: 'views',
+            visible: true,
+          },
+          {
+            id: 'likes',
+            visible: true,
+          },
+          {
+            id: 'comments',
+            visible: true,
+          },
+          {
+            id: 'shares',
+            visible: true,
+          },
+          {
+            id: 'saves',
+            visible: true,
+          },
+        ],
+        gridRow: 16,
+        rowLimit: 10,
+        gridColumn: 5,
+        description:
+          'Visualizações, curtidas, comentários, compartilhamentos e salvamentos do perfil no período. No Facebook, curtidas são as reações das postagens e reels publicados no período.',
+      },
+      {
+        id: 'breakdown-94257bf1-80bf-4ea0-b405-a7db85844107',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 5,
+        },
+        title: 'Audiência por idade e gênero',
+        metric: 'organic_audience_age_gender',
+        render: 'chart',
+        gridRow: 18,
+        rowLimit: 10,
+        gridColumn: 5,
+        description:
+          'Seus seguidores agrupados por faixa etária e gênero. O Instagram só informa o número atual de seguidores no momento em que o relatório é gerado, independentemente do período selecionado.',
+      },
+      {
+        id: 'group-1755fbe5-ec0d-4024-ac4f-6c3a5e0b888b',
+        kind: 'group',
+        size: {
+          h: 1,
+          w: 10,
+        },
+        cards: [
+          {
+            id: 'kpi-fc338e26-a575-49c6-8741-9ecc771c5c57',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Publicações',
+            metric: 'publications',
+            display: 'absolute',
+            decimals: 0,
+            description: 'Posts publicados no período.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'kpi-1215cb9b-0be2-4d0c-a7d0-73b1e8b4282a',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Alcance das postagens',
+            metric: 'feed_reach',
+            display: 'absolute',
+            decimals: 0,
+            description:
+              'Contas únicas que viram suas publicações do feed pelo menos uma vez no período. Considera apenas o feed: reels e stories ficam de fora. A Meta informa que esta métrica ainda está em desenvolvimento.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'table-b8ff75e3-fd69-4b89-89b1-fb92d5029272',
+            kind: 'table',
+            size: {
+              h: 2,
+              w: 6,
+            },
+            sort: {
+              columnId: 'views',
+              direction: 'desc',
+            },
+            title: 'Interações das postagens',
+            source: 'post_interactions',
+            columns: [
+              {
+                id: 'views',
+                visible: true,
+              },
+              {
+                id: 'likes',
+                visible: true,
+              },
+              {
+                id: 'comments',
+                visible: true,
+              },
+              {
+                id: 'shares',
+                visible: true,
+              },
+              {
+                id: 'saves',
+                visible: true,
+              },
+            ],
+            rowLimit: 10,
+            description:
+              'Soma das postagens publicadas no período, com os números acumulados de cada uma desde a publicação.',
+          },
+          {
+            id: 'table-812f3bbb-f812-44fb-82fb-d24e570f0a22',
+            kind: 'table',
+            size: {
+              h: 5,
+              w: 10,
+            },
+            sort: {
+              columnId: 'reach',
+              direction: 'desc',
+            },
+            title: 'Postagens em destaque',
+            source: 'organic_posts',
+            columns: [
+              {
+                id: 'name',
+                visible: true,
+              },
+              {
+                id: 'reach',
+                visible: true,
+              },
+              {
+                id: 'totalInteractions',
+                visible: true,
+              },
+              {
+                id: 'profileVisits',
+                visible: true,
+              },
+              {
+                id: 'follows',
+                visible: true,
+              },
+              {
+                id: 'publishedAt',
+                visible: true,
+              },
+            ],
+            rowLimit: 10,
+            description:
+              'Publicações do feed — imagem, vídeo e carrossel. Números acumulados desde a publicação, não somáveis entre linhas.',
+          },
+        ],
+        title: 'Postagens',
+        gridRow: 22,
+        category: 'posts',
+        gridColumn: 0,
+      },
+      {
+        id: 'group-d0bed6e7-a2f5-4e19-811c-ab9aabdb3ed3',
+        kind: 'group',
+        size: {
+          h: 1,
+          w: 10,
+        },
+        cards: [
+          {
+            id: 'kpi-20e69c7c-c19b-4410-8760-4c54b44ccdd8',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Número de reels',
+            metric: 'reel_count',
+            display: 'absolute',
+            gridRow: 0,
+            decimals: 0,
+            gridColumn: 0,
+            description:
+              'Reels publicados no período. Contado a partir das publicações, não medido pela Meta — não existe métrica de "quantos reels".',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'kpi-b16c8dcc-51c4-4412-a093-8ddb5a8dbad9',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Alcance dos reels',
+            metric: 'reel_reach',
+            display: 'absolute',
+            gridRow: 0,
+            decimals: 0,
+            gridColumn: 2,
+            description:
+              'Contas únicas que visualizaram seus reels pelo menos uma vez no período. Considera apenas reels: publicações do feed e stories ficam de fora. A Meta informa que esta métrica ainda está em desenvolvimento.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'kpi-2a247db8-3e11-4840-b626-1523ce4e196a',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Interações nos reels',
+            metric: 'reel_interactions',
+            display: 'absolute',
+            gridRow: 0,
+            decimals: 0,
+            gridColumn: 4,
+            description:
+              'Curtidas, salvos, comentários e compartilhamentos dos reels, menos descurtidas, remoções de salvo e comentários excluídos. Considera as interações no período, independentemente da data em que o reel foi publicado. Esta métrica está em desenvolvimento.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'table-92ac1127-aea2-46b0-9b32-4fa8bc50225e',
+            kind: 'table',
+            size: {
+              h: 2,
+              w: 4,
+            },
+            sort: {
+              columnId: 'views',
+              direction: 'desc',
+            },
+            title: 'Interações dos reels',
+            source: 'reel_interactions',
+            columns: [
+              {
+                id: 'views',
+                visible: true,
+              },
+              {
+                id: 'likes',
+                visible: true,
+              },
+              {
+                id: 'comments',
+                visible: true,
+              },
+              {
+                id: 'shares',
+                visible: true,
+              },
+              {
+                id: 'saves',
+                visible: true,
+              },
+            ],
+            gridRow: 0,
+            rowLimit: 10,
+            gridColumn: 6,
+            description:
+              'Soma dos reels publicados no período, com os números acumulados de cada um desde a publicação. No Facebook, visualizações são as reproduções.',
+          },
+          {
+            id: 'table-b50305f5-f04e-4c1f-b4f1-a29445dcc67e',
+            kind: 'table',
+            size: {
+              h: 5,
+              w: 10,
+            },
+            sort: {
+              columnId: 'reach',
+              direction: 'desc',
+            },
+            title: 'Reels em destaque',
+            source: 'organic_reels',
+            columns: [
+              {
+                id: 'name',
+                visible: true,
+              },
+              {
+                id: 'impressions',
+                visible: true,
+              },
+              {
+                id: 'reach',
+                visible: true,
+              },
+              {
+                id: 'totalInteractions',
+                visible: true,
+              },
+              {
+                id: 'reelsAvgWatchTimeMs',
+                visible: true,
+              },
+              {
+                id: 'publishedAt',
+                visible: true,
+              },
+            ],
+            gridRow: 2,
+            rowLimit: 10,
+            gridColumn: 0,
+            description:
+              'Só reels. Separados do feed porque um reel e uma foto no feed não disputam o mesmo alcance nem a mesma atenção.',
+          },
+        ],
+        title: 'Reels',
+        gridRow: 30,
+        category: 'reels',
+        gridColumn: 0,
+      },
+      {
+        id: 'group-90857982-69ab-4a70-a150-c9b9b90c1efd',
+        kind: 'group',
+        size: {
+          h: 1,
+          w: 10,
+        },
+        cards: [
+          {
+            id: 'kpi-0d0e4d0b-f072-4e88-b531-a2380f26549b',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Número de stories',
+            metric: 'story_count',
+            display: 'absolute',
+            decimals: 0,
+            description:
+              'Stories publicados no período que a coleta capturou. Um story só pode ser lido enquanto está no ar, então este número é um piso: um story publicado e expirado entre duas capturas nunca foi registrado.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'kpi-38dbac73-f1fd-4878-a905-c12cfb48e21b',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Alcance dos stories',
+            metric: 'story_reach',
+            display: 'absolute',
+            decimals: 0,
+            description:
+              'Contas únicas que visualizaram seus stories pelo menos uma vez no período. Considera apenas stories. A Meta informa que esta métrica ainda está em desenvolvimento.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'kpi-827d249f-3a1d-4686-9875-6c1f549c136c',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Total de interações com stories',
+            metric: 'story_interactions',
+            display: 'absolute',
+            decimals: 0,
+            description:
+              'Número total de interações com seus stories no período analisado. Esta métrica está em desenvolvimento.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'table-0e5101a0-b781-4127-8bdd-1505d2236744',
+            kind: 'table',
+            size: {
+              h: 2,
+              w: 4,
+            },
+            sort: {
+              columnId: 'views',
+              direction: 'desc',
+            },
+            title: 'Interações dos stories',
+            source: 'story_interactions',
+            columns: [
+              {
+                id: 'views',
+                visible: true,
+              },
+              {
+                id: 'likes',
+                visible: true,
+              },
+              {
+                id: 'comments',
+                visible: true,
+              },
+              {
+                id: 'shares',
+                visible: true,
+              },
+              {
+                id: 'saves',
+                visible: true,
+              },
+            ],
+            rowLimit: 10,
+            description:
+              'Visualizações, respostas e compartilhamentos dos stories no período. O Instagram não informa curtidas nem salvamentos de stories; as respostas ocupam o lugar dos comentários.',
+          },
+          {
+            id: 'table-bbe7b9a0-39db-485c-84de-9ef40b224831',
+            kind: 'table',
+            size: {
+              h: 5,
+              w: 10,
+            },
+            sort: {
+              columnId: 'views',
+              direction: 'desc',
+            },
+            title: 'Stories em destaque',
+            source: 'organic_stories',
+            columns: [],
+            rowLimit: 10,
+            description:
+              'Os stories de maior impacto no período, cada um com seu criativo e seus números. Um story só pode ser lido enquanto está no ar, então aparecem os que a coleta capturou.',
+          },
+        ],
+        title: 'Stories',
+        gridRow: 38,
+        category: 'stories',
+        gridColumn: 0,
+      },
+    ],
+    title: 'Instagram',
+    channel: 'instagram',
+  },
+  facebook: {
+    id: 'section-facebook',
+    cards: [
+      {
+        id: 'kpi-ff1bec8b-5115-490a-ab6c-163f7d659d82',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Seguidores',
+        metric: 'followers_count',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 0,
+        description: null,
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-3de7c4d1-3cfe-4373-8d84-26965e5e778f',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Variação de seguidores',
+        metric: 'followers_delta',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 2,
+        description:
+          'Seguidores ganhos menos perdidos. Fica negativo quando o perfil perde mais do que ganha — e esse é o número que importa, não só os ganhos.',
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-01e4f2e7-336b-4add-822a-112523eea53f',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Publicações',
+        metric: 'publications',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 4,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-00ad57b6-ea9d-4321-ab8e-d8e5b670ede6',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Visitas ao perfil',
+        metric: 'profile_views',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 6,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-1fe3338a-bfc4-48cd-a182-e4701f8a60b6',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Conversas iniciadas',
+        metric: 'page_new_conversations',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 8,
+        description:
+          'Conversas no Messenger abertas por quem nunca havia mandado mensagem para a Página.',
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-edc6b6fe-4707-470e-ab44-d63a9018a1f9',
+        kind: 'breakdown',
+        size: {
+          h: 7,
+          w: 6,
+        },
+        title: 'Cidades com mais seguidores',
+        metric: 'followers_city',
+        render: 'table',
+        gridRow: 2,
+        rowLimit: 10,
+        gridColumn: 0,
+        description: null,
+      },
+      {
+        id: 'breakdown-38c2ee5b-0170-47f6-8856-41e8a4dd5be4',
+        kind: 'breakdown',
+        size: {
+          h: 4,
+          w: 4,
+        },
+        title: 'Melhor dia para postagem',
+        metric: 'post_weekday_performance',
+        render: 'chart',
+        gridRow: 2,
+        rowLimit: 10,
+        gridColumn: 6,
+        description:
+          'Média de visualizações por publicação em cada dia da semana. Nenhum dia é apontado enquanto houver poucas publicações no período — a média de uma ou duas não distingue o dia do post.',
+      },
+      {
+        id: 'table-c0061e8c-abf1-4915-b286-4f3264559db8',
+        kind: 'table',
+        size: {
+          h: 2,
+          w: 4,
+        },
+        sort: {
+          columnId: 'views',
+          direction: 'desc',
+        },
+        title: 'Interações do perfil',
+        source: 'channel_interactions',
+        columns: [
+          {
+            id: 'views',
+            visible: true,
+          },
+          {
+            id: 'likes',
+            visible: true,
+          },
+          {
+            id: 'comments',
+            visible: true,
+          },
+          {
+            id: 'shares',
+            visible: true,
+          },
+          {
+            id: 'saves',
+            visible: true,
+          },
+        ],
+        gridRow: 6,
+        rowLimit: 10,
+        gridColumn: 6,
+        description:
+          'Visualizações, curtidas, comentários, compartilhamentos e salvamentos do perfil no período. No Facebook, curtidas são as reações das postagens e reels publicados no período.',
+      },
+      {
+        id: 'kpi-3151f45a-d1aa-4d5d-9953-3046c68bd225',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Total de visualizações da página',
+        metric: 'page_views',
+        display: 'absolute',
+        gridRow: 8,
+        decimals: 0,
+        gridColumn: 0,
+        description:
+          'Vezes que qualquer conteúdo da sua Página ou sobre sua Página entrou na tela de uma pessoa. Inclui publicações, stories, anúncios e outras informações da Página.',
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-2ca45ba1-cbd9-4f96-9355-7bfbbde1c6c4',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 3,
+        },
+        title: 'Visualizações pagas da Página',
+        metric: 'page_views_paid',
+        display: 'absolute',
+        gridRow: 8,
+        decimals: 0,
+        gridColumn: 2,
+        description:
+          'Visualizações do conteúdo da Página entregues por anúncios.',
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-e7ad3637-b772-4aee-8a9d-180a30c0a32d',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 2,
+        },
+        title: 'Impressões orgânicas',
+        metric: 'organic_impressions',
+        display: 'absolute',
+        gridRow: 8,
+        decimals: 0,
+        gridColumn: 5,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'kpi-c65bafe7-2447-4a4e-b201-9db44d0c0508',
+        kind: 'kpi',
+        size: {
+          h: 1,
+          w: 3,
+        },
+        title: 'Alcance orgânico',
+        metric: 'organic_reach',
+        display: 'absolute',
+        gridRow: 8,
+        decimals: 0,
+        gridColumn: 7,
+        description: null,
+        highlighted: false,
+        compactHeight: true,
+      },
+      {
+        id: 'group-9c8f1b4d-4cbb-4c1e-b2b4-36eda1310edd',
+        kind: 'group',
+        size: {
+          h: 1,
+          w: 10,
+        },
+        cards: [
+          {
+            id: 'kpi-a4f13609-e418-4adc-a75a-5e107ac17f5b',
+            kind: 'kpi',
+            size: {
+              h: 1,
+              w: 2,
+            },
+            title: 'Número de publicações',
+            metric: 'page_post_count',
+            display: 'absolute',
+            decimals: 0,
+            description:
+              'Publicações da Página no período. Contado a partir das publicações, não medido pela Meta.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'kpi-93c965bd-1791-43a9-8ffc-d4a1c9506967',
+            kind: 'kpi',
+            size: {
+              h: 1,
+              w: 2,
+            },
+            title: 'Total de reações das postagens',
+            metric: 'page_reactions',
+            display: 'absolute',
+            decimals: 0,
+            description:
+              'Reações nas publicações da Página no período, somadas de todos os tipos. A divisão por emoji aparece na tabela de reações.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'table-3baa14c0-b198-4a26-b0aa-28f02d682714',
+            kind: 'table',
+            size: {
+              h: 2,
+              w: 6,
+            },
+            sort: {
+              columnId: 'views',
+              direction: 'desc',
+            },
+            title: 'Interações das postagens',
+            source: 'post_interactions',
+            columns: [
+              {
+                id: 'views',
+                visible: true,
+              },
+              {
+                id: 'likes',
+                visible: true,
+              },
+              {
+                id: 'comments',
+                visible: true,
+              },
+              {
+                id: 'shares',
+                visible: true,
+              },
+              {
+                id: 'saves',
+                visible: true,
+              },
+            ],
+            rowLimit: 10,
+            description:
+              'Soma das postagens publicadas no período, com os números acumulados de cada uma desde a publicação.',
+          },
+          {
+            id: 'table-6c22e80a-9b7f-4434-b9be-d6d545ea66ca',
+            kind: 'table',
+            size: {
+              h: 5,
+              w: 10,
+            },
+            sort: {
+              columnId: 'impressions',
+              direction: 'desc',
+            },
+            title: 'Postagens em destaque (Facebook)',
+            source: 'facebook_posts',
+            columns: [
+              {
+                id: 'name',
+                visible: true,
+              },
+              {
+                id: 'mediaType',
+                visible: true,
+              },
+              {
+                id: 'impressions',
+                visible: true,
+              },
+              {
+                id: 'reactionsTotal',
+                visible: true,
+              },
+              {
+                id: 'comments',
+                visible: true,
+              },
+              {
+                id: 'shares',
+                visible: true,
+              },
+              {
+                id: 'publishedAt',
+                visible: true,
+              },
+            ],
+            rowLimit: 10,
+            description:
+              'Publicações da Página, com as reações separadas por emoji e a divisão entre visualizações orgânicas e pagas. Uma Página não informa alcance: a Meta aposentou a métrica.',
+          },
+        ],
+        title: 'Postagens',
+        gridRow: 10,
+        category: 'posts',
+        gridColumn: 0,
+      },
+      {
+        id: 'group-70a76829-e07e-4b7a-8ab8-0170138c3b6b',
+        kind: 'group',
+        size: {
+          h: 1,
+          w: 10,
+        },
+        cards: [
+          {
+            id: 'kpi-22a959a4-317b-46fb-a373-4f24a2645ecd',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Número de reels',
+            metric: 'page_reel_count',
+            display: 'absolute',
+            gridRow: 0,
+            decimals: 0,
+            gridColumn: 0,
+            description:
+              'Reels publicados pela Página no período. Contado a partir das publicações, não medido pela Meta.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'kpi-c58830ef-1acd-4219-8940-5efc1f486a2a',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Total de visualizadores dos reels',
+            metric: 'page_reel_viewers',
+            display: 'absolute',
+            gridRow: 0,
+            decimals: 0,
+            gridColumn: 2,
+            description:
+              'Contas que viram seus reels pelo menos uma vez. Somado por reel: quem viu dois reels é contado duas vezes, porque a Meta não informa o total sem repetição.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'kpi-f99b2af3-b8c6-4ccf-a08d-d13474034a73',
+            kind: 'kpi',
+            size: {
+              h: 2,
+              w: 2,
+            },
+            title: 'Tempo total de exibição dos reels (segundos)',
+            metric: 'page_reel_watch_time',
+            display: 'absolute',
+            gridRow: 0,
+            decimals: 0,
+            gridColumn: 4,
+            description:
+              'Tempo somado de exibição dos reels no período, em segundos, considerando todos os espectadores. A Meta reporta em milissegundos; o card converte.',
+            highlighted: false,
+            compactHeight: true,
+          },
+          {
+            id: 'table-748c0a80-0b17-4b9a-8039-e8a9da1ed21f',
+            kind: 'table',
+            size: {
+              h: 2,
+              w: 4,
+            },
+            sort: {
+              columnId: 'views',
+              direction: 'desc',
+            },
+            title: 'Interações dos reels',
+            source: 'reel_interactions',
+            columns: [
+              {
+                id: 'views',
+                visible: true,
+              },
+              {
+                id: 'likes',
+                visible: true,
+              },
+              {
+                id: 'comments',
+                visible: true,
+              },
+              {
+                id: 'shares',
+                visible: true,
+              },
+              {
+                id: 'saves',
+                visible: true,
+              },
+            ],
+            gridRow: 0,
+            rowLimit: 10,
+            gridColumn: 6,
+            description:
+              'Soma dos reels publicados no período, com os números acumulados de cada um desde a publicação. No Facebook, visualizações são as reproduções.',
+          },
+          {
+            id: 'table-b0a6c75a-b8ea-4013-bf2f-b415ca6ae9b7',
+            kind: 'table',
+            size: {
+              h: 5,
+              w: 10,
+            },
+            sort: {
+              columnId: 'plays',
+              direction: 'desc',
+            },
+            title: 'Reels em destaque (Facebook)',
+            source: 'facebook_reels',
+            columns: [
+              {
+                id: 'name',
+                visible: true,
+              },
+              {
+                id: 'uniqueViewers',
+                visible: true,
+              },
+              {
+                id: 'plays',
+                visible: true,
+              },
+              {
+                id: 'totalWatchTimeMs',
+                visible: true,
+              },
+              {
+                id: 'avgWatchTimeMs',
+                visible: true,
+              },
+              {
+                id: 'retentionGraph',
+                visible: true,
+              },
+              {
+                id: 'publishedAt',
+                visible: true,
+              },
+            ],
+            gridRow: 2,
+            rowLimit: 10,
+            gridColumn: 0,
+            description:
+              'Reels da Página, com a curva de retenção de cada um. Vêm de outra origem na Meta, com métricas que não existem no feed nem no Instagram.',
+          },
+        ],
+        title: 'Reels',
+        gridRow: 18,
+        category: 'reels',
+        gridColumn: 0,
+      },
+    ],
+    title: 'Facebook',
+    channel: 'facebook',
+  },
+};
+
+const REASON = 'SO-DEF1';
+
+export class ApplySocialChannelDefaultLayouts1801100000000 implements MigrationInterface {
+  name = 'ApplySocialChannelDefaultLayouts1801100000000';
+
+  async up(runner: QueryRunner): Promise<void> {
+    await runner.query(`
+      CREATE TABLE IF NOT EXISTS social_analytics_dashboard_layout_backups (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        dashboard_id uuid NOT NULL,
+        layout jsonb NOT NULL,
+        reason varchar(64) NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
+    // A re-run must not replace the original backup with the default it wrote.
+    await runner.query(
+      `INSERT INTO social_analytics_dashboard_layout_backups (dashboard_id, layout, reason)
+       SELECT d.id, d.layout, $1::varchar
+         FROM social_analytics_dashboards d
+        WHERE d.channel_key = ANY($2::varchar[])
+          AND NOT EXISTS (
+            SELECT 1
+              FROM social_analytics_dashboard_layout_backups b
+             WHERE b.dashboard_id = d.id
+               AND b.reason = $1::varchar
+          )`,
+      [REASON, Object.keys(CHANNEL_SECTIONS)],
+    );
+
+    for (const [channel, section] of Object.entries(CHANNEL_SECTIONS)) {
+      await runner.query(
+        `UPDATE social_analytics_dashboards
+            SET layout = $1::jsonb,
+                updated_at = now()
+          WHERE channel_key = $2`,
+        [JSON.stringify({ version: 1, sections: [section] }), channel],
+      );
+    }
+  }
+
+  async down(runner: QueryRunner): Promise<void> {
+    await runner.query(
+      `UPDATE social_analytics_dashboards d
+          SET layout = b.layout,
+              updated_at = now()
+         FROM social_analytics_dashboard_layout_backups b
+        WHERE b.dashboard_id = d.id
+          AND b.reason = $1`,
+      [REASON],
+    );
+    await runner.query(
+      `DELETE FROM social_analytics_dashboard_layout_backups WHERE reason = $1`,
+      [REASON],
+    );
+  }
+}

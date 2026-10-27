@@ -6,6 +6,7 @@ import { CreateOrionTurnsAndHelpSearch1800700000000 } from './migrations/1800700
 import { AddAgentPauseUntilAndActionTargets1800800000000 } from './migrations/1800800000000-add-agent-pause-until-and-action-targets';
 import { CreateLeadFlowAnalyticsReports1800900000000 } from './migrations/1800900000000-create-leadflow-analytics-reports';
 import { RemoveLeadflowRecommendationsTab1801000000000 } from './migrations/1801000000000-remove-leadflow-recommendations-tab';
+import { ApplySocialChannelDefaultLayouts1801100000000 } from './migrations/1801100000000-apply-social-channel-default-layouts';
 import { CreateAnalyticsOverviewHeaders1801200000000 } from './migrations/1801200000000-create-analytics-overview-headers';
 import { AddSurfaceToTrustedDevices1800200000000 } from './migrations/1800200000000-add-surface-to-trusted-devices';
 import { CreateClientAreaAnalyticsDashboards1800100000000 } from './migrations/1800100000000-create-client-area-analytics-dashboards';
@@ -573,6 +574,7 @@ export const AgencyDataSource = new DataSource({
     AddAgentPauseUntilAndActionTargets1800800000000,
     CreateLeadFlowAnalyticsReports1800900000000,
     RemoveLeadflowRecommendationsTab1801000000000,
+    ApplySocialChannelDefaultLayouts1801100000000,
     CreateAnalyticsOverviewHeaders1801200000000,
   ],
 });

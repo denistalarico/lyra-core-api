@@ -2,6 +2,11 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { IsNull, QueryFailedError } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import { DASHBOARD_LAYOUT_VERSION } from './dashboard-layout.contract';
+import {
+  SOCIAL_CHANNEL_DEFAULT_SECTIONS,
+  socialChannelDefaultLayout,
+  type SocialChannelDefaultId,
+} from './defaults/social-channel-default-layouts';
 import type { SocialAnalyticsDashboardEntity } from './entities';
 import {
   SEEDED_CHANNEL_DASHBOARDS,
@@ -281,7 +286,9 @@ describe('SocialAnalyticsDashboardsService', () => {
       await service.list(scope, null);
 
       const seededChannels = repository.save.mock.calls
-        .map(([entity]) => (entity as SocialAnalyticsDashboardEntity).channelKey)
+        .map(
+          ([entity]) => (entity as SocialAnalyticsDashboardEntity).channelKey,
+        )
         .filter(Boolean);
 
       expect(seededChannels).toEqual(['facebook', 'instagram', 'meta_ads']);
@@ -290,6 +297,39 @@ describe('SocialAnalyticsDashboardsService', () => {
       // that can only say "not integrated" is a promise the product does not
       // keep.
       expect(seededChannels).not.toContain('google_ads');
+    });
+
+    it('seeds each channel screen with its frozen default layout', async () => {
+      // SO-DEF1: a new scope's channel screens start as the Visão Geral
+      // sections of 2026-10-26, ids included, not as empty blocks.
+      const { service, repository } = buildService([]);
+      repository.findOne.mockResolvedValue(null);
+
+      await service.list(scope, null);
+
+      const seeded = repository.save.mock.calls
+        .map(([entity]) => entity)
+        .filter((entity) => entity.channelKey);
+
+      expect(seeded).toHaveLength(SEEDED_CHANNEL_DASHBOARDS.length);
+      for (const entity of seeded) {
+        const channel = entity.channelKey as SocialChannelDefaultId;
+        expect(entity.layout).toEqual(socialChannelDefaultLayout(channel));
+        expect(entity.layout.sections[0].id).toBe(`section-${channel}`);
+        expect(entity.layout.sections[0]).not.toBe(
+          SOCIAL_CHANNEL_DEFAULT_SECTIONS[channel],
+        );
+      }
+
+      // The Visão Geral seed is untouched: empty blocks, one per channel.
+      const overview = repository.save.mock.calls
+        .map(([entity]) => entity)
+        .find((entity) => entity.isDefault);
+      expect(
+        overview?.layout.sections.every(
+          (section) => section.cards.length === 0,
+        ),
+      ).toBe(true);
     });
 
     it('does not promote an operator-made dashboard into a channel screen', async () => {
