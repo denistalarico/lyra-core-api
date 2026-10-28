@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import type { Request } from 'express';
 import geoip from 'geoip-lite';
+import { resolveClientIp } from '../../../common/security/client-ip';
 
 export type LoginRequestContext = {
   ipAddress: string;
@@ -48,17 +49,10 @@ function resolveApproxLocation(ipAddress: string): string | null {
   }
 }
 
+// SEC-02 — the left-most X-Forwarded-For entry is client-supplied (nginx
+// appends), so it is no longer read here; see `resolveClientIp`.
 function getRequestIpAddress(req: Request): string {
-  const forwardedFor = getSingleHeaderValue(req.headers['x-forwarded-for']);
-  const realIp = getSingleHeaderValue(req.headers['x-real-ip']);
-  const ip =
-    forwardedFor?.split(',')[0]?.trim() ??
-    realIp?.trim() ??
-    req.ip ??
-    req.socket.remoteAddress ??
-    'Unknown';
-
-  return ip.replace(/^::ffff:/, '');
+  return resolveClientIp(req);
 }
 
 function getSingleHeaderValue(

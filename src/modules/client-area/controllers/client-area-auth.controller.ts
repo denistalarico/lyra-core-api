@@ -5,8 +5,10 @@ import {
   Post,
   Req,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { RetryAfterInterceptor } from '../../../common/security/retry-after.interceptor';
 import { LoginDto } from '../../auth/dto/login.dto';
 import { RefreshTokenDto } from '../../auth/dto/refresh-token.dto';
 import { normalizeClientAreaEmail } from '../client-area.types';
@@ -30,6 +32,7 @@ import {
  */
 @Controller('client-area/auth')
 @UseGuards(ClientAreaEnabledGuard)
+@UseInterceptors(RetryAfterInterceptor)
 export class ClientAreaAuthController {
   constructor(
     private readonly auth: ClientAreaAuthService,
@@ -39,7 +42,7 @@ export class ClientAreaAuthController {
 
   @Post('login')
   @HttpCode(200)
-  login(@Body() dto: LoginDto, @Req() req: Request) {
+  async login(@Body() dto: LoginDto, @Req() req: Request) {
     const ip = clientAreaRateLimitIp(req);
     const email = normalizeClientAreaEmail(dto.email);
     this.rateLimit.consume({
@@ -47,7 +50,10 @@ export class ClientAreaAuthController {
       login_account: `${ip}:${email}`,
       login_email: email,
     });
-    return this.auth.login(dto.email, dto.password, req);
+    const result = await this.auth.login(dto.email, dto.password, req);
+    // SEC-02 — only a correct password reaches here; it resets IP+account.
+    this.rateLimit.clear('login_account', `${ip}:${email}`);
+    return result;
   }
 
   @Post('2fa/login')

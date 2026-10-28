@@ -1514,7 +1514,8 @@ run(
       it('login is limited per IP+account whether or not the account exists; X-Forwarded-For does not mint new buckets', async () => {
         for (const address of [email('nao-existe'), email('exist')]) {
           rateLimit.reset();
-          for (let attempt = 0; attempt < 10; attempt += 1) {
+          // SEC-02: 5 per IP+account (was 10), below the 10-failure account lock.
+          for (let attempt = 0; attempt < 5; attempt += 1) {
             await http()
               .post('/client-area/auth/login')
               .set('X-Real-IP', '203.0.113.7')

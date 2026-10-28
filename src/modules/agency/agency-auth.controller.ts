@@ -1,5 +1,14 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import type { Request } from 'express';
+import { RetryAfterInterceptor } from '../../common/security/retry-after.interceptor';
 import { AuthenticatedUser } from '../auth/decorators/authenticated-user.decorator';
 import { LoginDto } from '../auth/dto/login.dto';
 import { RefreshTokenDto } from '../auth/dto/refresh-token.dto';
@@ -9,6 +18,7 @@ import type { AuthTokenPayload } from '../auth/types/auth-token-payload.type';
 import { AgencyAuthService } from './agency-auth.service';
 
 @Controller('agency/auth')
+@UseInterceptors(RetryAfterInterceptor)
 export class AgencyAuthController {
   constructor(private readonly agencyAuthService: AgencyAuthService) {}
 
@@ -34,13 +44,13 @@ export class AgencyAuthController {
   }
 
   @Post('forgot-password')
-  forgotPassword(@Body() body: { email: string }) {
-    return this.agencyAuthService.forgotPassword(body.email);
+  forgotPassword(@Body() body: { email: string }, @Req() req: Request) {
+    return this.agencyAuthService.forgotPassword(body.email, req);
   }
 
   @Post('reset-password')
-  resetPassword(@Body() dto: ResetPasswordDto) {
-    return this.agencyAuthService.resetPassword(dto.token, dto.password);
+  resetPassword(@Body() dto: ResetPasswordDto, @Req() req: Request) {
+    return this.agencyAuthService.resetPassword(dto.token, dto.password, req);
   }
 
   @Post('2fa/login')
@@ -52,7 +62,7 @@ export class AgencyAuthController {
   }
 
   @Post('2fa/email/send')
-  sendTwoFactorEmail(@Body() body: { token: string }) {
-    return this.agencyAuthService.sendTwoFactorEmail(body.token);
+  sendTwoFactorEmail(@Body() body: { token: string }, @Req() req: Request) {
+    return this.agencyAuthService.sendTwoFactorEmail(body.token, req);
   }
 }

@@ -10,6 +10,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
 import type { Request } from 'express';
 import { IsNull, Repository } from 'typeorm';
+import {
+  AuthRateLimitService,
+  IDENTITY_AUTH_RATE_LIMIT_RULES,
+} from '../../../common/security/auth-rate-limit.service';
 import { AgencyIdentityCredentialsService } from '../../agency/agency-identity-credentials.service';
 import {
   AgencyUserSecuritySettingsEntity,
@@ -99,6 +103,8 @@ function sessionInvalid(message = 'Invalid Client Area session.') {
  */
 @Injectable()
 export class ClientAreaAuthService {
+  private readonly rateLimit: AuthRateLimitService;
+
   constructor(
     @InjectRepository(AgencyUserSecuritySettingsEntity, AGENCY_CONNECTION)
     private readonly securityRepo: Repository<AgencyUserSecuritySettingsEntity>,
@@ -116,7 +122,13 @@ export class ClientAreaAuthService {
     @Optional()
     @InjectRepository(AgencyUserTrustedDeviceEntity, AGENCY_CONNECTION)
     private readonly trustedDevicesRepo?: Repository<AgencyUserTrustedDeviceEntity>,
-  ) {}
+    // SEC-02 — shared with the Agency surface through
+    // AgencyIdentityCredentialsModule; a private instance still enforces the
+    // limits where a test module does not provide it.
+    @Optional() rateLimit?: AuthRateLimitService,
+  ) {
+    this.rateLimit = rateLimit ?? new AuthRateLimitService();
+  }
 
   async login(
     email: string,
@@ -128,6 +140,20 @@ export class ClientAreaAuthService {
     const client = extractLoginContext(req);
     const eligible = await this.findEligibleIdentities(email);
     const matched: AgencyUserSecuritySettingsEntity[] = [];
+    const normalizedEmail = normalizeClientAreaEmail(email);
+
+    // SEC-02 — account lock (any IP): persisted from login events for known
+    // identities, in memory for the email, so unknown emails lock alike.
+    this.rateLimit.assertAccountUnlocked(
+      normalizedEmail,
+      await this.credentials.accountLockedUntil(eligible),
+    );
+
+    if (eligible.length === 0) {
+      await this.credentials.verifyDecoyPassword(
+        typeof password === 'string' ? password : '',
+      );
+    }
 
     for (const identity of eligible) {
       if (await this.credentials.verifyPassword(identity, password)) {
@@ -136,6 +162,7 @@ export class ClientAreaAuthService {
     }
 
     if (matched.length === 0) {
+      this.rateLimit.noteAccountOutcome(normalizedEmail, true);
       await Promise.all(
         eligible.map((identity) =>
           this.credentials.recordLoginEvent(
@@ -174,6 +201,7 @@ export class ClientAreaAuthService {
       return this.createTwoFactorChallenge(identity);
     }
 
+    this.rateLimit.noteAccountOutcome(normalizedEmail, false);
     return this.createAuthenticatedSession(identity, client);
   }
 
@@ -181,12 +209,19 @@ export class ClientAreaAuthService {
     assertClientAreaEnabled(this.configService);
 
     const payload = await this.verifyTwoFactorToken(token);
+    const identityKey = `${payload.tenantId}:${payload.sub}`;
+
+    this.rateLimit.consume(IDENTITY_AUTH_RATE_LIMIT_RULES, {
+      two_factor_identity: identityKey,
+    });
 
     await this.credentials.verifyTwoFactorCode(
       payload.method,
       { tenantId: payload.tenantId, userId: payload.sub },
       typeof code === 'string' ? code : '',
     );
+
+    this.rateLimit.clear('two_factor_identity', identityKey);
 
     const identity = await this.securityRepo.findOne({
       where: { tenantId: payload.tenantId, userId: payload.sub },
@@ -197,6 +232,7 @@ export class ClientAreaAuthService {
       throw invalidCredentials();
     }
 
+    this.rateLimit.noteAccountOutcome(identity.currentEmail, false);
     return this.createAuthenticatedSession(identity, extractLoginContext(req));
   }
 
@@ -208,6 +244,10 @@ export class ClientAreaAuthService {
     if (payload.method !== 'email') {
       throw sessionInvalid('Invalid 2FA method');
     }
+
+    this.rateLimit.consume(IDENTITY_AUTH_RATE_LIMIT_RULES, {
+      two_factor_email_identity: `${payload.tenantId}:${payload.sub}`,
+    });
 
     const identity = await this.securityRepo.findOne({
       where: { tenantId: payload.tenantId, userId: payload.sub },

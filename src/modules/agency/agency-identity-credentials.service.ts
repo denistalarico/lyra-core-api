@@ -1,12 +1,16 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import { generateSecret, generateURI, verify } from 'otplib';
 import * as QRCode from 'qrcode';
-import { IsNull } from 'typeorm';
+import { In, IsNull, MoreThanOrEqual } from 'typeorm';
 import { Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import {
+  ACCOUNT_LOCKOUT_LOOKBACK_MS,
+  accountLockedUntil,
+} from '../../common/security/account-lockout.policy';
 import {
   EmailService,
   type EmailTransportOverride,
@@ -21,6 +25,8 @@ import {
 import { AgencyWorkspaceEmailSettingsEntity } from './entities/agency-settings.entities';
 
 const AGENCY_CONNECTION = 'agency';
+const EMAIL_TWO_FACTOR_MAX_ATTEMPTS = 5;
+const LOCKOUT_EVENTS_LIMIT = 500;
 
 export type TwoFactorMethod = 'email' | 'authenticator';
 
@@ -46,6 +52,8 @@ type LoginEventClient = {
  */
 @Injectable()
 export class AgencyIdentityCredentialsService {
+  private decoyPasswordHash?: Promise<string>;
+
   constructor(
     @InjectRepository(AgencyUserSecuritySettingsEntity, AGENCY_CONNECTION)
     private readonly securityRepo: Repository<AgencyUserSecuritySettingsEntity>,
@@ -64,10 +72,74 @@ export class AgencyIdentityCredentialsService {
     password: string,
   ): Promise<boolean> {
     if (!security.passwordHash) {
-      return false;
+      return this.verifyDecoyPassword(password);
     }
 
     return argon2.verify(security.passwordHash, password).catch(() => false);
+  }
+
+  /**
+   * SEC-02 — spends one argon2 verification when there is no password to
+   * check, so an unknown email costs about as much as a wrong password.
+   */
+  async verifyDecoyPassword(password: string): Promise<false> {
+    this.decoyPasswordHash ??= argon2.hash(randomBytes(16).toString('hex'));
+    await argon2
+      .verify(await this.decoyPasswordHash, password)
+      .catch(() => false);
+    return false;
+  }
+
+  /**
+   * SEC-02 — when the account lock of these identities ends (epoch ms), or
+   * null. Rebuilt from the recorded `login_failed`/`login_success` events of
+   * every surface, so it survives restarts.
+   */
+  async accountLockedUntil(
+    identities: ReadonlyArray<{ tenantId: string; userId: string }>,
+    now = Date.now(),
+  ): Promise<number | null> {
+    if (identities.length === 0) {
+      return null;
+    }
+
+    const since = new Date(now - ACCOUNT_LOCKOUT_LOOKBACK_MS);
+    const events = await this.loginEventsRepo.find({
+      select: {
+        tenantId: true,
+        userId: true,
+        eventType: true,
+        createdAt: true,
+      },
+      where: identities.map(({ tenantId, userId }) => ({
+        tenantId,
+        userId,
+        eventType: In(['login_failed', 'login_success']),
+        createdAt: MoreThanOrEqual(since),
+      })),
+      order: { createdAt: 'DESC' },
+      take: LOCKOUT_EVENTS_LIMIT,
+    });
+
+    let lockedUntil: number | null = null;
+    for (const { tenantId, userId } of identities) {
+      const until = accountLockedUntil(
+        events
+          .filter(
+            (event) => event.tenantId === tenantId && event.userId === userId,
+          )
+          .map((event) => ({
+            failed: event.eventType === 'login_failed',
+            at: event.createdAt.getTime(),
+          })),
+        now,
+      );
+      if (until !== null && (lockedUntil === null || until > lockedUntil)) {
+        lockedUntil = until;
+      }
+    }
+
+    return lockedUntil;
   }
 
   /** CA2 — the one place a new identity password is hashed (argon2). */
@@ -285,10 +357,13 @@ export class AgencyIdentityCredentialsService {
       order: { createdAt: 'DESC' },
     });
 
+    // SEC-02 — `attempts` was counted but never enforced; a code dies after
+    // EMAIL_TWO_FACTOR_MAX_ATTEMPTS wrong guesses and a new one must be sent.
     if (
       !record ||
       record.usedAt ||
       record.expiresAt.getTime() < Date.now() ||
+      record.attempts >= EMAIL_TWO_FACTOR_MAX_ATTEMPTS ||
       record.codeHash !== codeHash
     ) {
       if (record) {

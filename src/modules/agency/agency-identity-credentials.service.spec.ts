@@ -1,4 +1,5 @@
 import { UnauthorizedException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import type { Repository } from 'typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import type { EmailService } from '../email/email.service';
@@ -70,5 +71,43 @@ describe('AgencyIdentityCredentialsService — authenticator 2FA', () => {
         ` ${VALID_CODE} `,
       ),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('AgencyIdentityCredentialsService — email 2FA attempts (SEC-02)', () => {
+  const crypto = new SettingsCryptoService();
+  const identity = { tenantId: 't', userId: 'u' };
+
+  function service(attempts: number) {
+    return new AgencyIdentityCredentialsService(
+      {} as Repository<AgencyUserSecuritySettingsEntity>,
+      {
+        findOne: jest.fn(() =>
+          Promise.resolve({
+            codeHash: createHash('sha256').update(VALID_CODE).digest('hex'),
+            usedAt: null,
+            expiresAt: new Date(Date.now() + 60_000),
+            attempts,
+          }),
+        ),
+        save: jest.fn(),
+      } as unknown as Repository<AgencyEmailTwoFactorCodeEntity>,
+      {} as Repository<AgencyUserLoginEventEntity>,
+      {} as Repository<AgencyWorkspaceEmailSettingsEntity>,
+      {} as EmailService,
+      crypto,
+    );
+  }
+
+  it('accepts the right code before the attempt cap', async () => {
+    await expect(
+      service(4).verifyTwoFactorCode('email', identity, VALID_CODE),
+    ).resolves.toBeUndefined();
+  });
+
+  it('refuses even the right code once 5 wrong guesses were made', async () => {
+    await expect(
+      service(5).verifyTwoFactorCode('email', identity, VALID_CODE),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

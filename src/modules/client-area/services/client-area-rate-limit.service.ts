@@ -1,6 +1,7 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import type { Request } from 'express';
+import { TooManyAuthAttemptsException } from '../../../common/security/auth-rate-limit.service';
 import { CLIENT_AREA_ERROR_CODES } from '../client-area.types';
 
 type RateLimitBucket = { count: number; resetsAt: number };
@@ -22,7 +23,8 @@ export const CLIENT_AREA_RATE_LIMIT_RULES = {
   security_identity: { limit: 10, windowMs: 5 * MINUTE },
   branding_ip: { limit: 60, windowMs: MINUTE },
   login_ip: { limit: 30, windowMs: 15 * MINUTE },
-  login_account: { limit: 10, windowMs: 15 * MINUTE },
+  // SEC-02: 5 per IP+account, cleared by a correct password (controller).
+  login_account: { limit: 5, windowMs: 15 * MINUTE },
   login_email: { limit: 30, windowMs: 15 * MINUTE },
   two_factor_ip: { limit: 10, windowMs: 5 * MINUTE },
   two_factor_email_ip: { limit: 5, windowMs: 5 * MINUTE },
@@ -48,26 +50,28 @@ export class ClientAreaRateLimitService {
 
   /** Spends one attempt on each bucket; throws 429 when any is exhausted. */
   consume(checks: Partial<Record<ClientAreaRateLimitRule, string>>): void {
-    let exceeded = false;
+    let retryAfterMs = 0;
 
     for (const [rule, discriminator] of Object.entries(checks) as Array<
       [ClientAreaRateLimitRule, string | undefined]
     >) {
       if (discriminator === undefined) continue;
-      exceeded = this.spend(rule, discriminator) || exceeded;
+      retryAfterMs = Math.max(retryAfterMs, this.spend(rule, discriminator));
     }
 
-    if (exceeded) {
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          error: 'Too Many Requests',
-          message: 'Too many attempts. Wait a few minutes and try again.',
-          code: CLIENT_AREA_ERROR_CODES.rateLimited,
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+    if (retryAfterMs > 0) {
+      throw new TooManyAuthAttemptsException(Math.ceil(retryAfterMs / 1000), {
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        error: 'Too Many Requests',
+        message: 'Too many attempts. Wait a few minutes and try again.',
+        code: CLIENT_AREA_ERROR_CODES.rateLimited,
+      });
     }
+  }
+
+  /** SEC-02 — forgets one bucket (a correct password resets IP+account). */
+  clear(rule: ClientAreaRateLimitRule, discriminator: string): void {
+    this.buckets.delete(this.key(rule, discriminator));
   }
 
   /** Test helper: forget every counter. */
@@ -75,22 +79,27 @@ export class ClientAreaRateLimitService {
     this.buckets.clear();
   }
 
+  /** Returns how long to wait (ms) when this attempt exceeds the rule, else 0. */
   private spend(rule: ClientAreaRateLimitRule, discriminator: string) {
     const now = Date.now();
     const { limit, windowMs } = CLIENT_AREA_RATE_LIMIT_RULES[rule];
-    const key = createHash('sha256')
-      .update(`${rule}:${discriminator}`)
-      .digest('hex');
+    const key = this.key(rule, discriminator);
     const current = this.buckets.get(key);
 
     if (!current || current.resetsAt <= now) {
       this.buckets.set(key, { count: 1, resetsAt: now + windowMs });
       this.pruneIfLarge(now);
-      return false;
+      return 0;
     }
 
     current.count += 1;
-    return current.count > limit;
+    return current.count > limit ? current.resetsAt - now : 0;
+  }
+
+  private key(rule: ClientAreaRateLimitRule, discriminator: string) {
+    return createHash('sha256')
+      .update(`${rule}:${discriminator}`)
+      .digest('hex');
   }
 
   private pruneIfLarge(now: number) {

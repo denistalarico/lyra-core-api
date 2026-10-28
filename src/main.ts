@@ -11,6 +11,11 @@ async function bootstrap() {
   });
   app.enableShutdownHooks();
 
+  // SEC-02 — nginx on the same host is the only proxy. Trusting loopback
+  // makes `req.ip` the address nginx appended to X-Forwarded-For; entries a
+  // client adds before it, or headers from a non-loopback peer, are ignored.
+  app.set('trust proxy', 'loopback');
+
   const clientAreaBranding = app.get(ClientAreaPublicBrandingService);
   app.enableCors(
     buildCorsOptions(process.env, (origin) =>

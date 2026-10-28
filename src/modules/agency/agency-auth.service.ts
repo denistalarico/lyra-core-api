@@ -1,5 +1,5 @@
 import { emailFrontendUrl } from '../email/email-frontend-url';
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -7,6 +7,11 @@ import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
 import type { Request } from 'express';
 import { Repository } from 'typeorm';
+import {
+  AuthRateLimitService,
+  IDENTITY_AUTH_RATE_LIMIT_RULES,
+} from '../../common/security/auth-rate-limit.service';
+import { resolveClientIp } from '../../common/security/client-ip';
 import { EmailService } from '../email/email.service';
 import { renderTransactionalEmail } from '../email/templates/transactional-email.template';
 import { LoginDto } from '../auth/dto/login.dto';
@@ -33,6 +38,22 @@ import {
 } from './agency-identity-credentials.service';
 
 const AGENCY_CONNECTION = 'agency';
+const MINUTE = 60 * 1000;
+
+/**
+ * SEC-02 — in-memory limits of the public Agency auth endpoints. The account
+ * lock (any IP) is not here: it is rebuilt from login events
+ * (`AgencyIdentityCredentialsService.accountLockedUntil`).
+ */
+export const AGENCY_AUTH_RATE_LIMIT_RULES = {
+  login_ip: { limit: 30, windowMs: 15 * MINUTE },
+  login_account: { limit: 5, windowMs: 15 * MINUTE },
+  two_factor_ip: { limit: 10, windowMs: 5 * MINUTE },
+  two_factor_email_ip: { limit: 5, windowMs: 5 * MINUTE },
+  password_forgot_ip: { limit: 10, windowMs: 15 * MINUTE },
+  password_forgot_email: { limit: 5, windowMs: 15 * MINUTE },
+  password_reset_ip: { limit: 10, windowMs: 15 * MINUTE },
+} as const;
 
 type AgencyLoginContext = {
   security: AgencyUserSecuritySettingsEntity;
@@ -56,6 +77,8 @@ type AgencyTwoFactorTokenPayload = {
 
 @Injectable()
 export class AgencyAuthService {
+  private readonly logger = new Logger(AgencyAuthService.name);
+
   constructor(
     @InjectRepository(AgencyUserSecuritySettingsEntity, AGENCY_CONNECTION)
     private readonly securityRepo: Repository<AgencyUserSecuritySettingsEntity>,
@@ -73,26 +96,50 @@ export class AgencyAuthService {
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
     private readonly credentials: AgencyIdentityCredentialsService,
+    private readonly rateLimit: AuthRateLimitService,
   ) {}
 
   async login(dto: LoginDto, req: Request) {
     const email = dto.email.trim().toLowerCase();
+    const ip = resolveClientIp(req);
+    const accountKey = `${ip}:${email}`;
+
+    this.rateLimit.consume(AGENCY_AUTH_RATE_LIMIT_RULES, {
+      login_ip: ip,
+      login_account: accountKey,
+    });
 
     if (isDevOnlyAgencyLoginBlocked(email)) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const loginContext = await this.findLoginContext(email, dto.password);
+    const securityRecords = await this.findSecurityRecords(email);
+    this.rateLimit.assertAccountUnlocked(
+      email,
+      await this.credentials.accountLockedUntil(securityRecords),
+    );
+
+    const loginContext = await this.findLoginContext(
+      securityRecords,
+      dto.password,
+    );
 
     if (!loginContext) {
-      await this.recordFailedLoginIfKnownEmail(email, extractLoginContext(req));
+      this.rateLimit.noteAccountOutcome(email, true);
+      await this.recordFailedLoginIfKnownEmail(
+        securityRecords[0],
+        extractLoginContext(req),
+      );
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    this.rateLimit.clear('login_account', accountKey);
 
     if (this.credentials.hasTwoFactorEnabled(loginContext.security)) {
       return this.createTwoFactorChallenge(loginContext.security);
     }
 
+    this.rateLimit.noteAccountOutcome(email, false);
     return this.createAuthenticatedSession(
       loginContext,
       extractLoginContext(req),
@@ -174,19 +221,38 @@ export class AgencyAuthService {
     return { success: true };
   }
 
-  async forgotPassword(email: string) {
-    const security = await this.findSecurityForPasswordReset(
-      email.trim().toLowerCase(),
-    );
+  async forgotPassword(email: string, req: Request) {
+    const normalized =
+      typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+    // Spent whether or not the email exists, so the 429 reveals nothing.
+    this.rateLimit.consume(AGENCY_AUTH_RATE_LIMIT_RULES, {
+      password_forgot_ip: resolveClientIp(req),
+      password_forgot_email: normalized,
+    });
+
+    const security = await this.findSecurityForPasswordReset(normalized);
 
     if (security?.currentEmail) {
-      await this.sendPasswordResetEmail(security);
+      try {
+        await this.sendPasswordResetEmail(security);
+      } catch (error) {
+        // Swallowed on purpose: a failure only for existing accounts would
+        // turn this endpoint into an account oracle.
+        this.logger.warn(
+          `Agency reset email failed for ${security.tenantId}/${security.userId}: ${(error as Error)?.message}`,
+        );
+      }
     }
 
     return { success: true };
   }
 
-  async resetPassword(token: string, password: string) {
+  async resetPassword(token: string, password: string, req: Request) {
+    this.rateLimit.consume(AGENCY_AUTH_RATE_LIMIT_RULES, {
+      password_reset_ip: resolveClientIp(req),
+    });
+
     // CA2 — a Client Area reset link must never be redeemable here.
     const resetRequest = await this.passwordResetRepo.findOne({
       where: { tokenHash: this.hashToken(token), surface: AGENCY_SURFACE },
@@ -227,13 +293,24 @@ export class AgencyAuthService {
   }
 
   async loginWith2FA(token: string, code: string, req: Request) {
+    this.rateLimit.consume(AGENCY_AUTH_RATE_LIMIT_RULES, {
+      two_factor_ip: resolveClientIp(req),
+    });
+
     const payload = await this.verifyTwoFactorToken(token);
+    const identityKey = `${payload.tenantId}:${payload.sub}`;
+
+    this.rateLimit.consume(IDENTITY_AUTH_RATE_LIMIT_RULES, {
+      two_factor_identity: identityKey,
+    });
 
     await this.credentials.verifyTwoFactorCode(
       payload.method,
       { tenantId: payload.tenantId, userId: payload.sub },
       code,
     );
+
+    this.rateLimit.clear('two_factor_identity', identityKey);
 
     const security = await this.securityRepo.findOne({
       where: { tenantId: payload.tenantId, userId: payload.sub },
@@ -246,14 +323,23 @@ export class AgencyAuthService {
       throw new UnauthorizedException('Invalid 2FA context');
     }
 
+    this.rateLimit.noteAccountOutcome(security.currentEmail, false);
     return this.createAuthenticatedSession(
       { security, workspaceUser },
       extractLoginContext(req),
     );
   }
 
-  async sendTwoFactorEmail(token: string) {
+  async sendTwoFactorEmail(token: string, req: Request) {
+    this.rateLimit.consume(AGENCY_AUTH_RATE_LIMIT_RULES, {
+      two_factor_email_ip: resolveClientIp(req),
+    });
+
     const payload = await this.verifyTwoFactorToken(token);
+
+    this.rateLimit.consume(IDENTITY_AUTH_RATE_LIMIT_RULES, {
+      two_factor_email_identity: `${payload.tenantId}:${payload.sub}`,
+    });
 
     if (payload.method !== 'email') {
       throw new UnauthorizedException('Invalid 2FA method');
@@ -280,11 +366,21 @@ export class AgencyAuthService {
     return { user: await this.buildUserResponse(payload) };
   }
 
-  private async findLoginContext(email: string, password: string) {
-    const securityRecords = await this.securityRepo.find({
+  private findSecurityRecords(email: string) {
+    return this.securityRepo.find({
       where: { currentEmail: email },
       order: { updatedAt: 'DESC' },
     });
+  }
+
+  private async findLoginContext(
+    securityRecords: AgencyUserSecuritySettingsEntity[],
+    password: string,
+  ) {
+    if (securityRecords.length === 0) {
+      await this.credentials.verifyDecoyPassword(password);
+      return null;
+    }
 
     for (const security of securityRecords) {
       const isValidPassword = await this.credentials.verifyPassword(
@@ -307,14 +403,9 @@ export class AgencyAuthService {
   }
 
   private async recordFailedLoginIfKnownEmail(
-    email: string,
+    security: AgencyUserSecuritySettingsEntity | undefined,
     client: LoginRequestContext,
   ) {
-    const security = await this.securityRepo.findOne({
-      where: { currentEmail: email },
-      order: { updatedAt: 'DESC' },
-    });
-
     if (!security) {
       return;
     }
