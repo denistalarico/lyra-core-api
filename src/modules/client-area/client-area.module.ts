@@ -51,6 +51,8 @@ import { AgencyClient } from '../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../clients/entities/agency-client-company-context.entity';
 import { ContactEntity } from '../contacts/entities/contact.entity';
 import { ContactCompanyLinkEntity } from '../contacts/entities/contact-company-link.entity';
+import { AgencyContactProfileEntity } from '../agency/entities/agency-contact-details.entities';
+import { FilesModule } from '../../common/files/files.module';
 import { EmailModule } from '../email/email.module';
 import { TenantProductEntitlementEntity } from '../platform/entities/tenant-product-entitlement.entity';
 import {
@@ -114,6 +116,7 @@ const AGENCY_CONNECTION = 'agency';
     JwtModule.register({}),
     AgencyIdentityCredentialsModule,
     EmailModule,
+    FilesModule,
     TypeOrmModule.forFeature(
       [
         ClientAreaIdentityPreferencesEntity,
@@ -142,6 +145,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyClientCompanyContext,
         ContactEntity,
         ContactCompanyLinkEntity,
+        AgencyContactProfileEntity,
         TenantProductEntitlementEntity,
       ],
       AGENCY_CONNECTION,

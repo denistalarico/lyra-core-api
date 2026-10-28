@@ -31,7 +31,10 @@ describe('PD1 ClientAreaManagementService branding', () => {
     secondaryColor: '#1E293B',
   };
 
-  function buildService(settings: Record<string, unknown> | null) {
+  function buildService(
+    settings: Record<string, unknown> | null,
+    filesService?: { uploadImageAsset: jest.Mock },
+  ) {
     const config = {
       get: (key: string) =>
         key === 'CLIENT_AREA_ENABLED' ? 'true' : undefined,
@@ -41,6 +44,8 @@ describe('PD1 ClientAreaManagementService branding', () => {
       findOne: jest.fn().mockResolvedValue(findOne),
       find: jest.fn().mockResolvedValue([]),
       save: jest.fn(),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      upsert: jest.fn().mockResolvedValue({}),
       create: jest.fn((value: unknown) => value),
     });
 
@@ -65,6 +70,11 @@ describe('PD1 ClientAreaManagementService branding', () => {
         find: jest.fn().mockResolvedValue([]),
         findOne: jest.fn().mockResolvedValue(null),
       } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      filesService as never,
     );
   }
 
@@ -99,6 +109,7 @@ describe('PD1 ClientAreaManagementService branding', () => {
       customSettings({
         displayName: 'Área do Cliente Talarico',
         logoLightUrl: '/api/assets/custom-light.webp',
+        loginImageUrl: '/api/assets/client-area/login.webp',
         primaryColor: '#7C3AED',
         secondaryColor: '#111827',
       }),
@@ -108,6 +119,7 @@ describe('PD1 ClientAreaManagementService branding', () => {
 
     expect(branding.displayName).toBe('Área do Cliente Talarico');
     expect(branding.logoLightUrl).toBe('/api/assets/custom-light.webp');
+    expect(branding.login.imageUrl).toBe('/api/assets/client-area/login.webp');
     expect(branding.primaryColor).toBe('#7C3AED');
     expect(branding.secondaryColor).toBe('#111827');
   });
@@ -129,5 +141,31 @@ describe('PD1 ClientAreaManagementService branding', () => {
 
     expect(branding.displayName).toBe('Talarico Labs');
     expect(branding.primaryColor).toBe('#2563EB');
+  });
+
+  it('stores a split-screen image through the bounded Client Area asset slot', async () => {
+    const filesService = {
+      uploadImageAsset: jest.fn().mockResolvedValue({
+        path: 'tenants/tenant-1/client-area/login_image.webp',
+        url: '/api/assets/tenants/tenant-1/client-area/login_image.webp',
+      }),
+    };
+    const service = buildService(customSettings(), filesService);
+    const file = { mimetype: 'image/png', buffer: Buffer.from('image') };
+
+    const result = await service.uploadBrandAsset(
+      TENANT,
+      WORKSPACE,
+      'login_image',
+      file as Express.Multer.File,
+    );
+
+    expect(filesService.uploadImageAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ file, maxDimension: 2400 }),
+    );
+    expect(result).toEqual({
+      slot: 'login_image',
+      url: '/api/assets/tenants/tenant-1/client-area/login_image.webp',
+    });
   });
 });

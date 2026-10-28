@@ -1,5 +1,6 @@
 import { ClientAreaPublicBrandingService } from '../services/client-area-public-branding.service';
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,8 +9,13 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { MAX_IMAGE_UPLOAD_BYTES } from '../../../common/files/files.service';
 import { AuthenticatedUser } from '../../auth/decorators/authenticated-user.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import type { AuthTokenPayload } from '../../auth/types/auth-token-payload.type';
@@ -27,9 +33,33 @@ import {
 } from '../dto/client-area-management.dto';
 import { ClientAreaLifecycleService } from '../services/client-area-lifecycle.service';
 import { ClientAreaManagementService } from '../services/client-area-management.service';
+import {
+  CLIENT_AREA_BRAND_ASSET_SLOTS,
+  type ClientAreaBrandAssetSlot,
+} from '../services/client-area-management.service';
 import { ClientAreaSelfAccessService } from '../services/client-area-self-access.service';
 
 export const CLIENT_AREA_MANAGE_PERMISSION = 'agency.client_area.manage.admin';
+
+const CLIENT_AREA_IMAGE_UPLOAD_OPTIONS = {
+  storage: memoryStorage(),
+  limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES },
+  fileFilter: (
+    _request: unknown,
+    file: Express.Multer.File,
+    callback: (error: Error | null, acceptFile: boolean) => void,
+  ) => {
+    if (
+      !['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(
+        file.mimetype,
+      )
+    ) {
+      callback(new BadRequestException('Unsupported image format.'), false);
+      return;
+    }
+    callback(null, true);
+  },
+};
 
 /** Agency-only CA3 configuration and support preview.  No Client Area token
  * is accepted here, and preview keeps the verified Agency actor. */
@@ -64,6 +94,26 @@ export class ClientAreaManagementAgencyController {
   }
   @Get('branding') branding(@AuthenticatedUser() user: AuthTokenPayload) {
     return this.management.branding(user.tenantId, user.workspaceId);
+  }
+  @Post('assets/:slot')
+  @UseInterceptors(FileInterceptor('file', CLIENT_AREA_IMAGE_UPLOAD_OPTIONS))
+  uploadBrandAsset(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('slot') slot: ClientAreaBrandAssetSlot,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!CLIENT_AREA_BRAND_ASSET_SLOTS.includes(slot) || !file)
+      throw new BadRequestException(
+        !file
+          ? 'Missing multipart field "file".'
+          : 'Unsupported Client Area asset slot.',
+      );
+    return this.management.uploadBrandAsset(
+      user.tenantId,
+      user.workspaceId,
+      slot,
+      file,
+    );
   }
   @Get('companies') companies(@AuthenticatedUser() user: AuthTokenPayload) {
     return this.management.listCompanies(user.tenantId, user.workspaceId);

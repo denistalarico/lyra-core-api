@@ -23,7 +23,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
+import { FilesService } from '../../../common/files/files.service';
 import { isActiveProductEntitlement } from '../../../common/context/product-entitlement-availability';
 import { AgencyWorkspaceCompanySettingsEntity } from '../../agency/entities/agency-settings.entities';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
@@ -31,6 +32,7 @@ import { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-a
 import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
+import { AgencyContactProfileEntity } from '../../agency/entities/agency-contact-details.entities';
 import { TenantProductEntitlementEntity } from '../../platform/entities/tenant-product-entitlement.entity';
 import {
   isActiveClient,
@@ -58,6 +60,13 @@ import { permissionsForClientAreaRole } from '../client-area-permissions.catalog
 import { ClientAreaEligibilityService } from './client-area-eligibility.service';
 
 const AGENCY_CONNECTION = 'agency';
+export const CLIENT_AREA_BRAND_ASSET_SLOTS = [
+  'logo_light',
+  'logo_dark',
+  'login_image',
+] as const;
+export type ClientAreaBrandAssetSlot =
+  (typeof CLIENT_AREA_BRAND_ASSET_SLOTS)[number];
 
 function trimOrNull(value: string | null | undefined) {
   return value?.trim() || null;
@@ -108,6 +117,10 @@ export class ClientAreaManagementService {
     @Optional() private readonly consents?: ClientAreaConsentService,
     @Optional() private readonly memberAccess?: ClientAreaMemberAccessService,
     @Optional() private readonly companyHooks?: ClientAreaCompanyHooksRegistry,
+    @Optional()
+    @InjectRepository(AgencyContactProfileEntity, AGENCY_CONNECTION)
+    private readonly contactProfilesRepo?: Repository<AgencyContactProfileEntity>,
+    @Optional() private readonly filesService?: FilesService,
   ) {}
 
   private async findSettings(tenantId: string, workspaceId: string) {
@@ -200,6 +213,33 @@ export class ClientAreaManagementService {
       ['tenantId', 'workspaceId'],
     );
     return this.getSettings(tenantId, workspaceId);
+  }
+
+  async uploadBrandAsset(
+    tenantId: string,
+    workspaceId: string,
+    slot: ClientAreaBrandAssetSlot,
+    file: Express.Multer.File,
+  ) {
+    if (!CLIENT_AREA_BRAND_ASSET_SLOTS.includes(slot))
+      throw new BadRequestException('Unsupported Client Area asset slot.');
+    if (!this.filesService)
+      throw new BadRequestException('File storage is unavailable.');
+
+    const stored = await this.filesService.uploadImageAsset({
+      file,
+      path: `tenants/${tenantId}/client-area/${slot}-${Date.now()}.webp`,
+      maxDimension: slot === 'login_image' ? 2400 : 1200,
+    });
+    const patch =
+      slot === 'logo_light'
+        ? { logoLightUrl: stored.url }
+        : slot === 'logo_dark'
+          ? { logoDarkUrl: stored.url }
+          : { loginImageUrl: stored.url };
+    await this.patchSettings(tenantId, workspaceId, {});
+    await this.settingsRepo.update({ tenantId, workspaceId }, patch);
+    return { slot, url: stored.url };
   }
 
   async assertAgencyEnabled(tenantId: string, workspaceId: string) {
@@ -557,6 +597,7 @@ export class ClientAreaManagementService {
         heading: settings.loginHeading,
         supportingText: settings.loginSupportingText,
         backgroundColor: settings.loginBackgroundColor,
+        imageUrl: settings.loginImageUrl ?? null,
       },
     };
   }
@@ -570,6 +611,11 @@ export class ClientAreaManagementService {
     return {
       platformEnabled: isClientAreaEnabled(this.config),
       settings,
+      domainDns: {
+        cnameTarget:
+          this.config.get<string>('CLIENT_AREA_DOMAIN_CNAME')?.trim() || null,
+        ttl: 300,
+      },
       metrics: {
         enabledCompanies: enabled.length,
         activeUsers: companies.reduce(
@@ -596,12 +642,13 @@ export class ClientAreaManagementService {
     });
     const clientIds = [...new Set(contexts.map((c) => c.agencyClientId))];
     const contactIds = [...new Set(contexts.map((c) => c.companyContactId))];
-    const [clients, contacts, configured, memberships, invitations]: [
+    const [clients, contacts, configured, memberships, invitations, profiles]: [
       AgencyClient[],
       ContactEntity[],
       ClientAreaCompanySettingsEntity[],
       ClientAreaMembershipEntity[],
       ClientAreaInvitationEntity[],
+      AgencyContactProfileEntity[],
     ] = await Promise.all([
       clientIds.length
         ? this.clientsRepo.find({
@@ -620,6 +667,11 @@ export class ClientAreaManagementService {
       this.invitationsRepo.find({
         where: { tenantId, workspaceId, status: 'pending' },
       }),
+      contactIds.length && this.contactProfilesRepo
+        ? this.contactProfilesRepo.find({
+            where: { tenantId, workspaceId, contactId: In(contactIds) },
+          })
+        : [],
     ]);
     const configBy = new Map<string, ClientAreaCompanySettingsEntity>(
       configured.map((item) => [item.companyContextId, item]),
@@ -629,6 +681,9 @@ export class ClientAreaManagementService {
     );
     const contactBy = new Map<string, ContactEntity>(
       contacts.map((item) => [item.id, item] as [string, ContactEntity]),
+    );
+    const profileByContactId = new Map(
+      profiles.map((item) => [item.contactId, item]),
     );
     return contexts
       .filter((context) => {
@@ -647,6 +702,8 @@ export class ClientAreaManagementService {
           companyContextId: context.id,
           agencyClientId: context.agencyClientId,
           company: contact?.displayName || contact?.legalName || 'Empresa',
+          avatarUrl:
+            profileByContactId.get(context.companyContactId)?.avatarUrl ?? null,
           agencyClient:
             clientBy.get(context.agencyClientId)?.displayName || 'Cliente',
           enabled: config?.enabled ?? false,

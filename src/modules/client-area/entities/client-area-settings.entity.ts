@@ -95,6 +95,8 @@ export class ClientAreaSettingsEntity {
     nullable: true,
   })
   loginBackgroundColor!: string | null;
+  @Column({ name: 'login_image_url', type: 'text', nullable: true })
+  loginImageUrl!: string | null;
   @Column({
     name: 'default_role',
     type: 'varchar',
