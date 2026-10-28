@@ -2,6 +2,7 @@ import { ClientAreaManagementService } from './services/client-area-management.s
 import { ConfigService } from '@nestjs/config';
 import { ClientAreaPublicBrandingService } from './services/client-area-public-branding.service';
 import { ClientAreaRateLimitService } from './services/client-area-rate-limit.service';
+import { resolveClientAreaDomainCname } from './client-area.config';
 
 describe('CA8 public branding and DNS', () => {
   const settings = {
@@ -36,6 +37,23 @@ describe('CA8 public branding and DNS', () => {
     );
     return { repo, management, service };
   }
+  it('always resolves the required CNAME destination from explicit config or the frontend URL', () => {
+    expect(
+      resolveClientAreaDomainCname(
+        new ConfigService<Record<string | symbol, unknown>>({
+          CLIENT_AREA_DOMAIN_CNAME: 'edge.example.test',
+          CLIENT_AREA_FRONTEND_URL: 'https://agency.example.test/client-area',
+        }),
+      ),
+    ).toBe('edge.example.test');
+    expect(
+      resolveClientAreaDomainCname(
+        new ConfigService<Record<string | symbol, unknown>>({
+          CLIENT_AREA_FRONTEND_URL: 'https://agency.example.test/client-area',
+        }),
+      ),
+    ).toBe('agency.example.test');
+  });
   it('resolves enabled slug and returns only branding, no settings or secret', async () => {
     const { service } = setup();
     expect(await service.resolve('agency-test', 'ignored.test')).toEqual({

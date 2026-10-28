@@ -4,27 +4,15 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { resolveCname, resolveTxt } from 'node:dns/promises';
 import { Repository } from 'typeorm';
+import {
+  clientAreaHostname,
+  resolveClientAreaDomainCname,
+} from '../client-area.config';
 import { ClientAreaSettingsEntity } from '../entities/client-area-settings.entity';
 import { ClientAreaManagementService } from './client-area-management.service';
 
 const MAX_VERIFICATION_AGE_MS = 26 * 60 * 60 * 1000;
-export function clientAreaHostname(value: string): string | null {
-  if (!/^[a-z0-9.-]+(?::[0-9]+)?$/i.test(value)) return null;
-  const host = value
-    .toLowerCase()
-    .replace(/:[0-9]+$/, '')
-    .replace(/\.$/, '');
-  return host.length <= 253 &&
-    host.includes('.') &&
-    host
-      .split('.')
-      .every(
-        (part) =>
-          /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(part) && part.length <= 63,
-      )
-    ? host
-    : null;
-}
+export { clientAreaHostname };
 
 @Injectable()
 export class ClientAreaPublicBrandingService {
@@ -93,9 +81,7 @@ export class ClientAreaPublicBrandingService {
   }
   private async check(row: ClientAreaSettingsEntity) {
     let verified = false;
-    const expectedCname = clientAreaHostname(
-      this.config.get<string>('CLIENT_AREA_DOMAIN_CNAME') ?? '',
-    );
+    const expectedCname = resolveClientAreaDomainCname(this.config);
     if (expectedCname && row.customDomain && row.domainVerificationToken) {
       try {
         const [txt, cnames] = await Promise.all([

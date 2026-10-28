@@ -39,7 +39,10 @@ import {
   isActiveCompany,
   isAvailableOrganization,
 } from '../client-area-availability';
-import { isClientAreaEnabled } from '../client-area.config';
+import {
+  isClientAreaEnabled,
+  resolveClientAreaDomainCname,
+} from '../client-area.config';
 import {
   type PatchClientAreaCompanySettingsDto,
   type PatchClientAreaSettingsDto,
@@ -612,8 +615,7 @@ export class ClientAreaManagementService {
       platformEnabled: isClientAreaEnabled(this.config),
       settings,
       domainDns: {
-        cnameTarget:
-          this.config.get<string>('CLIENT_AREA_DOMAIN_CNAME')?.trim() || null,
+        cnameTarget: resolveClientAreaDomainCname(this.config),
         ttl: 300,
       },
       metrics: {

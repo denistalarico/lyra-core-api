@@ -8,6 +8,49 @@ export const CLIENT_AREA_ACCESS_SECRET_ENV = 'JWT_CLIENT_AREA_ACCESS_SECRET';
 /** Shorter secrets are treated as absent: the surface stays closed. */
 export const CLIENT_AREA_MIN_SECRET_LENGTH = 32;
 
+export function clientAreaHostname(value: string): string | null {
+  if (!/^[a-z0-9.-]+(?::[0-9]+)?$/i.test(value)) return null;
+  const host = value
+    .toLowerCase()
+    .replace(/:[0-9]+$/, '')
+    .replace(/\.$/, '');
+  return host.length <= 253 &&
+    host.includes('.') &&
+    host
+      .split('.')
+      .every(
+        (part) =>
+          /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(part) && part.length <= 63,
+      )
+    ? host
+    : null;
+}
+
+/**
+ * Required CNAME destination advertised to agencies and used by verification.
+ * An explicit edge hostname wins; otherwise the Client Area frontend hostname
+ * is the canonical destination already configured by the deployment.
+ */
+export function resolveClientAreaDomainCname(
+  config: Pick<ConfigService, 'get'>,
+): string | null {
+  const explicit = clientAreaHostname(
+    config.get<string>('CLIENT_AREA_DOMAIN_CNAME')?.trim() ?? '',
+  );
+  if (explicit) return explicit;
+
+  const frontendUrl = config.get<string>('CLIENT_AREA_FRONTEND_URL')?.trim();
+  if (!frontendUrl) return null;
+
+  try {
+    const url = new URL(frontendUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return clientAreaHostname(url.hostname);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The Client Area signing secret, or `null` when the surface must stay closed.
  *
