@@ -1,6 +1,7 @@
 import { ClientAreaCompanyHooksRegistry } from '../client-area-company-hooks.registry';
 import { clientAreaUiPermissions } from '../client-area-agency-permission-projection';
 import { randomBytes } from 'node:crypto';
+import { resolve4, resolve6 } from 'node:dns/promises';
 import { ClientAreaMemberAccessService } from './client-area-member-access.service';
 import { permissionsForMemberAccess } from '../client-area-permissions.catalog';
 import { Optional } from '@nestjs/common';
@@ -200,6 +201,10 @@ export class ClientAreaManagementService {
         domainVerifiedAt:
           customDomain === current.customDomain && domainMode === 'custom'
             ? current.domainVerifiedAt
+            : null,
+        domainTlsActiveAt:
+          customDomain === current.customDomain && domainMode === 'custom'
+            ? current.domainTlsActiveAt
             : null,
         domainVerificationStatus:
           domainMode === 'custom' && customDomain !== current.customDomain
@@ -606,16 +611,24 @@ export class ClientAreaManagementService {
   }
 
   async overview(tenantId: string, workspaceId: string) {
-    const [settings, companies] = await Promise.all([
+    const cnameTarget = resolveClientAreaDomainCname(this.config);
+    // The apex alternative to the CNAME: the target's own addresses, read
+    // live so the instructions follow the platform DNS instead of a copy.
+    const none = () => [] as string[];
+    const [settings, companies, aTargets, aaaaTargets] = await Promise.all([
       this.getSettings(tenantId, workspaceId),
       this.listCompanies(tenantId, workspaceId),
+      cnameTarget ? resolve4(cnameTarget).catch(none) : none(),
+      cnameTarget ? resolve6(cnameTarget).catch(none) : none(),
     ]);
     const enabled = companies.filter((company) => company.enabled);
     return {
       platformEnabled: isClientAreaEnabled(this.config),
       settings,
       domainDns: {
-        cnameTarget: resolveClientAreaDomainCname(this.config),
+        cnameTarget,
+        aTargets,
+        aaaaTargets,
         ttl: 300,
       },
       metrics: {

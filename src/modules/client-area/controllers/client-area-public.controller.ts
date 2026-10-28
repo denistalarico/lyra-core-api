@@ -1,4 +1,12 @@
-import { Controller, Get, Header, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Header,
+  NotFoundException,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { ClientAreaEnabledGuard } from '../guards/client-area.guards';
 import { ClientAreaPublicBrandingService } from '../services/client-area-public-branding.service';
@@ -26,5 +34,22 @@ export class ClientAreaPublicController {
       slug,
       typeof webHost === 'string' ? webHost : (req.headers.host ?? ''),
     );
+  }
+  /** Caddy `on_demand_tls.ask` (appends `?domain=`): 200 issues, 404 refuses. */
+  @Get('tls-allowed')
+  @Header('Cache-Control', 'no-store')
+  async tlsAllowed(@Query('domain') domain: unknown, @Req() req: Request) {
+    const forwarded = Boolean(
+      req.headers['x-forwarded-for'] ?? req.headers['x-real-ip'],
+    );
+    if (
+      !(await this.branding.isTlsAllowed(
+        domain,
+        req.socket.remoteAddress,
+        forwarded,
+      ))
+    )
+      throw new NotFoundException();
+    return { allowed: true };
   }
 }

@@ -93,8 +93,10 @@ describe('CA8 public branding and DNS', () => {
     jest
       .spyOn(service, 'lookupCname')
       .mockResolvedValue(['agency.example.test.']);
+    jest.spyOn(service, 'probeTls').mockResolvedValue(false);
     await expect(service.verify('t', 'w')).resolves.toMatchObject({
       status: 'verified',
+      pointedBy: 'cname',
     });
     expect(await service.isAllowedOrigin('https://clients.example.test')).toBe(
       true,
@@ -111,6 +113,125 @@ describe('CA8 public branding and DNS', () => {
         domainVerifiedAt: null,
       }),
     );
+  });
+  function mockDns(
+    service: ClientAreaPublicBrandingService,
+    records: Record<string, Record<string, string[]>>,
+  ) {
+    const lookup = (kind: string) => (host: string) =>
+      records[kind]?.[host]
+        ? Promise.resolve(records[kind][host])
+        : Promise.reject(new Error('ENODATA'));
+    jest.spyOn(service, 'lookupTxt').mockResolvedValue([['secret']]);
+    jest.spyOn(service, 'lookupCname').mockImplementation(lookup('cname'));
+    jest.spyOn(service, 'lookupA').mockImplementation(lookup('a'));
+    jest.spyOn(service, 'lookupAaaa').mockImplementation(lookup('aaaa'));
+  }
+  it('verifies an apex domain by A records that all belong to the target', async () => {
+    const { service } = setup();
+    jest.spyOn(service, 'probeTls').mockResolvedValue(false);
+    mockDns(service, {
+      a: {
+        'clients.example.test': ['82.29.61.35'],
+        'agency.example.test': ['82.29.61.35'],
+      },
+    });
+    await expect(service.verify('t', 'w')).resolves.toMatchObject({
+      status: 'verified',
+      pointedBy: 'a',
+    });
+  });
+  it('refuses A records with a stray address or a foreign AAAA', async () => {
+    const { service } = setup();
+    mockDns(service, {
+      a: {
+        'clients.example.test': ['82.29.61.35', '10.0.0.9'],
+        'agency.example.test': ['82.29.61.35'],
+      },
+    });
+    await expect(service.verify('t', 'w')).resolves.toMatchObject({
+      status: 'failed',
+    });
+    mockDns(service, {
+      a: {
+        'clients.example.test': ['82.29.61.35'],
+        'agency.example.test': ['82.29.61.35'],
+      },
+      aaaa: { 'clients.example.test': ['2001:db8::1'] },
+    });
+    await expect(service.verify('t', 'w')).resolves.toMatchObject({
+      status: 'failed',
+    });
+  });
+  it('probes HTTPS only after the row is verified and records when it went live', async () => {
+    const { repo, service } = setup();
+    const order: string[] = [];
+    repo.update.mockImplementation((_where: unknown, patch: object) => {
+      order.push(Object.keys(patch).join(','));
+      return Promise.resolve({ affected: 1 });
+    });
+    jest.spyOn(service, 'probeTls').mockImplementation(() => {
+      order.push('probe');
+      return Promise.resolve(true);
+    });
+    mockDns(service, {
+      cname: { 'clients.example.test': ['agency.example.test'] },
+    });
+    await expect(service.verify('t', 'w')).resolves.toMatchObject({
+      status: 'verified',
+      tlsActive: true,
+    });
+    expect(order).toEqual([
+      'domainVerificationStatus,domainVerifiedAt',
+      'probe',
+      'domainTlsActiveAt',
+    ]);
+    expect(repo.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ customDomain: 'clients.example.test' }),
+      { domainTlsActiveAt: expect.any(Date) as unknown },
+    );
+  });
+  it('clears the TLS status when the domain stops verifying', async () => {
+    const { repo, service } = setup();
+    jest.spyOn(service, 'lookupTxt').mockRejectedValue(new Error('NXDOMAIN'));
+    await service.verify('t', 'w');
+    expect(repo.update).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        domainVerificationStatus: 'failed',
+        domainTlsActiveAt: null,
+      }),
+    );
+  });
+  it('allows on-demand TLS only from loopback, unforwarded, for a fresh verified domain', async () => {
+    const { repo, service } = setup();
+    expect(
+      await service.isTlsAllowed('Clients.Example.Test', '127.0.0.1', false),
+    ).toBe(true);
+    expect(repo.findOne).toHaveBeenLastCalledWith({
+      where: expect.objectContaining({
+        customDomain: 'clients.example.test',
+        domainVerificationStatus: 'verified',
+      }) as unknown,
+    });
+    expect(
+      await service.isTlsAllowed('clients.example.test', '127.0.0.1', true),
+    ).toBe(false);
+    expect(
+      await service.isTlsAllowed('clients.example.test', '203.0.113.7', false),
+    ).toBe(false);
+    expect(await service.isTlsAllowed('a/b', '::1', false)).toBe(false);
+    repo.findOne.mockResolvedValueOnce({
+      ...settings,
+      domainVerifiedAt: new Date(0),
+    });
+    expect(
+      await service.isTlsAllowed('clients.example.test', '::1', false),
+    ).toBe(false);
+    repo.findOne.mockResolvedValueOnce(null);
+    expect(
+      await service.isTlsAllowed('unknown.example.test', '::1', false),
+    ).toBe(false);
   });
   it('generates a named public slug without serializing internal scope IDs', async () => {
     const repo = {

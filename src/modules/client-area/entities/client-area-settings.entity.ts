@@ -30,6 +30,9 @@ export class ClientAreaSettingsEntity {
   domainVerificationToken!: string | null;
   @Column({ name: 'domain_verified_at', type: 'timestamptz', nullable: true })
   domainVerifiedAt!: Date | null;
+  /** First successful HTTPS probe of the verified domain; null until the edge serves it. */
+  @Column({ name: 'domain_tls_active_at', type: 'timestamptz', nullable: true })
+  domainTlsActiveAt!: Date | null;
   @Column({ name: 'tenant_id', type: 'uuid' }) tenantId!: string;
   @Column({ name: 'workspace_id', type: 'uuid' }) workspaceId!: string;
   @Column({ type: 'boolean', default: false }) enabled!: boolean;
