@@ -2,11 +2,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClientAreaSettingsEntity } from '../entities/client-area-settings.entity';
 import { emailFrontendUrl } from '../../email/email-frontend-url';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AgencyIdentityCredentialsService } from '../../agency/agency-identity-credentials.service';
 import { EmailService } from '../../email/email.service';
-import { renderTransactionalEmail } from '../../email/templates/transactional-email.template';
+import {
+  renderTransactionalEmail,
+  type TransactionalEmailBrand,
+} from '../../email/templates/transactional-email.template';
+import type { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-auth.entities';
+import { ClientAreaManagementService } from './client-area-management.service';
 import type { ClientAreaRole } from '../client-area.types';
 
 export const CLIENT_AREA_ROLE_LABELS: Readonly<Record<ClientAreaRole, string>> =
@@ -50,6 +55,7 @@ export function renderClientAreaInvitationEmail(input: {
   url: string;
   expiresAt: Date;
   productName: string;
+  brand?: TransactionalEmailBrand;
 }) {
   const company = escapeHtml(input.companyDisplayName);
   const expires = input.expiresAt.toLocaleDateString('pt-BR', {
@@ -63,6 +69,7 @@ export function renderClientAreaInvitationEmail(input: {
     secondaryText: `O convite vale até ${expires}. Se o botão não funcionar, copie este endereço no navegador:<br/>${escapeHtml(input.url)}`,
     footerText:
       'Se você não esperava este convite, ignore este e-mail. Nenhum acesso é criado sem a sua confirmação.',
+    brand: input.brand,
   });
 
   return {
@@ -76,6 +83,7 @@ export function renderClientAreaResetEmail(input: {
   url: string;
   ttlMinutes: number;
   productName: string;
+  brand?: TransactionalEmailBrand;
 }) {
   const { html, text } = renderTransactionalEmail({
     title: 'Redefinição de senha',
@@ -85,6 +93,7 @@ export function renderClientAreaResetEmail(input: {
     secondaryText: `Este link expira em ${input.ttlMinutes} minutos e só pode ser usado uma vez.`,
     footerText:
       'Se você não solicitou a redefinição, ignore este e-mail: sua senha continua a mesma.',
+    brand: input.brand,
   });
 
   return {
@@ -108,7 +117,25 @@ export class ClientAreaEmailService {
     private readonly config: ConfigService,
     @InjectRepository(ClientAreaSettingsEntity, 'agency')
     private readonly settingsRepo: Repository<ClientAreaSettingsEntity>,
+    @Optional() private readonly management?: ClientAreaManagementService,
   ) {}
+
+  /** Tenant logo when configured; otherwise the template keeps Lyra's. */
+  brand(tenantId: string, workspaceId?: string) {
+    return this.management?.emailBrand(tenantId, workspaceId);
+  }
+
+  async sendTwoFactorCode(
+    identity: AgencyUserSecuritySettingsEntity,
+    productName: string,
+  ) {
+    await this.credentials.sendEmailTwoFactorCode(
+      identity,
+      'login',
+      productName,
+      await this.brand(identity.tenantId),
+    );
+  }
 
   async sendInvitation(input: {
     tenantId: string;
@@ -132,6 +159,7 @@ export class ClientAreaEmailService {
       ),
       expiresAt: input.expiresAt,
       productName: this.productName(),
+      brand: await this.brand(input.tenantId, input.workspaceId),
     });
 
     await this.emailService.sendEmail({
@@ -162,6 +190,7 @@ export class ClientAreaEmailService {
       ),
       ttlMinutes: input.ttlMinutes,
       productName: this.productName(),
+      brand: await this.brand(input.tenantId, settings?.workspaceId),
     });
 
     await this.emailService.sendEmail({

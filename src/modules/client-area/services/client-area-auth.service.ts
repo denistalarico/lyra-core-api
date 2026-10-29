@@ -261,6 +261,7 @@ export class ClientAreaAuthService {
       identity,
       'login',
       this.getProductName(),
+      await this.management.emailBrand(identity.tenantId),
     );
 
     return { success: true };
@@ -435,6 +436,7 @@ export class ClientAreaAuthService {
         identity,
         'login',
         this.getProductName(),
+        await this.management.emailBrand(identity.tenantId),
       );
     }
 

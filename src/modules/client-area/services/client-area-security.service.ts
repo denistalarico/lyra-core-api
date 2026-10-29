@@ -3,11 +3,13 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, IsNull, Not } from 'typeorm';
 import { AgencyIdentityCredentialsService } from '../../agency/agency-identity-credentials.service';
+import { ClientAreaManagementService } from './client-area-management.service';
 import {
   AgencyUserLoginEventEntity,
   AgencyUserSecuritySettingsEntity,
@@ -63,6 +65,7 @@ export class ClientAreaSecurityService {
   constructor(
     @InjectDataSource('agency') private readonly db: DataSource,
     private readonly credentials: AgencyIdentityCredentialsService,
+    @Optional() private readonly management?: ClientAreaManagementService,
   ) {}
 
   private scope(identity: ClientAreaIdentity) {
@@ -156,6 +159,7 @@ export class ClientAreaSecurityService {
       row,
       'login',
       'Area do Cliente',
+      await this.management?.emailBrand(row.tenantId),
     );
     return { success: true };
   }

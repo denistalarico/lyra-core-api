@@ -1047,11 +1047,7 @@ export class ClientAreaInvitationService {
       throw this.invalidTwoFactorToken();
     }
 
-    await this.credentials.sendEmailTwoFactorCode(
-      identity,
-      'login',
-      this.auth.getProductName(),
-    );
+    await this.emails.sendTwoFactorCode(identity, this.auth.getProductName());
 
     return { success: true };
   }
@@ -1707,11 +1703,7 @@ export class ClientAreaInvitationService {
     const method = this.credentials.getTwoFactorMethod(identity);
 
     if (method === 'email') {
-      await this.credentials.sendEmailTwoFactorCode(
-        identity,
-        'login',
-        this.auth.getProductName(),
-      );
+      await this.emails.sendTwoFactorCode(identity, this.auth.getProductName());
     }
 
     const payload: ClientAreaInvitationTwoFactorTokenPayload = {

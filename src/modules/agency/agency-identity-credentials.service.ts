@@ -15,7 +15,10 @@ import {
   EmailService,
   type EmailTransportOverride,
 } from '../email/email.service';
-import { renderTransactionalEmail } from '../email/templates/transactional-email.template';
+import {
+  renderTransactionalEmail,
+  type TransactionalEmailBrand,
+} from '../email/templates/transactional-email.template';
 import {
   AgencyEmailTwoFactorCodeEntity,
   AgencyUserLoginEventEntity,
@@ -175,6 +178,7 @@ export class AgencyIdentityCredentialsService {
     security: AgencyUserSecuritySettingsEntity,
     purpose: 'login' | 'setup',
     productName: string,
+    brand?: TransactionalEmailBrand,
   ) {
     const code = String(randomInt(100000, 999999));
 
@@ -194,6 +198,7 @@ export class AgencyIdentityCredentialsService {
       secondaryText: `<strong>Codigo:</strong> ${code}`,
       footerText:
         'Este codigo expira em 5 minutos. Se voce nao solicitou este acesso, ignore este e-mail.',
+      brand,
     });
 
     await this.emailService.sendEmail({

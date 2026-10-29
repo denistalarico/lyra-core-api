@@ -68,9 +68,31 @@ export const CLIENT_AREA_BRAND_ASSET_SLOTS = [
   'logo_light',
   'logo_dark',
   'login_image',
+  'mark_light',
+  'mark_dark',
+  'favicon',
 ] as const;
 export type ClientAreaBrandAssetSlot =
   (typeof CLIENT_AREA_BRAND_ASSET_SLOTS)[number];
+const BRAND_ASSET_COLUMNS = {
+  logo_light: 'logoLightUrl',
+  logo_dark: 'logoDarkUrl',
+  login_image: 'loginImageUrl',
+  mark_light: 'markLightUrl',
+  mark_dark: 'markDarkUrl',
+  favicon: 'faviconUrl',
+} as const satisfies Record<
+  ClientAreaBrandAssetSlot,
+  keyof ClientAreaSettingsEntity
+>;
+const BRAND_ASSET_MAX_DIMENSION: Record<ClientAreaBrandAssetSlot, number> = {
+  logo_light: 1200,
+  logo_dark: 1200,
+  login_image: 2400,
+  mark_light: 512,
+  mark_dark: 512,
+  favicon: 256,
+};
 
 function trimOrNull(value: string | null | undefined) {
   return value?.trim() || null;
@@ -237,16 +259,13 @@ export class ClientAreaManagementService {
     const stored = await this.filesService.uploadImageAsset({
       file,
       path: `tenants/${tenantId}/client-area/${slot}-${Date.now()}.webp`,
-      maxDimension: slot === 'login_image' ? 2400 : 1200,
+      maxDimension: BRAND_ASSET_MAX_DIMENSION[slot],
     });
-    const patch =
-      slot === 'logo_light'
-        ? { logoLightUrl: stored.url }
-        : slot === 'logo_dark'
-          ? { logoDarkUrl: stored.url }
-          : { loginImageUrl: stored.url };
     await this.patchSettings(tenantId, workspaceId, {});
-    await this.settingsRepo.update({ tenantId, workspaceId }, patch);
+    await this.settingsRepo.update(
+      { tenantId, workspaceId },
+      { [BRAND_ASSET_COLUMNS[slot]]: stored.url },
+    );
     return { slot, url: stored.url };
   }
 
@@ -598,8 +617,12 @@ export class ClientAreaManagementService {
         : agency.markLightUrl,
       markDarkUrl: custom ? settings.markDarkUrl : agency.markDarkUrl,
       faviconUrl: custom ? settings.faviconUrl : agency.faviconUrl,
-      primaryColor: custom ? settings.primaryColor : agency.primaryColor,
-      secondaryColor: custom ? settings.secondaryColor : agency.secondaryColor,
+      primaryColor: custom
+        ? (settings.primaryColor ?? agency.primaryColor)
+        : agency.primaryColor,
+      secondaryColor: custom
+        ? (settings.secondaryColor ?? agency.secondaryColor)
+        : agency.secondaryColor,
       login: {
         layout: settings.loginLayout,
         heading: settings.loginHeading,
@@ -608,6 +631,36 @@ export class ClientAreaManagementService {
         imageUrl: settings.loginImageUrl ?? null,
       },
     };
+  }
+
+  /**
+   * Brand for Client Area emails: the same light logo as the login, made
+   * absolute (uploads are `/api/assets/…`). No logo → the template keeps Lyra's.
+   */
+  async emailBrand(tenantId: string, workspaceId?: string) {
+    const settings = await this.settingsRepo.findOne({
+      where: workspaceId
+        ? { tenantId, workspaceId }
+        : { tenantId, enabled: true },
+      order: { createdAt: 'ASC' },
+    });
+    if (!settings) return undefined;
+    const brand = await this.branding(tenantId, settings.workspaceId);
+    const publicApi =
+      process.env.API_PUBLIC_URL?.trim() ||
+      process.env.AGENCY_PUBLIC_API_URL?.trim() ||
+      process.env.META_WEBHOOK_CALLBACK_URL?.trim();
+    const logo = brand.logoLightUrl;
+    let logoUrl: string | null = null;
+    if (logo?.startsWith('https://')) logoUrl = logo;
+    else if (logo?.startsWith('/api/') && publicApi) {
+      try {
+        logoUrl = `${new URL(publicApi).origin}${logo}`;
+      } catch {
+        logoUrl = null;
+      }
+    }
+    return { name: brand.displayName, logoUrl };
   }
 
   async overview(tenantId: string, workspaceId: string) {

@@ -6,7 +6,18 @@ type TransactionalEmailOptions = {
   buttonUrl?: string;
   secondaryText?: string;
   footerText?: string;
+  /** White label (Client Area): tenant logo and name instead of Lyra's. */
+  brand?: TransactionalEmailBrand;
 };
+
+export type TransactionalEmailBrand = { name: string; logoUrl: string | null };
+
+const escapeAttr = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 
 function getLogoUrl() {
   const frontendUrl = emailFrontendUrl(process.env.APP_FRONTEND_URL);
@@ -15,7 +26,12 @@ function getLogoUrl() {
 }
 
 export function renderTransactionalEmail(options: TransactionalEmailOptions) {
-  const logoUrl = getLogoUrl();
+  const branded = Boolean(options.brand?.logoUrl);
+  const logoUrl = branded ? escapeAttr(options.brand!.logoUrl!) : getLogoUrl();
+  const logoAlt = branded ? escapeAttr(options.brand!.name) : 'Lyra Suite';
+  const copyright = branded
+    ? `© ${options.brand!.name}`
+    : '© Lyra Suite · Talarico Labs';
   const footer =
     options.footerText ??
     'Este é um e-mail automático de segurança da Lyra Suite. Se você não reconhece esta ação, recomendamos redefinir sua senha imediatamente.';
@@ -53,7 +69,7 @@ export function renderTransactionalEmail(options: TransactionalEmailOptions) {
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:520px;background:#ffffff;border:1px solid #E2E8F0;border-radius:16px;overflow:hidden;">
             <tr>
               <td align="center" style="padding:32px 32px 20px;">
-                <img src="${logoUrl}" alt="Lyra Suite" width="150" style="display:block;width:150px;max-width:150px;height:auto;border:0;outline:none;text-decoration:none;" />
+                <img src="${logoUrl}" alt="${logoAlt}" width="150" style="display:block;width:150px;max-width:150px;height:auto;border:0;outline:none;text-decoration:none;" />
               </td>
             </tr>
             <tr>
@@ -77,7 +93,7 @@ export function renderTransactionalEmail(options: TransactionalEmailOptions) {
             </tr>
           </table>
           <p style="margin:16px 0 0;color:#94A3B8;font-size:12px;text-align:center;">
-            © Lyra Suite · Talarico Labs
+            ${escapeAttr(copyright)}
           </p>
         </td>
       </tr>
@@ -96,7 +112,7 @@ export function renderTransactionalEmail(options: TransactionalEmailOptions) {
     '',
     footer,
     '',
-    '© Lyra Suite · Talarico Labs',
+    copyright,
   ]
     .filter(Boolean)
     .join('\n');
