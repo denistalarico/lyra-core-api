@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
 import { CrmOpportunityEntity } from '../entities/crm-opportunity.entity';
 import { CrmStageEntity } from '../entities/crm-stage.entity';
 import { CrmStageTransitionPolicyEntity } from '../entities/crm-stage-transition-policy.entity';
@@ -71,6 +72,7 @@ function policy(overrides: Record<string, unknown> = {}) {
 function harness(
   resolvedPolicy: CrmStageTransitionPolicyEntity | null,
   leadScoreState: { score: number; band: string } | null = null,
+  inboundMessageCount = 0,
 ) {
   const findOne = jest.fn().mockResolvedValue(resolvedPolicy);
   const leadScoreFindOne = jest.fn().mockResolvedValue(leadScoreState);
@@ -79,6 +81,9 @@ function harness(
       if (entity === CrmStageTransitionPolicyEntity) return { findOne };
       if (entity === CrmLeadScoreStateEntity) {
         return { findOne: leadScoreFindOne };
+      }
+      if (entity === InboxMessageEntity) {
+        return { count: jest.fn().mockResolvedValue(inboundMessageCount) };
       }
       throw new Error('Unexpected repository');
     }),
@@ -337,6 +342,112 @@ describe('CrmStageTransitionPolicyService', () => {
         missingFields: ['contactPhone'],
       },
     });
+  });
+
+  it('treats a sent D+0 follow-up as a present transition field', async () => {
+    const expected = policy({ requiredFields: ['followUp.d0'] });
+    const { service, manager } = harness(expected);
+
+    await expect(
+      service.assertTransitionAllowedWithinTransaction(
+        manager as never,
+        ctx,
+        opportunity({
+          metadata: {
+            followUp: {
+              attempts: [
+                {
+                  stepKey: 'd0',
+                  result: 'sent',
+                  channel: 'whatsapp',
+                  at: '2026-10-29T12:00:00.000Z',
+                  runId: 'run-1',
+                },
+              ],
+            },
+          },
+        }),
+        stage(),
+        { type: 'user', userId: ctx.userId },
+        'manual_stage_move',
+      ),
+    ).resolves.toBe(expected);
+  });
+
+  it('blocks an automatic move to qualification before the lead replies', async () => {
+    const expected = policy({
+      allowedActors: ['automation'],
+      reasonCodes: ['automatic_stage_advance'],
+    });
+    const { service, manager } = harness(expected, null, 0);
+
+    await expect(
+      service.assertTransitionAllowedWithinTransaction(
+        manager as never,
+        ctx,
+        opportunity({
+          contactName: 'Ada Lovelace',
+          contactPhone: '+5511999999999',
+          inboxConversationId: 'conversation-1',
+        }),
+        stage({ role: 'qualification' }),
+        { type: 'automation' },
+        'automatic_stage_advance',
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'CRM_STAGE_TRANSITION_BLOCKED',
+        reasonCode: 'lead_reply_required',
+      },
+    });
+  });
+
+  it('blocks an automatic qualification for a placeholder contact', async () => {
+    const expected = policy({
+      allowedActors: ['automation'],
+      reasonCodes: ['automatic_stage_advance'],
+    });
+    const { service, manager } = harness(expected, null, 1);
+
+    await expect(
+      service.assertTransitionAllowedWithinTransaction(
+        manager as never,
+        ctx,
+        opportunity({
+          contactName: 'Contato do WhatsApp',
+          contactPhone: '+5511999999999',
+          inboxConversationId: 'conversation-1',
+        }),
+        stage({ role: 'qualification' }),
+        { type: 'automation' },
+        'automatic_stage_advance',
+      ),
+    ).rejects.toMatchObject({
+      response: { reasonCode: 'contact_basic_data_required' },
+    });
+  });
+
+  it('allows automatic qualification after valid identity and a reply', async () => {
+    const expected = policy({
+      allowedActors: ['automation'],
+      reasonCodes: ['automatic_stage_advance'],
+    });
+    const { service, manager } = harness(expected, null, 1);
+
+    await expect(
+      service.assertTransitionAllowedWithinTransaction(
+        manager as never,
+        ctx,
+        opportunity({
+          contactName: 'Ada Lovelace',
+          contactEmail: 'ada@example.com',
+          inboxConversationId: 'conversation-1',
+        }),
+        stage({ role: 'qualification' }),
+        { type: 'automation' },
+        'automatic_stage_advance',
+      ),
+    ).resolves.toBe(expected);
   });
 
   describe('lead score qualification (Fase 1C)', () => {

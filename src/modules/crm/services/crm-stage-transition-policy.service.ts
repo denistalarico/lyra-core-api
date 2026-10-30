@@ -7,8 +7,11 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Raw } from 'typeorm';
 import { RequestContext } from '../../../common/context/request-context.interface';
+import { InboxMessageEntity } from '../../inbox/entities/inbox-message.entity';
+import { hasBasicContactData } from '../../contacts/contact-basic-data';
 import {
   isAddressableOpportunityField,
+  isFollowUpField,
   isLeadScoreField,
 } from '../catalog/crm-opportunity-field.catalog';
 import {
@@ -26,6 +29,7 @@ import {
   CrmStageTransitionPolicyEntity,
 } from '../entities/crm-stage-transition-policy.entity';
 import type { CrmCommandActor } from './crm-opportunity-command.service';
+import { readOpportunityFollowUp } from './crm-opportunity-follow-up';
 
 /**
  * The Lead Score of the opportunity under evaluation, or `null` when it was
@@ -868,6 +872,12 @@ export class CrmStageTransitionPolicyService {
         'The reason code is not allowed by the published policy.',
       );
     }
+    await this.assertAutomaticQualificationPrerequisites(
+      manager,
+      opportunity,
+      targetStage,
+      effectiveActor,
+    );
     const leadScore = this.contractReferencesLeadScore(
       policy.requiredFields,
       policy.conditionContract,
@@ -906,6 +916,51 @@ export class CrmStageTransitionPolicyService {
       });
     }
     return policy;
+  }
+
+  private async assertAutomaticQualificationPrerequisites(
+    manager: EntityManager,
+    opportunity: CrmOpportunityEntity,
+    targetStage: CrmStageEntity,
+    actor: CrmStageTransitionActor,
+  ): Promise<void> {
+    if (actor === 'human' || targetStage.role !== 'qualification') return;
+
+    if (
+      !hasBasicContactData({
+        name: opportunity.contactName,
+        phone: opportunity.contactPhone,
+        email: opportunity.contactEmail,
+      })
+    ) {
+      this.block(
+        'contact_basic_data_required',
+        'Automatic qualification requires a real name and phone or email.',
+      );
+    }
+
+    if (!opportunity.inboxConversationId) {
+      this.block(
+        'lead_reply_required',
+        'Automatic qualification requires at least one inbound reply.',
+      );
+    }
+    const inboundMessageCount = await manager
+      .getRepository(InboxMessageEntity)
+      .count({
+        where: {
+          tenantId: opportunity.tenantId,
+          workspaceId: opportunity.workspaceId,
+          conversationId: opportunity.inboxConversationId,
+          direction: 'inbound',
+        },
+      });
+    if (inboundMessageCount < 1) {
+      this.block(
+        'lead_reply_required',
+        'Automatic qualification requires at least one inbound reply.',
+      );
+    }
   }
 
   private async policy(
@@ -1083,6 +1138,12 @@ export class CrmStageTransitionPolicyService {
     // operator treats as "no value" rather than a silent zero.
     if (field === 'leadScore.band') return leadScore?.band ?? undefined;
     if (field === 'leadScore.score') return leadScore?.score ?? undefined;
+    if (isFollowUpField(field)) {
+      const stepKey = field.slice('followUp.'.length);
+      return readOpportunityFollowUp(opportunity).attempts.find(
+        (attempt) => attempt.stepKey === stepKey && attempt.result === 'sent',
+      )?.at;
+    }
     if (field.startsWith('businessContext.')) {
       return opportunity.businessContext?.[
         field.slice('businessContext.'.length)

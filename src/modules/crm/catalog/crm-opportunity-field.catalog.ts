@@ -32,6 +32,8 @@ export type CrmOpportunityFieldOrigin =
   | 'core'
   /** A qualification field declared by the active Business Mode template. */
   | 'business_mode'
+  /** A canonical follow-up attempt projected from opportunity metadata. */
+  | 'follow_up'
   /**
    * A projection of the deterministic Lead Score. Not a column: the score
    * lives in its own 1:1 table so writing it cannot look like the deal
@@ -172,6 +174,15 @@ export const CRM_CORE_OPPORTUNITY_FIELDS: readonly CrmOpportunityFieldSpec[] = [
 
 const CORE_KEYS = new Set(CRM_CORE_OPPORTUNITY_FIELDS.map((spec) => spec.key));
 
+export const CRM_FOLLOW_UP_FIELDS: readonly CrmOpportunityFieldSpec[] = [
+  followUpField('d0', 'Follow D+0'),
+  followUpField('d1', 'Follow D+1'),
+  followUpField('d3', 'Follow D+3'),
+  followUpField('d7', 'Follow D+7'),
+];
+
+const FOLLOW_UP_KEYS = new Set(CRM_FOLLOW_UP_FIELDS.map((spec) => spec.key));
+
 /** Bands the Lead Score resolves to, coldest first. Stable across versions. */
 export const CRM_LEAD_SCORE_BAND_VALUES = ['cold', 'warm', 'hot'] as const;
 
@@ -245,11 +256,16 @@ export function isLeadScoreField(key: string): boolean {
  */
 export function isAddressableOpportunityField(key: string): boolean {
   if (CORE_KEYS.has(key)) return true;
+  if (FOLLOW_UP_KEYS.has(key)) return true;
   if (LEAD_SCORE_KEYS.has(key)) return true;
   if (!key.startsWith(CRM_BUSINESS_CONTEXT_PREFIX)) return false;
   return CRM_BUSINESS_CONTEXT_KEY_PATTERN.test(
     key.slice(CRM_BUSINESS_CONTEXT_PREFIX.length),
   );
+}
+
+export function isFollowUpField(key: string): boolean {
+  return FOLLOW_UP_KEYS.has(key);
 }
 
 /** Core spec for a key, when it is one. */
@@ -324,5 +340,20 @@ function field(
     developerOnly,
     essential: false,
     ...(options ? { options } : {}),
+  };
+}
+
+function followUpField(
+  stepKey: 'd0' | 'd1' | 'd3' | 'd7',
+  label: string,
+): CrmOpportunityFieldSpec {
+  return {
+    key: `followUp.${stepKey}`,
+    label,
+    type: 'date',
+    origin: 'follow_up',
+    group: 'schedule',
+    developerOnly: false,
+    essential: false,
   };
 }

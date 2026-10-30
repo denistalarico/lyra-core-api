@@ -7,6 +7,7 @@ import { LeadFlowSettingsStatus } from '../../leadflow-settings/enums/leadflow-s
 import {
   businessModeFieldSpecs,
   CRM_CORE_OPPORTUNITY_FIELDS,
+  CRM_FOLLOW_UP_FIELDS,
   CRM_LEAD_SCORE_FIELDS,
   isAddressableOpportunityField,
   type CrmOpportunityFieldSpec,
@@ -55,7 +56,11 @@ export class CrmOpportunityFieldCatalogService {
     // Lead Score fields are real and selectable in every Business Mode: the
     // score is computed for every opportunity, so a policy may gate on it
     // regardless of which qualification fields the mode declares.
-    const core = [...CRM_CORE_OPPORTUNITY_FIELDS, ...CRM_LEAD_SCORE_FIELDS];
+    const core = [
+      ...CRM_CORE_OPPORTUNITY_FIELDS,
+      ...CRM_FOLLOW_UP_FIELDS,
+      ...CRM_LEAD_SCORE_FIELDS,
+    ];
     if (!businessModeKey) {
       return {
         businessModeKey: null,

@@ -2,6 +2,7 @@ import {
   businessModeFieldSpecs,
   coreFieldSpec,
   CRM_CORE_OPPORTUNITY_FIELDS,
+  CRM_FOLLOW_UP_FIELDS,
   isAddressableOpportunityField,
 } from './crm-opportunity-field.catalog';
 
@@ -58,6 +59,28 @@ describe('CRM opportunity field catalog', () => {
       expect(
         isAddressableOpportunityField(`businessContext.${'x'.repeat(81)}`),
       ).toBe(false);
+    });
+  });
+
+  describe('follow-up fields', () => {
+    it('offers the four canonical attempts under dates and follow-up', () => {
+      expect(
+        CRM_FOLLOW_UP_FIELDS.map(({ key, label, group }) => ({
+          key,
+          label,
+          group,
+        })),
+      ).toEqual([
+        { key: 'followUp.d0', label: 'Follow D+0', group: 'schedule' },
+        { key: 'followUp.d1', label: 'Follow D+1', group: 'schedule' },
+        { key: 'followUp.d3', label: 'Follow D+3', group: 'schedule' },
+        { key: 'followUp.d7', label: 'Follow D+7', group: 'schedule' },
+      ]);
+      expect(
+        CRM_FOLLOW_UP_FIELDS.every((field) =>
+          isAddressableOpportunityField(field.key),
+        ),
+      ).toBe(true);
     });
   });
 
