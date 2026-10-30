@@ -1,6 +1,7 @@
 import { Module, type OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AgencyUserSecuritySettingsEntity } from '../agency/entities/agency-auth.entities';
+import { AgencyUserNotificationPreferencesEntity } from '../agency/entities/agency-settings.entities';
 import { ClientAreaModule } from '../client-area/client-area.module';
 import { ClientAreaMembershipEntity } from '../client-area/entities/client-area-membership.entity';
 import { ClientConversationsModule } from '../client-conversations/client-conversations.module';
@@ -70,7 +71,11 @@ import { ClientNotificationsService } from './services/client-notifications.serv
     ClientAreaModule,
     ClientConversationsModule,
     TypeOrmModule.forFeature(
-      [ClientAreaMembershipEntity, AgencyUserSecuritySettingsEntity],
+      [
+        ClientAreaMembershipEntity,
+        AgencyUserSecuritySettingsEntity,
+        AgencyUserNotificationPreferencesEntity,
+      ],
       'agency',
     ),
   ],

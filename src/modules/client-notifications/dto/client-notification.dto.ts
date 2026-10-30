@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsObject,
@@ -54,4 +55,12 @@ export class ClientNotificationPushSubscribeDto {
 export class ClientNotificationPushUnsubscribeDto {
   @IsString()
   endpoint!: string;
+}
+
+export class ClientNotificationPreferenceUpdateDto {
+  @IsString()
+  type!: string;
+
+  @IsBoolean()
+  email!: boolean;
 }

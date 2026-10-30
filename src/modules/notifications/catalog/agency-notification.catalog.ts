@@ -962,6 +962,7 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationCategory.DEADLINE,
     NotificationRecipientStrategy.RESPONSIBLE_ROLE,
     {
+      audience: NotificationAudience.BOTH,
       selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
     },
   ),
@@ -971,6 +972,7 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationCategory.OVERDUE,
     NotificationRecipientStrategy.RESPONSIBLE_ROLE,
     {
+      audience: NotificationAudience.BOTH,
       defaultPriority: NotificationPriority.HIGH,
       selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
     },
@@ -1210,6 +1212,7 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationCategory.DEADLINE,
     NotificationRecipientStrategy.RESPONSIBLE_ROLE,
     {
+      audience: NotificationAudience.BOTH,
       selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
     },
   ),

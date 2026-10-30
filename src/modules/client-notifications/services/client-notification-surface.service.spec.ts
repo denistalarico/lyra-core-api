@@ -40,11 +40,13 @@ function build({
   memberships = [] as unknown[],
   eligible = new Set<string>(),
   emails = [] as unknown[],
+  preferences = [] as unknown[],
   modules = { approvals: true, conversations: true } as Record<string, boolean>,
 }: {
   memberships?: unknown[];
   eligible?: Set<string>;
   emails?: unknown[];
+  preferences?: unknown[];
   modules?: Record<string, boolean>;
 } = {}) {
   const membershipsRepo = {
@@ -52,6 +54,7 @@ function build({
     manager: {},
   };
   const identitiesRepo = { find: jest.fn().mockResolvedValue(emails) };
+  const preferencesRepo = { find: jest.fn().mockResolvedValue(preferences) };
   const eligibility = {
     isMembershipEligible: jest
       .fn()
@@ -66,6 +69,7 @@ function build({
   const service = new ClientNotificationSurfaceService(
     membershipsRepo as never,
     identitiesRepo as never,
+    preferencesRepo as never,
     eligibility as never,
     management as never,
   );
@@ -210,6 +214,37 @@ describe('NTF-C1 client notification audience', () => {
       userId: 'member',
       membershipId: 'membership-member',
       companyContextId: 'company-a',
+    });
+  });
+
+  it('rechecks the canonical per-type email preference while resolving', async () => {
+    const { service } = build({
+      memberships: [membership('owner', 'client_owner')],
+      eligible: new Set(['owner']),
+      emails: [{ userId: 'owner', currentEmail: 'owner@example.com' }],
+      preferences: [
+        {
+          userId: 'owner',
+          preferences: [
+            { key: 'invoice.due_soon', channels: { email: false } },
+          ],
+        },
+      ],
+      modules: { agency_billing: true },
+    });
+
+    const audience = await service.resolveAudience({
+      ...query,
+      requiredPermission: 'client_area.agency_billing.view',
+      requiredModule: 'agency_billing',
+      eventType: 'finance.invoice_due_soon',
+    });
+
+    expect(audience[0].channels).toEqual({
+      inApp: true,
+      push: true,
+      email: false,
+      whatsapp: false,
     });
   });
 

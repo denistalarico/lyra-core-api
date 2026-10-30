@@ -56,6 +56,12 @@ export type ClientNotificationRecipient = {
    * no usable address, which skips the email channel without skipping in-app.
    */
   email: string | null;
+  channels?: {
+    inApp: true;
+    push: boolean;
+    email: boolean;
+    whatsapp: false;
+  };
 };
 
 export type ClientNotificationAudienceQuery = {
@@ -69,6 +75,8 @@ export type ClientNotificationAudienceQuery = {
   requiredPermission: string;
   /** The Client Area module that must be enabled for the company.  */
   requiredModule: string;
+  /** Domain event resolved through the Client Area notification catalog. */
+  eventType?: string;
 };
 
 export type ClientNotificationSurface = {

@@ -1,6 +1,7 @@
 import { QueryFailedError } from 'typeorm';
 import {
   ClientAgencyBillingNotificationsService,
+  invoiceDaysUntilDue,
   renewalUpcomingBody,
 } from './client-agency-billing-notifications.service';
 import { FinanceInvoice } from '../finance/entities';
@@ -19,6 +20,10 @@ const company = {
   ownerSince: new Date('2026-01-01'),
 };
 describe('CA9 billing notices', () => {
+  it('detects the exact D-3 invoice window without time-of-day drift', () => {
+    expect(invoiceDaysUntilDue('2026-11-04', '2026-11-01')).toBe(3);
+    expect(invoiceDaysUntilDue('2026-10-31', '2026-11-01')).toBe(-1);
+  });
   it('reserves the audience permission for Owner and uses separate automatic-renewal copy', () => {
     expect(
       permissionsForClientAreaRole('client_owner').has(
@@ -46,6 +51,9 @@ describe('CA9 billing notices', () => {
   it('emits stable source IDs per company, only signed renewals and issued invoices, through NTF-C1', async () => {
     const date = new Date(),
       today = contractToday(date);
+    const dueSoon = new Date(`${today}T12:00:00Z`);
+    dueSoon.setUTCDate(dueSoon.getUTCDate() + 3);
+    const dueSoonDate = dueSoon.toISOString().slice(0, 10);
     const record = {
       id: 'contract',
       title: 'Signed',
@@ -64,6 +72,15 @@ describe('CA9 billing notices', () => {
         clientContract: { manual: { autoRenewal: true } },
       },
       variablesData: {},
+    };
+    const pendingRecord = {
+      ...record,
+      id: 'contract-pending',
+      title: 'Pending',
+      status: 'pending_signature',
+      signedAt: null,
+      parentContractId: null,
+      metadata: {},
     };
     const qb: Record<string, unknown> = {};
     for (const key of [
@@ -88,13 +105,15 @@ describe('CA9 billing notices', () => {
                     status: 'issued',
                     issuedAt: date,
                     invoiceNumber: '1',
+                    dueDate: dueSoonDate,
+                    balanceDue: '100.00',
                   },
                   { id: 'draft', status: 'draft', issuedAt: date },
                 ]),
             }
           : entity === ContractRecord
             ? {
-                find: () => Promise.resolve([record]),
+                find: () => Promise.resolve([record, pendingRecord]),
                 createQueryBuilder: () => qb,
               }
             : entity === ContractDefaults
@@ -142,14 +161,16 @@ describe('CA9 billing notices', () => {
           payload: object;
         },
     );
-    expect(events.slice(0, 4).map((event) => event.eventType)).toEqual([
+    expect(events.slice(0, 6).map((event) => event.eventType)).toEqual([
       'agency.invoice.issued',
+      'finance.invoice_due_soon',
       'agency.contract.document_available',
+      'contract.signature_reminder_due',
       'agency.contract.renewed',
       'agency.contract.renewal_upcoming',
     ]);
-    expect(events.slice(0, 4).map((event) => event.eventId)).toEqual(
-      events.slice(4).map((event) => event.eventId),
+    expect(events.slice(0, 6).map((event) => event.eventId)).toEqual(
+      events.slice(6).map((event) => event.eventId),
     );
     for (const event of events) {
       expect(event.clientAudience.requiredPermission).toBe(

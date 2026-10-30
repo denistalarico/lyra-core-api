@@ -1,7 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NotificationRecipientEntity } from '../../notifications/entities';
+import { AgencyUserNotificationPreferencesEntity } from '../../agency/entities/agency-settings.entities';
+import {
+  CLIENT_NOTIFICATION_CATALOG,
+  clientNotificationDefinition,
+  clientNotificationDefinitionForEvent,
+  type ClientNotificationType,
+} from '../client-notification-catalog';
 import {
   NotificationDeliveryChannel,
   NotificationDeliveryStatus,
@@ -25,7 +36,7 @@ export type ClientNotificationReader = {
 };
 
 export type ClientNotificationListResponse = {
-  items: ClientNotificationItem[];
+  items: Array<ClientNotificationItem & { type: string }>;
   nextCursor: string | null;
   hasMore: boolean;
 };
@@ -60,7 +71,70 @@ export class ClientNotificationsService {
   constructor(
     @InjectRepository(NotificationRecipientEntity, AGENCY_CONNECTION)
     private readonly recipients: Repository<NotificationRecipientEntity>,
+    @InjectRepository(
+      AgencyUserNotificationPreferencesEntity,
+      AGENCY_CONNECTION,
+    )
+    private readonly preferencesRepo: Repository<AgencyUserNotificationPreferencesEntity>,
   ) {}
+
+  async preferences(reader: ClientNotificationReader) {
+    const row = await this.preferencesRepo.findOne({
+      where: { tenantId: reader.tenantId, userId: reader.userId },
+    });
+    const stored = new Map(
+      (row?.preferences ?? []).map((item) => [String(item.key ?? ''), item]),
+    );
+
+    return {
+      items: Object.values(CLIENT_NOTIFICATION_CATALOG).map((definition) => {
+        const preference = stored.get(definition.type) as
+          | { channels?: { email?: boolean } }
+          | undefined;
+        return {
+          type: definition.type,
+          email: preference?.channels?.email ?? true,
+        };
+      }),
+    };
+  }
+
+  async updatePreference(
+    reader: ClientNotificationReader,
+    input: { type: string; email: boolean },
+  ) {
+    const definition = clientNotificationDefinition(input.type);
+    if (!definition) {
+      throw new BadRequestException({
+        code: 'client_area_invalid_notification_preference',
+        message: 'Tipo de notificação inválido.',
+      });
+    }
+
+    let row = await this.preferencesRepo.findOne({
+      where: { tenantId: reader.tenantId, userId: reader.userId },
+    });
+    row ??= this.preferencesRepo.create({
+      tenantId: reader.tenantId,
+      userId: reader.userId,
+      preferences: [],
+    });
+    const next = row.preferences.filter(
+      (preference) => preference.key !== definition.type,
+    );
+    next.push({
+      key: definition.type satisfies ClientNotificationType,
+      channels: {
+        app: true,
+        push: true,
+        email: input.email,
+        whatsapp: false,
+      },
+    });
+    row.preferences = next;
+    await this.preferencesRepo.save(row);
+    return { type: definition.type, email: input.email };
+  }
 
   async list(
     reader: ClientNotificationReader,
@@ -129,7 +203,7 @@ export class ClientNotificationsService {
   async markSeen(
     reader: ClientNotificationReader,
     notificationId: string,
-  ): Promise<ClientNotificationItem> {
+  ): Promise<ClientNotificationItem & { type: string }> {
     const recipient = await this.findOrFail(reader, notificationId);
     if (!recipient.seenAt) {
       recipient.seenAt = new Date();
@@ -147,7 +221,7 @@ export class ClientNotificationsService {
   async markRead(
     reader: ClientNotificationReader,
     notificationId: string,
-  ): Promise<ClientNotificationItem> {
+  ): Promise<ClientNotificationItem & { type: string }> {
     const recipient = await this.findOrFail(reader, notificationId);
     const now = new Date();
     recipient.seenAt ??= now;
@@ -159,7 +233,7 @@ export class ClientNotificationsService {
   async archive(
     reader: ClientNotificationReader,
     notificationId: string,
-  ): Promise<ClientNotificationItem> {
+  ): Promise<ClientNotificationItem & { type: string }> {
     const recipient = await this.findOrFail(reader, notificationId);
     const now = new Date();
     recipient.seenAt ??= now;
@@ -252,21 +326,32 @@ export class ClientNotificationsService {
    */
   private project(
     recipient: NotificationRecipientEntity,
-  ): ClientNotificationItem[] {
+  ): Array<ClientNotificationItem & { type: string }> {
     const companyContextId = companyContextIdOf(recipient.notification);
-    return companyContextId
-      ? [toClientNotificationItem(recipient, companyContextId)]
-      : [];
+    return companyContextId ? [this.projectItem(recipient, companyContextId)] : [];
   }
 
   private projectOrFail(
     recipient: NotificationRecipientEntity,
-  ): ClientNotificationItem {
+  ): ClientNotificationItem & { type: string } {
     const companyContextId = companyContextIdOf(recipient.notification);
     if (!companyContextId) {
       throw new NotFoundException('Notification not found.');
     }
-    return toClientNotificationItem(recipient, companyContextId);
+    return this.projectItem(recipient, companyContextId);
+  }
+
+  private projectItem(
+    recipient: NotificationRecipientEntity,
+    companyContextId: string,
+  ): ClientNotificationItem & { type: string } {
+    return {
+      ...toClientNotificationItem(recipient, companyContextId),
+      type:
+        clientNotificationDefinitionForEvent(
+          recipient.notification.eventType,
+        )?.type ?? 'system',
+    };
   }
 
   private encodeCursor(payload: { createdAt: string; id: string }): string {

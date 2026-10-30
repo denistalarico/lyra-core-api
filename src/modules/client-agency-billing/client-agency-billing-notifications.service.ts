@@ -15,6 +15,7 @@ import {
   ContractDocument,
 } from '../contracts/entities';
 import { ContractTargetType } from '../contracts/enums';
+import { ContractStatus } from '../contracts/enums';
 import { readClientContractTerms } from '../contracts/contract-term-reader';
 import { isSignedContract } from '../contracts/contract-term';
 import { NotificationEventProcessorService } from '../notifications/services/notification-event-processor.service';
@@ -35,6 +36,21 @@ export function renewalUpcomingBody(autoRenewal: boolean, validUntil: string) {
   return autoRenewal
     ? `Seu contrato será renovado automaticamente em ${validUntil}.`
     : `Seu contrato vence em ${validUntil}. Entre em contato com a agência para renovar.`;
+}
+
+function dateOnlyInSaoPaulo(value = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(value);
+}
+
+export function invoiceDaysUntilDue(dueDate: string, today: string) {
+  const due = Date.parse(`${dueDate}T12:00:00Z`);
+  const base = Date.parse(`${today}T12:00:00Z`);
+  return Math.round((due - base) / 86_400_000);
 }
 @Injectable()
 export class ClientAgencyBillingNotificationsService {
@@ -77,7 +93,8 @@ export class ClientAgencyBillingNotificationsService {
     const invoices = await this.db
       .getRepository(FinanceInvoice)
       .find({ where: { ...scope, customerId: In(customers) } });
-    for (const invoice of invoices)
+    const today = dateOnlyInSaoPaulo();
+    for (const invoice of invoices) {
       if (
         invoice.status !== FinanceInvoiceStatus.Draft &&
         invoice.issuedAt &&
@@ -91,6 +108,36 @@ export class ClientAgencyBillingNotificationsService {
           `A fatura ${invoice.invoiceNumber} está disponível.`,
           invoice.issuedAt,
         );
+      const open = ![
+        FinanceInvoiceStatus.Draft,
+        FinanceInvoiceStatus.Paid,
+        FinanceInvoiceStatus.Cancelled,
+        FinanceInvoiceStatus.Void,
+      ].includes(invoice.status);
+      if (open && invoice.dueDate && Number(invoice.balanceDue) > 0) {
+        const daysUntilDue = invoiceDaysUntilDue(invoice.dueDate, today);
+        if (daysUntilDue === 3)
+          await this.publish(
+            company,
+            'finance.invoice_due_soon',
+            `${invoice.id}:${invoice.dueDate}`,
+            'Fatura perto do vencimento',
+            `A fatura ${invoice.invoiceNumber} vence em 3 dias.`,
+            new Date(),
+            `/finance/invoices/${invoice.id}`,
+          );
+        if (daysUntilDue < 0 || invoice.status === FinanceInvoiceStatus.Overdue)
+          await this.publish(
+            company,
+            'finance.invoice_overdue',
+            `${invoice.id}:${invoice.dueDate}`,
+            'Fatura vencida',
+            `A fatura ${invoice.invoiceNumber} está vencida.`,
+            new Date(),
+            `/finance/invoices/${invoice.id}`,
+          );
+      }
+    }
     const records = await this.db.getRepository(ContractRecord).find({
       where: {
         ...scope,
@@ -119,6 +166,25 @@ export class ClientAgencyBillingNotificationsService {
           'Novo documento disponível',
           'Um documento assinado do seu contrato está disponível.',
           doc.createdAt,
+        );
+    for (const record of records)
+      if (
+        [
+          ContractStatus.PendingSignature,
+          ContractStatus.SentForSignature,
+          ContractStatus.WaitingManualSignature,
+          ContractStatus.WaitingDigitalSignature,
+          ContractStatus.PartiallySigned,
+        ].includes(record.status)
+      )
+        await this.publish(
+          company,
+          'contract.signature_reminder_due',
+          `${record.id}:${record.status}`,
+          'Assinatura pendente',
+          `O contrato "${record.title}" ainda precisa de assinatura.`,
+          new Date(),
+          `/clients/${company.agencyClientId}?tab=contract`,
         );
     for (const record of records)
       if (
@@ -171,6 +237,7 @@ export class ClientAgencyBillingNotificationsService {
     title: string,
     body: string,
     occurredAt: Date,
+    agencyActionUrl?: string,
   ) {
     try {
       return await this.processor.process({
@@ -192,7 +259,12 @@ export class ClientAgencyBillingNotificationsService {
           title,
           body,
         },
-        payload: { title, body, deliveryChannels: ['in_app', 'email'] },
+        payload: {
+          title,
+          body,
+          ...(agencyActionUrl ? { actionUrl: agencyActionUrl } : {}),
+          deliveryChannels: ['in_app', 'email'],
+        },
       });
     } catch (error) {
       const cause =

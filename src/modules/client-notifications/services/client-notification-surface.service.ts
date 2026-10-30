@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-auth.entities';
+import { AgencyUserNotificationPreferencesEntity } from '../../agency/entities/agency-settings.entities';
 import { permissionsForClientAreaRole } from '../../client-area/client-area-permissions.catalog';
 import {
   isClientAreaRole,
@@ -16,6 +17,7 @@ import type {
   ClientNotificationRecipient,
   ClientNotificationSurface,
 } from '../../notifications/ports/client-notification-surface.port';
+import { clientNotificationDefinitionForEvent } from '../client-notification-catalog';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -56,6 +58,11 @@ export class ClientNotificationSurfaceService implements ClientNotificationSurfa
     private readonly memberships: Repository<ClientAreaMembershipEntity>,
     @InjectRepository(AgencyUserSecuritySettingsEntity, AGENCY_CONNECTION)
     private readonly identities: Repository<AgencyUserSecuritySettingsEntity>,
+    @InjectRepository(
+      AgencyUserNotificationPreferencesEntity,
+      AGENCY_CONNECTION,
+    )
+    private readonly preferences: Repository<AgencyUserNotificationPreferencesEntity>,
     private readonly eligibility: ClientAreaEligibilityService,
     private readonly management: ClientAreaManagementService,
   ) {}
@@ -106,11 +113,22 @@ export class ClientNotificationSurfaceService implements ClientNotificationSurfa
       eligible.map((membership) => membership.userId),
     );
 
+    const channelPreferences = await this.resolveChannelPreferences(
+      query,
+      eligible.map((membership) => membership.userId),
+    );
+
     return eligible.map((membership) => ({
       userId: membership.userId,
       membershipId: membership.id,
       companyContextId: membership.companyContextId,
       email: emails.get(membership.userId) ?? null,
+      channels: channelPreferences.get(membership.userId) ?? {
+        inApp: true,
+        push: true,
+        email: true,
+        whatsapp: false,
+      },
     }));
   }
 
@@ -188,6 +206,37 @@ export class ClientNotificationSurfaceService implements ClientNotificationSurfa
       rows
         .filter((row) => row.currentEmail?.trim())
         .map((row) => [row.userId, row.currentEmail.trim()]),
+    );
+  }
+
+  private async resolveChannelPreferences(
+    query: ClientNotificationAudienceQuery,
+    userIds: string[],
+  ) {
+    const definition = query.eventType
+      ? clientNotificationDefinitionForEvent(query.eventType)
+      : null;
+    if (!definition || userIds.length === 0) return new Map();
+
+    const rows = await this.preferences.find({
+      where: { tenantId: query.tenantId, userId: In(userIds) },
+    });
+    return new Map(
+      userIds.map((userId) => {
+        const row = rows.find((candidate) => candidate.userId === userId);
+        const stored = row?.preferences.find(
+          (preference) => preference.key === definition.type,
+        ) as { channels?: { email?: boolean } } | undefined;
+        return [
+          userId,
+          {
+            inApp: true as const,
+            push: true,
+            email: stored?.channels?.email ?? true,
+            whatsapp: false as const,
+          },
+        ];
+      }),
     );
   }
 }

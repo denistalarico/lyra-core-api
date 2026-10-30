@@ -273,8 +273,12 @@ export class NotificationEventProcessorService {
           ] as const,
       ),
       ...(wantsChannel(NotificationDeliveryChannel.EMAIL)
-        ? [...clientEmailByUserId].map(
-            ([userId, email]) =>
+        ? [...clientEmailByUserId]
+            .filter(([userId]) =>
+              clientRecipients.find((recipient) => recipient.userId === userId)
+                ?.channels?.email !== false,
+            )
+            .map(([userId, email]) =>
               [
                 recipientKey(NotificationRecipientSurface.CLIENT_AREA, userId),
                 email,
@@ -288,7 +292,9 @@ export class NotificationEventProcessorService {
         recipientKey(NotificationRecipientSurface.AGENCY, userId),
       ),
       ...(wantsChannel(NotificationDeliveryChannel.PUSH)
-        ? clientRecipients.map((recipient) =>
+        ? clientRecipients
+            .filter((recipient) => recipient.channels?.push !== false)
+            .map((recipient) =>
             recipientKey(
               NotificationRecipientSurface.CLIENT_AREA,
               recipient.userId,
@@ -618,6 +624,7 @@ export class NotificationEventProcessorService {
         companyContextId: query.companyContextId,
         requiredPermission: query.requiredPermission,
         requiredModule: query.requiredModule,
+        eventType: event.eventType,
       });
     } catch (error) {
       this.logger.error(

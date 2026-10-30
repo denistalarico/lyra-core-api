@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Patch,
   Param,
   ParseUUIDPipe,
   Post,
@@ -20,9 +21,11 @@ import { NotificationRecipientSurface } from '../../notifications/enums';
 import {
   ClientNotificationPushSubscribeDto,
   ClientNotificationPushUnsubscribeDto,
+  ClientNotificationPreferenceUpdateDto,
   ListClientNotificationsQueryDto,
 } from '../dto/client-notification.dto';
 import { ClientNotificationsService } from '../services/client-notifications.service';
+import { CLIENT_NOTIFICATION_CATALOG } from '../client-notification-catalog';
 
 /**
  * NTF-C1 §13/§14 — the Client Area notification boundary.
@@ -79,6 +82,24 @@ export class ClientNotificationsController {
   @Get('unread-count')
   unreadCount(@Req() req: ClientAreaRequest) {
     return this.notifications.unreadCount(this.reader(req));
+  }
+
+  @Get('catalog')
+  catalog() {
+    return { items: Object.values(CLIENT_NOTIFICATION_CATALOG) };
+  }
+
+  @Get('preferences')
+  preferences(@Req() req: ClientAreaRequest) {
+    return this.notifications.preferences(this.reader(req));
+  }
+
+  @Patch('preferences')
+  updatePreference(
+    @Req() req: ClientAreaRequest,
+    @Body() dto: ClientNotificationPreferenceUpdateDto,
+  ) {
+    return this.notifications.updatePreference(this.reader(req), dto);
   }
 
   /**
