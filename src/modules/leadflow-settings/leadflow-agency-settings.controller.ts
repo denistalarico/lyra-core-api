@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   PermissionsGuard,
   RequirePermission,
@@ -27,6 +28,7 @@ export class LeadFlowAgencySettingsController {
   ) {}
 
   @Get()
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.view.admin')
   getSettings(
     @RequestContextData() ctx: RequestContext,
@@ -35,6 +37,7 @@ export class LeadFlowAgencySettingsController {
   }
 
   @Post()
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.update.admin')
   createSettings(
     @RequestContextData() ctx: RequestContext,
@@ -44,6 +47,7 @@ export class LeadFlowAgencySettingsController {
   }
 
   @Patch()
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.update.admin')
   updateSettings(
     @RequestContextData() ctx: RequestContext,
@@ -53,6 +57,7 @@ export class LeadFlowAgencySettingsController {
   }
 
   @Patch('developer-mode')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.danger_zone.manage.owner_only')
   setDeveloperMode(
     @RequestContextData() ctx: RequestContext,
@@ -66,6 +71,7 @@ export class LeadFlowAgencySettingsController {
   }
 
   @Post('validate')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.view.admin')
   validateSettings(
     @RequestContextData() ctx: RequestContext,
@@ -75,6 +81,7 @@ export class LeadFlowAgencySettingsController {
   }
 
   @Post('company-context/publish')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.update.admin')
   publishCompanyContext(
     @RequestContextData() ctx: RequestContext,
@@ -88,6 +95,7 @@ export class LeadFlowAgencySettingsController {
   }
 
   @Get('company-context/preview')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.view.admin')
   previewCompanyContext(@RequestContextData() ctx: RequestContext) {
     return this.leadFlowClientSettingsService.previewCompanyContext(ctx);

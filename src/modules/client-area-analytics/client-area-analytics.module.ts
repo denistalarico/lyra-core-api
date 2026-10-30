@@ -12,7 +12,10 @@ import { LeadFlowAnalyticsModule } from '../leadflow-analytics/leadflow-analytic
 import { ClientAreaSourcesRegistry } from './client-area-sources.registry';
 import { ClientAreaSourcesAdapter } from './client-area-sources.adapter';
 import { ClientAreaOverviewService } from './client-area-overview.service';
-import { ClientAreaOverviewController } from './client-area-analytics.controller';
+import {
+  ClientAreaOverviewController,
+  ClientAreaSelfOverviewController,
+} from './client-area-analytics.controller';
 /** CA-AN3: only the Client Area `overview` module lives here; the CA13 dashboards facade was retired. */
 @Module({
   imports: [
@@ -27,7 +30,7 @@ import { ClientAreaOverviewController } from './client-area-analytics.controller
     LeadFlowAgendaModule,
     LeadFlowAnalyticsModule,
   ],
-  controllers: [ClientAreaOverviewController],
+  controllers: [ClientAreaOverviewController, ClientAreaSelfOverviewController],
   providers: [
     ClientAreaSourcesRegistry,
     ClientAreaSourcesAdapter,

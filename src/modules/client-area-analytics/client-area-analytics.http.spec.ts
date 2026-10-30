@@ -95,7 +95,7 @@ describe('Client Area Overview over real HTTP guards (offline signed sessions)',
         modules: key.startsWith('agency.') ? ['agency_projects'] : [],
         ownerOnly: key === 'agency.invoices' || key === 'agency.contract',
         read: (input) =>
-          Promise.resolve({ company: input.scope.companyContextId }),
+          Promise.resolve({ company: input.scope!.companyContextId }),
       });
     const mod = await Test.createTestingModule({
       imports: [

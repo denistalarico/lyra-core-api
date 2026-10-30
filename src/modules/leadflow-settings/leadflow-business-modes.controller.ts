@@ -2,6 +2,7 @@ import { Controller, Get, Param, UseGuards } from '@nestjs/common';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import {
   PermissionsGuard,
   RequirePermission,
@@ -25,6 +26,7 @@ export class LeadFlowBusinessModesController {
   ) {}
 
   @Get()
+  @ClientAreaExposed('leadflow_agents')
   async listBusinessModes(
     @RequestContextData() ctx: RequestContext,
   ): Promise<LeadFlowBusinessModeTemplateListResponse> {
@@ -36,6 +38,7 @@ export class LeadFlowBusinessModesController {
   }
 
   @Get(':key')
+  @ClientAreaExposed('leadflow_agents')
   async getBusinessMode(
     @RequestContextData() ctx: RequestContext,
     @Param('key') key: string,

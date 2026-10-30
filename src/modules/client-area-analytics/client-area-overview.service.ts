@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ClientAreaContext } from '../client-area/client-area.types';
+import type {
+  ClientAreaContext,
+  ClientAreaSelfContext,
+} from '../client-area/client-area.types';
+import type { RequestContext } from '../../common/context/request-context.interface';
 import { toCompanyAwareScope } from '../client-area/client-area-scope';
 import {
   AnalyticsSourceUnavailable,
@@ -27,12 +31,31 @@ export class ClientAreaOverviewService {
   constructor(private readonly sources: ClientAreaSourcesRegistry) {}
   async get(context: ClientAreaContext) {
     const scope = toCompanyAwareScope(context);
+    return this.readSources(context, scope);
+  }
+  async getSelf(context: ClientAreaSelfContext) {
+    const agencyContext: RequestContext = {
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+      userId: context.userId,
+      sessionId: context.sessionId,
+      role: context.agencyRole,
+    };
+    return this.readSources(context, undefined, agencyContext);
+  }
+  private async readSources(
+    context: ClientAreaContext | ClientAreaSelfContext,
+    scope?: ReturnType<typeof toCompanyAwareScope>,
+    agencyContext?: RequestContext,
+  ) {
     const outcomes = await Promise.allSettled(
       OVERVIEW_SOURCES.map(async (key) => {
         const source = this.sources.get(key);
         if (
           source.ownerOnly &&
-          (context.accountRole ?? context.role) !== 'client_owner'
+          ('agencyRole' in context
+            ? context.agencyRole !== 'owner'
+            : (context.accountRole ?? context.role) !== 'client_owner')
         )
           return {
             status: 'unavailable',
@@ -55,8 +78,9 @@ export class ClientAreaOverviewService {
             data: await source.read({
               scope,
               userId: context.userId,
-              context,
+              context: 'companyContextId' in context ? context : undefined,
               query: {},
+              agencyContext,
             }),
           } as OverviewSlice;
         } catch (error) {

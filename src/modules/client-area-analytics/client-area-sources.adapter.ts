@@ -28,11 +28,25 @@ export function analyticsDomainContext(
   input: AnalyticsSourceInput,
   productKey: ProductKey,
 ): RequestContext & { workspaceId: string; userId: string } {
+  if (input.agencyContext) {
+    return {
+      ...input.agencyContext,
+      workspaceId: input.agencyContext.workspaceId!,
+      userId: input.userId,
+      managedContext: {
+        productKey,
+        operatingMode: 'agency',
+        clientId: null,
+        companyContextId: null,
+        managedTenantId: null,
+      },
+    };
+  }
+  if (!input.scope) throw new AnalyticsSourceUnavailable('module_unavailable');
   return {
     tenantId: input.scope.tenantId,
     workspaceId: input.scope.workspaceId,
     userId: input.userId,
-    role: input.agencyContext?.role,
     managedContext: {
       productKey,
       operatingMode: 'client',
@@ -41,6 +55,10 @@ export function analyticsDomainContext(
       managedTenantId: null,
     },
   };
+}
+function companyScope(input: AnalyticsSourceInput) {
+  if (!input.scope) throw new AnalyticsSourceUnavailable('module_unavailable');
+  return input.scope;
 }
 export function analyticsPeriod(input: AnalyticsSourceInput) {
   const to = input.query.to ? new Date(input.query.to) : new Date();
@@ -77,7 +95,7 @@ export class ClientAreaSourcesAdapter implements OnModuleInit {
               clientArea: input.context,
             },
             {
-              clientId: input.scope.agencyClientId,
+              ...(input.scope ? { clientId: input.scope.agencyClientId } : {}),
               status: ProjectStatus.Active,
             },
           )
@@ -99,7 +117,7 @@ export class ClientAreaSourcesAdapter implements OnModuleInit {
               ...analyticsDomainContext(input, 'agency'),
               clientArea: input.context,
             },
-            { clientId: input.scope.agencyClientId },
+            input.scope ? { clientId: input.scope.agencyClientId } : {},
           )
         )
           .filter(
@@ -125,7 +143,7 @@ export class ClientAreaSourcesAdapter implements OnModuleInit {
       ownerOnly: true,
       read: async (input) => ({
         invoices: (
-          await this.billing.invoicesInScope(input.scope)
+          await this.billing.invoicesInScope(companyScope(input))
         ).invoices.filter((row) =>
           ['issued', 'partially_paid', 'overdue'].includes(row.status),
         ),
@@ -136,15 +154,16 @@ export class ClientAreaSourcesAdapter implements OnModuleInit {
       modules: ['agency_billing'],
       ownerOnly: true,
       read: async (input) => ({
-        current: (await this.billing.contractHistoryInScope(input.scope))
-          .current,
+        current: (
+          await this.billing.contractHistoryInScope(companyScope(input))
+        ).current,
       }),
     });
     this.registry.register({
       key: 'social.approvals',
       modules: ['approvals'],
       read: async (input) => ({
-        items: (await this.approvals.list(input.scope)).items
+        items: (await this.approvals.list(companyScope(input))).items
           .filter((row) => row.needsYou || row.downloadable)
           .map((row) => ({
             id: row.id,
@@ -165,11 +184,10 @@ export class ClientAreaSourcesAdapter implements OnModuleInit {
           until = new Date(now.getTime() + 7 * 86400000)
             .toISOString()
             .slice(0, 10);
-        const plans = await this.planner.listPlans(input.scope);
+        const scope = companyScope(input);
+        const plans = await this.planner.listPlans(scope);
         const groups = await Promise.all(
-          plans.items.map((plan) =>
-            this.planner.listContent(input.scope, plan.id),
-          ),
+          plans.items.map((plan) => this.planner.listContent(scope, plan.id)),
         );
         return {
           period: { from, until, untilExclusive: true },
@@ -199,14 +217,15 @@ export class ClientAreaSourcesAdapter implements OnModuleInit {
       key: 'social.campaign',
       modules: ['social_campaigns'],
       read: async (input) => {
-        const connections = await this.paid.listConnections(input.scope);
+        const scope = companyScope(input);
+        const connections = await this.paid.listConnections(scope);
         if (!connections.length)
           throw new AnalyticsSourceUnavailable('source_not_configured');
         const period = analyticsPeriod(input);
         const results = await Promise.all(
           connections.map((connection) =>
             this.paid.latestCampaign({
-              ...input.scope,
+              ...scope,
               connectionId: connection.id,
               since: period.from.slice(0, 10),
               until: period.to.slice(0, 10),

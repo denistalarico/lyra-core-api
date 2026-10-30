@@ -45,7 +45,7 @@ describe('CA13 Overview source isolation', () => {
         modules: [],
         ownerOnly: key === 'agency.invoices' || key === 'agency.contract',
         read: (input) => {
-          expect(input.scope.companyContextId).toBe('a');
+          expect(input.scope!.companyContextId).toBe('a');
           if (key === 'agency.invoices') billing++;
           return key === 'social.contents'
             ? Promise.reject(new Error('secret stack and token'))

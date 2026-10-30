@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   Param,
@@ -13,6 +14,8 @@ import {
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
+import { CLIENT_AREA_ACTOR_ROLE } from '../client-area/client-area.types';
 import {
   PermissionsGuard,
   RequirePermission,
@@ -40,33 +43,52 @@ export class LeadFlowClientSettingsController {
     private readonly leadFlowClientSettingsService: LeadFlowClientSettingsService,
   ) {}
 
+  private agencyClientId(ctx: RequestContext, requested: string) {
+    return ctx.role === CLIENT_AREA_ACTOR_ROLE && ctx.managedContext?.clientId
+      ? ctx.managedContext.clientId
+      : requested;
+  }
+
+  private assertCatalogContext(ctx: RequestContext) {
+    if (ctx.role === CLIENT_AREA_ACTOR_ROLE) throw new ForbiddenException();
+  }
+
   @Get()
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.view.admin')
   listClients(
     @RequestContextData() ctx: RequestContext,
     @Query() query: ListLeadFlowClientsQueryDto,
   ): Promise<LeadFlowClientSummaryListResponse> {
+    this.assertCatalogContext(ctx);
     return this.leadFlowClientSettingsService.listClients(ctx, query);
   }
 
   @Get('capacity')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.view.admin')
   getCapacity(
     @RequestContextData() ctx: RequestContext,
   ): Promise<LeadFlowCompanyCapacityResponse> {
+    this.assertCatalogContext(ctx);
     return this.leadFlowClientSettingsService.getCapacity(ctx);
   }
 
   @Get(':agencyClientId/settings')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.view.admin')
   getSettings(
     @RequestContextData() ctx: RequestContext,
     @Param('agencyClientId') agencyClientId: string,
   ): Promise<LeadFlowClientSettingsResponse> {
-    return this.leadFlowClientSettingsService.getSettings(ctx, agencyClientId);
+    return this.leadFlowClientSettingsService.getSettings(
+      ctx,
+      this.agencyClientId(ctx, agencyClientId),
+    );
   }
 
   @Post(':agencyClientId/settings')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.update.admin')
   createSettings(
     @RequestContextData() ctx: RequestContext,
@@ -75,12 +97,13 @@ export class LeadFlowClientSettingsController {
   ): Promise<LeadFlowClientSettingsResponse> {
     return this.leadFlowClientSettingsService.createSettings(
       ctx,
-      agencyClientId,
+      this.agencyClientId(ctx, agencyClientId),
       dto,
     );
   }
 
   @Patch(':agencyClientId/settings')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.update.admin')
   updateSettings(
     @RequestContextData() ctx: RequestContext,
@@ -89,7 +112,7 @@ export class LeadFlowClientSettingsController {
   ): Promise<LeadFlowClientSettingsResponse> {
     return this.leadFlowClientSettingsService.updateSettings(
       ctx,
-      agencyClientId,
+      this.agencyClientId(ctx, agencyClientId),
       dto,
     );
   }
@@ -108,11 +131,12 @@ export class LeadFlowClientSettingsController {
   ): Promise<void> {
     return this.leadFlowClientSettingsService.deleteSettings(
       ctx,
-      agencyClientId,
+      this.agencyClientId(ctx, agencyClientId),
     );
   }
 
   @Patch(':agencyClientId/settings/developer-mode')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.danger_zone.manage.owner_only')
   setDeveloperMode(
     @RequestContextData() ctx: RequestContext,
@@ -121,12 +145,13 @@ export class LeadFlowClientSettingsController {
   ): Promise<LeadFlowClientSettingsResponse> {
     return this.leadFlowClientSettingsService.setDeveloperMode(
       ctx,
-      agencyClientId,
+      this.agencyClientId(ctx, agencyClientId),
       dto.enabled,
     );
   }
 
   @Post(':agencyClientId/settings/validate')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.view.admin')
   validateSettings(
     @RequestContextData() ctx: RequestContext,
@@ -135,12 +160,13 @@ export class LeadFlowClientSettingsController {
   ): Promise<LeadFlowSettingsValidationResponse> {
     return this.leadFlowClientSettingsService.validateSettings(
       ctx,
-      agencyClientId,
+      this.agencyClientId(ctx, agencyClientId),
       dto,
     );
   }
 
   @Post(':agencyClientId/settings/company-context/publish')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.update.admin')
   publishCompanyContext(
     @RequestContextData() ctx: RequestContext,
@@ -149,12 +175,13 @@ export class LeadFlowClientSettingsController {
   ) {
     return this.leadFlowClientSettingsService.publishCompanyContext(
       ctx,
-      agencyClientId,
+      this.agencyClientId(ctx, agencyClientId),
       dto?.expectedDraftHash,
     );
   }
 
   @Get(':agencyClientId/settings/company-context/preview')
+  @ClientAreaExposed('leadflow_agents')
   @RequirePermission('leadflow.settings.general.view.admin')
   previewCompanyContext(
     @RequestContextData() ctx: RequestContext,
@@ -162,7 +189,7 @@ export class LeadFlowClientSettingsController {
   ) {
     return this.leadFlowClientSettingsService.previewCompanyContext(
       ctx,
-      agencyClientId,
+      this.agencyClientId(ctx, agencyClientId),
     );
   }
 }

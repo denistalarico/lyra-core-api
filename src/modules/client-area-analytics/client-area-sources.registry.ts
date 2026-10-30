@@ -23,7 +23,8 @@ export type AnalyticsReadQuery = {
   businessMode?: string;
 };
 export type AnalyticsSourceInput = {
-  scope: ClientAreaCompanyScope;
+  /** Company-bound branch only. Self keeps this absent by construction. */
+  scope?: ClientAreaCompanyScope;
   userId: string;
   context?: ClientAreaContext;
   query: AnalyticsReadQuery;
