@@ -533,6 +533,7 @@ export const agencyEntities = [
   DocumentLayoutTemplateEntity,
   AgencyUserPreferencesEntity,
   AgencyUserProfileEntity,
+  UserProfileEntity,
   AgencyWorkspaceCompanySettingsEntity,
   AgencyWorkspaceNotificationSettingsEntity,
   AgencyUserNotificationPreferencesEntity,

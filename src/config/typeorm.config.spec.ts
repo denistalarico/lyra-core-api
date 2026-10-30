@@ -7,9 +7,14 @@ import {
   LeadFlowBriefingSuggestionApplicationEntity,
   LeadFlowBriefingSuggestionEntity,
 } from '../modules/leadflow-briefing/entities';
+import { UserProfileEntity } from '../modules/settings/entities/user-profile.entity';
 import { agencyEntities, getAgencyTypeOrmConfig } from './typeorm.config';
 
 describe('Agency TypeORM configuration', () => {
+  it('registers the canonical user profile used by the Client Area', () => {
+    expect(agencyEntities).toContain(UserProfileEntity);
+  });
+
   it('registers every LeadFlow Briefing entity in the runtime data source', () => {
     const briefingEntities = [
       LeadFlowBriefingSourceEntity,
