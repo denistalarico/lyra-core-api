@@ -7,7 +7,10 @@ import {
   ClientAreaOverviewService,
   OVERVIEW_SOURCES,
 } from './client-area-overview.service';
-import { ClientAreaOverviewController } from './client-area-analytics.controller';
+import {
+  ClientAreaOverviewController,
+  ClientAreaSelfOverviewController,
+} from './client-area-analytics.controller';
 import {
   ClientAreaBridgeRegistry,
   ClientAreaBridgeRegistryModule,
@@ -65,12 +68,14 @@ describe('Client Area Overview registry lifecycle and module boundaries', () => 
       ClientAreaSourcesAdapter,
       ClientAreaOverviewService,
     ]);
+    // R2 supersedes the single-controller boundary: agency_self now consumes
+    // the same canonical Overview facade through its own guarded route.
     expect(
       Reflect.getMetadata(
         MODULE_METADATA.CONTROLLERS,
         ClientAreaAnalyticsModule,
       ),
-    ).toEqual([ClientAreaOverviewController]);
+    ).toEqual([ClientAreaOverviewController, ClientAreaSelfOverviewController]);
   });
   it('registers the Overview sources at init on the same consumer instances and no CA13 metric wiring', async () => {
     const projects = {
@@ -126,11 +131,14 @@ describe('Client Area Overview registry lifecycle and module boundaries', () => 
           dueDate: null,
         },
       ]);
-      expect(projects.list.mock.calls[0][0]).toMatchObject({
-        role: undefined,
+      const projectsContext = projects.list.mock.calls[0][0];
+      expect(projectsContext).toMatchObject({
         clientArea: context,
         managedContext: { clientId: 'c', companyContextId: 'company' },
       });
+      // R2 supersedes the explicit `role: undefined`: omitting the property is
+      // the stronger guarantee that the facade never fabricates an Agency role.
+      expect(projectsContext).not.toHaveProperty('role');
       // No CA13 metric scope resolver remains.
       expect(
         await ref

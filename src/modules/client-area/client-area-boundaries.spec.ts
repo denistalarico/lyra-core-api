@@ -106,6 +106,8 @@ describe('CA7 production route boundaries and Agency preservation', () => {
             }
         }
     }
+    // R2 supersedes the pre-settings snapshot with the explicitly permissioned
+    // LeadFlow settings bridge; its scope matrix is pinned by the bridge spec.
     expect(exposed.sort()).toMatchInlineSnapshot(`
      [
        "agency/agency-contacts.controller.ts:createLeadFlowCompanyContact",
@@ -240,6 +242,24 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "leadflow-analytics/leadflow-analytics.controller.ts:getOverview",
        "leadflow-analytics/leadflow-analytics.controller.ts:getRecommendations",
        "leadflow-analytics/leadflow-analytics.controller.ts:getTimeseries",
+       "leadflow-settings/leadflow-agency-settings.controller.ts:createSettings",
+       "leadflow-settings/leadflow-agency-settings.controller.ts:getSettings",
+       "leadflow-settings/leadflow-agency-settings.controller.ts:previewCompanyContext",
+       "leadflow-settings/leadflow-agency-settings.controller.ts:publishCompanyContext",
+       "leadflow-settings/leadflow-agency-settings.controller.ts:setDeveloperMode",
+       "leadflow-settings/leadflow-agency-settings.controller.ts:updateSettings",
+       "leadflow-settings/leadflow-agency-settings.controller.ts:validateSettings",
+       "leadflow-settings/leadflow-business-modes.controller.ts:getBusinessMode",
+       "leadflow-settings/leadflow-business-modes.controller.ts:listBusinessModes",
+       "leadflow-settings/leadflow-client-settings.controller.ts:createSettings",
+       "leadflow-settings/leadflow-client-settings.controller.ts:getCapacity",
+       "leadflow-settings/leadflow-client-settings.controller.ts:getSettings",
+       "leadflow-settings/leadflow-client-settings.controller.ts:listClients",
+       "leadflow-settings/leadflow-client-settings.controller.ts:previewCompanyContext",
+       "leadflow-settings/leadflow-client-settings.controller.ts:publishCompanyContext",
+       "leadflow-settings/leadflow-client-settings.controller.ts:setDeveloperMode",
+       "leadflow-settings/leadflow-client-settings.controller.ts:updateSettings",
+       "leadflow-settings/leadflow-client-settings.controller.ts:validateSettings",
        "media-assets/media-asset.controller.ts:getContent",
        "media-assets/media-asset.controller.ts:list",
        "media-assets/media-asset.controller.ts:upload",
