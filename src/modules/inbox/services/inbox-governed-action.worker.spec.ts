@@ -458,6 +458,7 @@ describe('InboxGovernedActionWorker social canonical contacts', () => {
       inboundMetadata: { senderName: 'Ana Silva', senderUsername: 'ana.silva' },
       metadata: {
         contactName: 'Nome antigo',
+        contactEmail: 'ana@example.com',
         avatarUrl: 'https://cdn.example/avatar.jpg',
       },
     });
@@ -515,10 +516,14 @@ describe('InboxGovernedActionWorker social canonical contacts', () => {
     );
   });
 
-  it('creates a Messenger contact with a readable fallback and a Facebook method', async () => {
+  it('creates a Messenger contact when name and email are available', async () => {
     const test = setup({
       channelType: 'facebook_messenger',
       externalThreadId: 'messenger:page:98765432101234567',
+      metadata: {
+        contactName: 'Maria Souza',
+        contactEmail: 'maria@example.com',
+      },
     });
 
     await expect(test.ensureContact()).resolves.toEqual({
@@ -527,7 +532,7 @@ describe('InboxGovernedActionWorker social canonical contacts', () => {
     });
     expect(test.contacts.save).toHaveBeenCalledWith(
       expect.objectContaining({
-        displayName: 'Contato do Messenger',
+        displayName: 'Maria Souza',
         source: 'leadflow_messenger',
       }),
     );
@@ -549,26 +554,58 @@ describe('InboxGovernedActionWorker social canonical contacts', () => {
     ).toBe(false);
   });
 
-  it('uses an Instagram username as the name when the lead has no name', async () => {
+  it('does not create a WhatsApp contact without a real name', async () => {
+    const test = setup({
+      channelType: 'whatsapp',
+      externalThreadId: '+5511999999999',
+    });
+
+    await expect(test.ensureContact()).rejects.toThrow(
+      'contact_basic_data_missing',
+    );
+    expect(test.contacts.save).not.toHaveBeenCalled();
+    expect(test.methods.save).not.toHaveBeenCalled();
+  });
+
+  it('does not create a social contact without phone or email', async () => {
+    const test = setup({
+      channelType: 'instagram',
+      externalThreadId: 'instagram:17841400000000123',
+      inboundMetadata: {
+        senderName: 'Ana Silva',
+        senderUsername: 'ana.silva',
+      },
+    });
+
+    await expect(test.ensureContact()).rejects.toThrow(
+      'contact_basic_data_missing',
+    );
+    expect(test.contacts.save).not.toHaveBeenCalled();
+    expect(test.methods.save).not.toHaveBeenCalled();
+  });
+
+  it('does not accept an Instagram username as the contact name', async () => {
     const test = setup({
       channelType: 'instagram',
       externalThreadId: 'instagram:17841400000000123',
       inboundMetadata: { senderUsername: '@ana.silva' },
+      metadata: { contactEmail: 'ana@example.com' },
     });
-    await test.ensureContact();
-    expect(test.contacts.save).toHaveBeenCalledWith(
-      expect.objectContaining({ displayName: '@ana.silva' }),
+    await expect(test.ensureContact()).rejects.toThrow(
+      'contact_basic_data_missing',
     );
-    expect(test.methods.save).toHaveBeenCalledWith(
-      expect.objectContaining({ value: '@ana.silva' }),
-    );
+    expect(test.contacts.save).not.toHaveBeenCalled();
+    expect(test.methods.save).not.toHaveBeenCalled();
   });
 
   it('uses conversation profile metadata and the scoped Instagram ID when no inbound username exists', async () => {
     const test = setup({
       channelType: 'instagram',
       externalThreadId: 'instagram:17841400000000123',
-      metadata: { contactName: 'Ana do perfil' },
+      metadata: {
+        contactName: 'Ana do perfil',
+        contactPhone: '+5511999999999',
+      },
     });
     await test.ensureContact();
     expect(test.contacts.save).toHaveBeenCalledWith(

@@ -10,6 +10,7 @@ import { DataSource, EntityManager, IsNull } from 'typeorm';
 import { createHash } from 'crypto';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
 import { ContactMethodEntity } from '../../contacts/entities/contact-method.entity';
+import { validContactName } from '../../contacts/contact-basic-data';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { InboxAgentDecisionEntity } from '../entities/inbox-agent-decision.entity';
 import { InboxConversationEntity } from '../entities/inbox-conversation.entity';
@@ -419,10 +420,17 @@ export class InboxGovernedActionWorker
         conversation,
         latestInbound?.metadata,
       );
+      const contactPhone =
+        canonical.identityType === 'phone' ? identity : profile.phone;
+      if (!profile.realName || (!contactPhone && !profile.email)) {
+        throw new Error('contact_basic_data_missing');
+      }
       if (canonical.identityType !== 'phone') {
         conversation.metadata = {
           ...conversation.metadata,
-          contactName: profile.displayName,
+          contactName: profile.realName,
+          ...(contactPhone ? { contactPhone } : {}),
+          ...(profile.email ? { contactEmail: profile.email } : {}),
           ...(profile.username ? { username: profile.username } : {}),
         };
       }
@@ -430,7 +438,7 @@ export class InboxGovernedActionWorker
         tenantId: action.tenantId,
         workspaceId: action.workspaceId,
         type: 'person',
-        displayName: profile.displayName,
+        displayName: profile.realName,
         firstName: null,
         lastName: null,
         legalName: null,
@@ -462,6 +470,21 @@ export class InboxGovernedActionWorker
         isPrimary: true,
         verifiedAt: null,
       });
+      if (
+        canonical.identityType !== 'phone' &&
+        (contactPhone || profile.email)
+      ) {
+        await manager.getRepository(ContactMethodEntity).save({
+          tenantId: action.tenantId,
+          workspaceId: action.workspaceId,
+          contactId: contact.id,
+          type: contactPhone ? 'phone' : 'email',
+          value: contactPhone ?? profile.email!,
+          label: contactPhone ? 'Telefone' : 'E-mail',
+          isPrimary: false,
+          verifiedAt: null,
+        });
+      }
       await manager.getRepository(InboxChannelContactIdentityEntity).save({
         tenantId: action.tenantId,
         workspaceId: action.workspaceId,
@@ -494,7 +517,12 @@ export class InboxGovernedActionWorker
     channelId: string,
     contactId: string,
   ) {
-    await ensureLeadFlowContactMembership(manager, action, channelId, contactId);
+    await ensureLeadFlowContactMembership(
+      manager,
+      action,
+      channelId,
+      contactId,
+    );
   }
 
   private async ensureOpportunity(
@@ -1376,48 +1404,34 @@ function canonicalContactProfile(
   inbound: Record<string, unknown> = {},
 ) {
   const metadata = conversation.metadata ?? {};
+  const text = (value: unknown) =>
+    typeof value === 'string' && value.trim() ? value.trim() : null;
   const social = ['instagram', 'facebook_messenger'].includes(
     conversation.source,
   );
-  if (!social)
-    return {
-      displayName: safeContactName(conversation.title),
-      username: null,
-      avatarUrl: null,
-    };
-  const text = (value: unknown) =>
-    typeof value === 'string' && value.trim() ? value.trim() : null;
-  const username =
-    (text(inbound.senderUsername) ?? text(metadata.username))?.replace(
-      /^@/,
-      '',
-    ) ?? null;
+  const username = social
+    ? ((text(inbound.senderUsername) ?? text(metadata.username))?.replace(
+        /^@/,
+        '',
+      ) ?? null)
+    : null;
   const candidate =
     text(inbound.senderName) ??
     text(metadata.contactName) ??
     text(conversation.title);
-  const name =
-    candidate &&
-    !/^(instagram|facebook_messenger|messenger):|^\+?[\d\s()-]+$/.test(
-      candidate,
-    ) &&
-    ![
-      'Nova conversa',
-      'Conversa sem título',
-      'Lead do Instagram',
-      'Lead do Messenger',
-    ].includes(candidate)
-      ? candidate
-      : null;
+  const realName = validContactName(candidate);
   return {
     displayName: (
-      name ??
+      realName ??
       (social && username
         ? `@${username}`
         : social
           ? `Contato do ${conversation.source === 'instagram' ? 'Instagram' : 'Messenger'}`
           : safeContactName(conversation.title))
     ).slice(0, 160),
+    realName,
+    phone: text(metadata.contactPhone),
+    email: text(metadata.contactEmail),
     username,
     avatarUrl: text(metadata.avatarUrl),
   };
