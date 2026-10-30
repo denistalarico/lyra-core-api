@@ -180,8 +180,10 @@ export class LeadScoreEngineService {
         previousBand !== calculation.band;
       // Only a genuine crossing announces a hot lead. Staying above the line
       // is not news, and re-announcing it would make every recalculation look
-      // like the lead had just heated up.
+      // like the lead had just heated up. Terminal outcomes are labels for
+      // Analytics, not new-lead signals for operational automations.
       const hotLeadDetected =
+        opportunity.status === 'open' &&
         calculation.score >= LEAD_SCORE_HOT_THRESHOLD &&
         (previousScore === null || previousScore < LEAD_SCORE_HOT_THRESHOLD);
 

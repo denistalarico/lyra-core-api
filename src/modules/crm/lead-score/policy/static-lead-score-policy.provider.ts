@@ -3,7 +3,7 @@ import type {
   LeadScorePolicy,
   LeadScorePolicyProvider,
 } from '../lead-score.types';
-import { LEAD_SCORE_POLICY_V2 } from './lead-score-rules-v2.policy';
+import { LEAD_SCORE_POLICY_V3 } from './lead-score-rules-v3.policy';
 
 /**
  * Serves the policy compiled into the backend.
@@ -13,13 +13,14 @@ import { LEAD_SCORE_POLICY_V2 } from './lead-score-rules-v2.policy';
  * this with a `PublishedLeadScorePolicyProvider` must be a wiring change, not
  * an engine change. The engine never reads weights from anywhere else.
  *
- * Scope is declared by the interface and ignored here. V1 has no per-tenant or
- * per-Business-Mode policy; the parameter stays in the contract so adding one
- * later does not ripple through every caller.
+ * Scope is declared by the interface and ignored here. V3 reads the Business
+ * Mode from the feature set, but still uses one versioned policy for every
+ * tenant; the parameter stays in the contract so a published scoped provider
+ * can replace this one without rippling through callers.
  */
 @Injectable()
 export class StaticLeadScorePolicyProvider implements LeadScorePolicyProvider {
   getActivePolicy(): Promise<LeadScorePolicy> {
-    return Promise.resolve(LEAD_SCORE_POLICY_V2);
+    return Promise.resolve(LEAD_SCORE_POLICY_V3);
   }
 }

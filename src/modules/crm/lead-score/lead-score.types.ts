@@ -13,6 +13,8 @@
 
 /** Rules the pretended policy names. Not all of them can run yet. */
 export enum LeadScoreRuleId {
+  /** A real name plus at least one reachable phone or email. */
+  BasicContact = 'basic_contact',
   /** The lead arrived through an active channel rather than manual entry. */
   ChannelOrigin = 'channel_origin',
   /** Every field the Business Mode declares as necessary is filled in. */
@@ -26,9 +28,13 @@ export enum LeadScoreRuleId {
   MeetingAccepted = 'meeting_accepted',
   FollowupUnanswered = 'followup_unanswered',
   MeetingNoShow = 'meeting_no_show',
+  /** Business-mode-specific progress toward the commercial outcome. */
+  BusinessMilestone = 'business_milestone',
   NoInterest = 'no_interest',
   OptOutOrInvalid = 'opt_out_or_invalid',
   LostOrDiscarded = 'lost_or_discarded',
+  /** A completed sale is the only terminal state displayed as 100. */
+  Won = 'won',
 }
 
 /**
@@ -69,6 +75,7 @@ export type LeadScoreRuleKind =
 
 /** Structured inputs a rule may consult. Never message text. */
 export enum LeadScoreFeatureKey {
+  BasicContactValid = 'basic_contact_valid',
   OriginatedFromChannel = 'originated_from_channel',
   ConversationLinked = 'conversation_linked',
   InboundMessageCount = 'inbound_message_count',
@@ -76,6 +83,8 @@ export enum LeadScoreFeatureKey {
   EssentialFieldsPresent = 'essential_fields_present',
   LifecycleStatus = 'lifecycle_status',
   StageIsLost = 'stage_is_lost',
+  BusinessModeKey = 'business_mode_key',
+  OperationalStatus = 'operational_status',
   /** Outcome of the opportunity's latest non-cancelled appointment. */
   LatestAppointmentOutcome = 'latest_appointment_outcome',
 }
@@ -136,6 +145,8 @@ export interface LeadScoreRuleSpec {
   owningDomain: string;
   /** Features the rule consults. Drives demand-driven loading. */
   features: LeadScoreFeatureKey[];
+  /** V1/V2 are binary; V3 may award partial qualification progress. */
+  scoringMode?: 'binary' | 'proportional';
   /** Why it is not active. Required whenever availability is not `active`. */
   blockedReason?: string;
 }
@@ -250,5 +261,11 @@ export function maxAchievableScore(policy: LeadScorePolicy): number {
         rule.points > 0,
     )
     .reduce((sum, rule) => sum + rule.points, 0);
-  return Math.min(total, policy.maxScore);
+  const terminalMaximum = policy.rules
+    .filter(
+      (rule) =>
+        rule.availability === 'active' && rule.kind === 'terminal_override',
+    )
+    .reduce((maximum, rule) => Math.max(maximum, rule.overrideScore ?? 0), 0);
+  return Math.min(Math.max(total, terminalMaximum), policy.maxScore);
 }

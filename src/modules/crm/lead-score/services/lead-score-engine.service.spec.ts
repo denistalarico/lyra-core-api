@@ -5,6 +5,7 @@ import { CrmOpportunityEntity } from '../../entities/crm-opportunity.entity';
 import { CrmLeadScoreSnapshotEntity } from '../entities/crm-lead-score-snapshot.entity';
 import { CrmLeadScoreStateEntity } from '../entities/crm-lead-score-state.entity';
 import { LEAD_SCORE_POLICY_V1 } from '../policy/lead-score-rules-v1.policy';
+import { LEAD_SCORE_POLICY_V3 } from '../policy/lead-score-rules-v3.policy';
 import {
   LeadScoreFeatureKey,
   type LeadScoreFeatureSet,
@@ -280,6 +281,34 @@ describe('LeadScoreEngineService', () => {
       expect(payload.currentBand).toBe('warm');
       expect(payload.maxAchievable).toBe(45);
     });
+  });
+
+  it('does not announce a won opportunity as a newly hot lead', async () => {
+    const { service, tables } = buildHarness(
+      features({
+        [LeadScoreFeatureKey.LifecycleStatus]: {
+          available: true,
+          value: 'won',
+          observedAt: '2026-10-29T12:00:00.000Z',
+        },
+      }),
+      LEAD_SCORE_POLICY_V3,
+    );
+    tables.opportunities[0].status = 'won';
+
+    const result = await service.recalculate(ctx, {
+      opportunityId: 'opportunity-1',
+      reason: 'lifecycle_changed',
+      sourceEventId: 'won-event',
+    });
+
+    expect(result.score).toBe(100);
+    expect(result.hotLeadDetected).toBe(false);
+    expect(
+      tables.outbox.some(
+        (event) => event.eventName === LEAD_SCORE_HOT_LEAD_EVENT,
+      ),
+    ).toBe(false);
   });
 
   describe('hot lead', () => {

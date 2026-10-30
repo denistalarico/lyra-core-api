@@ -130,6 +130,11 @@ function evaluateRule(
       });
     }
 
+    case LeadScoreRuleId.BasicContact: {
+      const valid = boolOf(features[LeadScoreFeatureKey.BasicContactValid]);
+      return decide(base, valid, { basicContactValid: valid });
+    }
+
     case LeadScoreRuleId.LeadReplied: {
       const count = numberOf(features[LeadScoreFeatureKey.InboundMessageCount]);
       return decide(base, count >= 1, { inboundMessageCount: count });
@@ -162,10 +167,53 @@ function evaluateRule(
           evidence: [],
         };
       }
+      if (rule.scoringMode === 'proportional') {
+        const appliedPoints = Math.round(
+          rule.points * Math.min(1, present / total),
+        );
+        return {
+          ...base,
+          outcome: appliedPoints > 0 ? 'contributed' : 'not_met',
+          observed: {
+            essentialFieldsTotal: total,
+            essentialFieldsPresent: present,
+          },
+          appliedPoints,
+          reasonCode:
+            appliedPoints > 0 ? 'partial_progress' : 'condition_not_met',
+          evidence: [],
+        };
+      }
       return decide(base, present >= total, {
         essentialFieldsTotal: total,
         essentialFieldsPresent: present,
       });
+    }
+
+    case LeadScoreRuleId.BusinessMilestone: {
+      const businessMode = stringOf(
+        features[LeadScoreFeatureKey.BusinessModeKey],
+      );
+      const operationalStatus = stringOf(
+        features[LeadScoreFeatureKey.OperationalStatus],
+      );
+      const appointmentOutcome = stringOf(
+        features[LeadScoreFeatureKey.LatestAppointmentOutcome],
+      );
+      const appliedPoints = businessMilestonePoints(
+        businessMode,
+        operationalStatus,
+        appointmentOutcome,
+      );
+      return {
+        ...base,
+        outcome: appliedPoints > 0 ? 'contributed' : 'not_met',
+        observed: { businessMode, operationalStatus, appointmentOutcome },
+        appliedPoints,
+        reasonCode:
+          appliedPoints > 0 ? 'milestone_reached' : 'condition_not_met',
+        evidence: [],
+      };
     }
 
     // Both read the latest appointment, so at most one of them applies.
@@ -198,6 +246,11 @@ function evaluateRule(
       });
     }
 
+    case LeadScoreRuleId.Won: {
+      const status = stringOf(features[LeadScoreFeatureKey.LifecycleStatus]);
+      return decide(base, status === 'won', { lifecycleStatus: status });
+    }
+
     default:
       // An active rule with no evaluator would otherwise score silently as
       // zero. Reporting it as unavailable keeps the policy honest.
@@ -210,6 +263,41 @@ function evaluateRule(
         evidence: [],
       };
   }
+}
+
+function businessMilestonePoints(
+  businessMode: string,
+  operationalStatus: string,
+  appointmentOutcome: string,
+): number {
+  if (
+    ['restaurants_food', 'retail_store', 'ecommerce_light'].includes(
+      businessMode,
+    )
+  ) {
+    if (
+      [
+        'order_preparing',
+        'order_ready',
+        'order_out_for_delivery',
+        'order_delivered',
+      ].includes(operationalStatus)
+    ) {
+      return 25;
+    }
+    return ['order_requested', 'order_pending'].includes(operationalStatus)
+      ? 10
+      : 0;
+  }
+
+  if (['clinics_esthetics', 'events_tourism'].includes(businessMode)) {
+    if (operationalStatus === 'reservation_confirmed') return 25;
+    if (operationalStatus === 'reservation_requested') return 10;
+  }
+
+  if (appointmentOutcome === 'accepted') return 25;
+  if (appointmentOutcome === 'pending') return 10;
+  return 0;
 }
 
 function decide(

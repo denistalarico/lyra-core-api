@@ -7,6 +7,10 @@ import {
   LEAD_SCORE_POLICY_VERSION_V2,
 } from '../policy/lead-score-rules-v2.policy';
 import {
+  LEAD_SCORE_POLICY_V3,
+  LEAD_SCORE_POLICY_VERSION_V3,
+} from '../policy/lead-score-rules-v3.policy';
+import {
   LeadScoreFeatureKey,
   LeadScoreRuleId,
   maxAchievableScore,
@@ -369,8 +373,9 @@ describe('LEAD_SCORE_POLICY_V2 meeting rules', () => {
       ]),
     );
     expect(activated).toHaveLength(
-      LEAD_SCORE_POLICY_V1.rules.filter((rule) => rule.availability === 'active')
-        .length + 2,
+      LEAD_SCORE_POLICY_V1.rules.filter(
+        (rule) => rule.availability === 'active',
+      ).length + 2,
     );
     expect(maxAchievableScore(policy)).toBe(65);
   });
@@ -406,4 +411,100 @@ describe('LEAD_SCORE_POLICY_V2 meeting rules', () => {
       expect(result.score).toBe(15);
     }
   });
+});
+
+describe('LEAD_SCORE_POLICY_V3', () => {
+  const policy = LEAD_SCORE_POLICY_V3;
+  const features = (
+    overrides: LeadScoreFeatureSet = {},
+  ): LeadScoreFeatureSet => ({
+    [LeadScoreFeatureKey.BasicContactValid]: value(true),
+    [LeadScoreFeatureKey.InboundMessageCount]: value(3),
+    [LeadScoreFeatureKey.EssentialFieldsTotal]: value(4),
+    [LeadScoreFeatureKey.EssentialFieldsPresent]: value(4),
+    [LeadScoreFeatureKey.BusinessModeKey]: value('agency_services'),
+    [LeadScoreFeatureKey.OperationalStatus]: value('new'),
+    [LeadScoreFeatureKey.LatestAppointmentOutcome]: value('accepted'),
+    [LeadScoreFeatureKey.LifecycleStatus]: value('open'),
+    [LeadScoreFeatureKey.StageIsLost]: value(false),
+    ...overrides,
+  });
+
+  it('reaches 95 before outcome from canonical qualification and conversion signals', () => {
+    const result = calculateLeadScore(policy, features(), AT);
+
+    expect(result.score).toBe(95);
+    expect(result.policyVersion).toBe(LEAD_SCORE_POLICY_VERSION_V3);
+    expect(result.maxAchievable).toBe(100);
+  });
+
+  it('awards qualification points proportionally to the Business Mode fields', () => {
+    const result = calculateLeadScore(
+      policy,
+      features({
+        [LeadScoreFeatureKey.EssentialFieldsPresent]: value(2),
+        [LeadScoreFeatureKey.LatestAppointmentOutcome]: value('none'),
+      }),
+      AT,
+    );
+
+    expect(
+      entryFor(result, LeadScoreRuleId.QualificationFields)?.appliedPoints,
+    ).toBe(13);
+  });
+
+  it('forces won opportunities to 100 while preserving their qualification breakdown', () => {
+    const result = calculateLeadScore(
+      policy,
+      features({ [LeadScoreFeatureKey.LifecycleStatus]: value('won') }),
+      AT,
+    );
+
+    expect(result.score).toBe(100);
+    expect(result.terminalOverride).toBe(LeadScoreRuleId.Won);
+    expect(entryFor(result, LeadScoreRuleId.LeadReplied)?.appliedPoints).toBe(
+      20,
+    );
+  });
+
+  it('does not erase the qualification score when an opportunity is lost', () => {
+    const result = calculateLeadScore(
+      policy,
+      features({
+        [LeadScoreFeatureKey.LifecycleStatus]: value('lost'),
+        [LeadScoreFeatureKey.StageIsLost]: value(true),
+      }),
+      AT,
+    );
+
+    expect(result.score).toBe(95);
+    expect(result.terminalOverride).toBeNull();
+  });
+
+  it.each([
+    ['restaurants_food', 'order_requested', 'none', 10],
+    ['restaurants_food', 'order_preparing', 'none', 25],
+    ['events_tourism', 'reservation_requested', 'none', 10],
+    ['events_tourism', 'reservation_confirmed', 'none', 25],
+    ['agency_services', 'new', 'pending', 10],
+    ['agency_services', 'new', 'accepted', 25],
+  ])(
+    'scores the %s milestone from %s/%s at %i points',
+    (businessMode, operationalStatus, appointmentOutcome, expected) => {
+      const result = calculateLeadScore(
+        policy,
+        features({
+          [LeadScoreFeatureKey.BusinessModeKey]: value(businessMode),
+          [LeadScoreFeatureKey.OperationalStatus]: value(operationalStatus),
+          [LeadScoreFeatureKey.LatestAppointmentOutcome]:
+            value(appointmentOutcome),
+        }),
+        AT,
+      );
+
+      expect(
+        entryFor(result, LeadScoreRuleId.BusinessMilestone)?.appliedPoints,
+      ).toBe(expected);
+    },
+  );
 });

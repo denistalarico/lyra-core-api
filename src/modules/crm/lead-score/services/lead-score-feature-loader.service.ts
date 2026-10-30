@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 import type { RequestContext } from '../../../../common/context/request-context.interface';
 import { InboxMessageEntity } from '../../../inbox/entities/inbox-message.entity';
+import { hasBasicContactData } from '../../../contacts/contact-basic-data';
 import type { CrmOpportunityEntity } from '../../entities/crm-opportunity.entity';
 import { CrmStageEntity } from '../../entities/crm-stage.entity';
 import { CrmOpportunityFieldCatalogService } from '../../services/crm-opportunity-field-catalog.service';
@@ -57,6 +58,34 @@ export class LeadScoreFeatureLoaderService {
 
     // --- read off the opportunity itself: no query -------------------------
     const conversationId = opportunity.inboxConversationId ?? null;
+
+    if (wanted.has(LeadScoreFeatureKey.BasicContactValid)) {
+      set(LeadScoreFeatureKey.BasicContactValid, {
+        available: true,
+        value: hasBasicContactData({
+          name: opportunity.contactName,
+          phone: opportunity.contactPhone,
+          email: opportunity.contactEmail,
+        }),
+        observedAt,
+      });
+    }
+
+    if (wanted.has(LeadScoreFeatureKey.BusinessModeKey)) {
+      set(LeadScoreFeatureKey.BusinessModeKey, {
+        available: true,
+        value: opportunity.businessMode ?? 'general',
+        observedAt,
+      });
+    }
+
+    if (wanted.has(LeadScoreFeatureKey.OperationalStatus)) {
+      set(LeadScoreFeatureKey.OperationalStatus, {
+        available: true,
+        value: opportunity.operationalStatus ?? 'none',
+        observedAt,
+      });
+    }
 
     if (wanted.has(LeadScoreFeatureKey.ConversationLinked)) {
       set(LeadScoreFeatureKey.ConversationLinked, {
