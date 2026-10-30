@@ -19,20 +19,31 @@ export class ClientAreaPreferencesController {
   @Get() async get(@Req() req: ClientAreaRequest) {
     const { tenantId, userId } = req.clientAreaIdentity!;
     const row = await this.repo.findOne({ where: { tenantId, userId } });
-    return { theme: row?.theme ?? 'system', locale: row?.locale ?? 'pt-BR' };
+    return {
+      theme: row?.theme ?? 'system',
+      locale: row?.locale ?? 'pt-BR',
+      sidebarCollapsed: row?.sidebarCollapsed ?? false,
+    };
   }
   @Patch() async patch(
     @Req() req: ClientAreaRequest,
     @Body() dto: PatchClientAreaPreferencesDto,
   ) {
     const { tenantId, userId } = req.clientAreaIdentity!;
-    if (dto.theme !== undefined || dto.locale !== undefined)
+    if (
+      dto.theme !== undefined ||
+      dto.locale !== undefined ||
+      dto.sidebarCollapsed !== undefined
+    )
       await this.repo.upsert(
         {
           tenantId,
           userId,
           ...(dto.theme !== undefined ? { theme: dto.theme } : {}),
           ...(dto.locale !== undefined ? { locale: dto.locale } : {}),
+          ...(dto.sidebarCollapsed !== undefined
+            ? { sidebarCollapsed: dto.sidebarCollapsed }
+            : {}),
         },
         ['tenantId', 'userId'],
       );

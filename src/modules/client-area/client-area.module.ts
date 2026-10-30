@@ -11,6 +11,8 @@ import { ClientAreaSecurityService } from './services/client-area-security.servi
 import { ClientAreaCompanyHooksRegistry } from './client-area-company-hooks.registry';
 import { ClientAreaPublicController } from './controllers/client-area-public.controller';
 import { ClientAreaPreferencesController } from './controllers/client-area-preferences.controller';
+import { ClientAreaProfileController } from './controllers/client-area-profile.controller';
+import { ClientAreaProfileService } from './services/client-area-profile.service';
 import { ClientAreaPublicBrandingService } from './services/client-area-public-branding.service';
 import { ClientAreaIdentityPreferencesEntity } from './entities/client-area-identity-preferences.entity';
 import { APP_INTERCEPTOR } from '@nestjs/core';
@@ -53,6 +55,7 @@ import { ContactEntity } from '../contacts/entities/contact.entity';
 import { ContactCompanyLinkEntity } from '../contacts/entities/contact-company-link.entity';
 import { AgencyContactProfileEntity } from '../agency/entities/agency-contact-details.entities';
 import { FilesModule } from '../../common/files/files.module';
+import { UserProfileEntity } from '../settings/entities/user-profile.entity';
 import { EmailModule } from '../email/email.module';
 import { TenantProductEntitlementEntity } from '../platform/entities/tenant-product-entitlement.entity';
 import {
@@ -147,6 +150,7 @@ const AGENCY_CONNECTION = 'agency';
         ContactCompanyLinkEntity,
         AgencyContactProfileEntity,
         TenantProductEntitlementEntity,
+        UserProfileEntity,
       ],
       AGENCY_CONNECTION,
     ),
@@ -157,6 +161,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaSecurityController,
     ClientAreaPublicController,
     ClientAreaPreferencesController,
+    ClientAreaProfileController,
     ClientAreaAccessController,
     ClientAreaAuthController,
     ClientAreaDirectoryController,
@@ -167,6 +172,7 @@ const AGENCY_CONNECTION = 'agency';
     ClientAreaSecurityService,
     ClientAreaCompanyHooksRegistry,
     ClientAreaPublicBrandingService,
+    ClientAreaProfileService,
     ClientAreaBridgeAuthenticator,
     ClientAreaMemberAccessService,
     ClientAreaConsentService,

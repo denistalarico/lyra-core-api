@@ -12,4 +12,6 @@ export class ClientAreaIdentityPreferencesEntity {
     | 'pt-BR'
     | 'en'
     | 'es';
+  @Column({ name: 'sidebar_collapsed', type: 'boolean', default: false })
+  sidebarCollapsed!: boolean;
 }

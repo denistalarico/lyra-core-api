@@ -147,18 +147,30 @@ describe('CA8 HTTP contracts (auth identity fixture)', () => {
       branding: { displayName: 'Agency', login: { layout: 'centered' } },
     });
   });
-  it('preferences project only theme/locale and use the verified identity', async () => {
+  it('preferences project theme/locale/sidebar and use the verified identity', async () => {
     await request(app.getHttpServer())
       .get('/client-area/me/preferences')
       .set('x-user-id', 'forged')
       .expect(200)
-      .expect({ theme: 'dark', locale: 'es' });
+      .expect({ theme: 'dark', locale: 'es', sidebarCollapsed: false });
     await request(app.getHttpServer())
       .patch('/client-area/me/preferences')
       .send({ theme: 'light' })
       .expect(200);
     expect(repo.upsert).toHaveBeenLastCalledWith(
       { tenantId: 'verified-tenant', userId: 'verified-user', theme: 'light' },
+      ['tenantId', 'userId'],
+    );
+    await request(app.getHttpServer())
+      .patch('/client-area/me/preferences')
+      .send({ sidebarCollapsed: true })
+      .expect(200);
+    expect(repo.upsert).toHaveBeenLastCalledWith(
+      {
+        tenantId: 'verified-tenant',
+        userId: 'verified-user',
+        sidebarCollapsed: true,
+      },
       ['tenantId', 'userId'],
     );
     await request(app.getHttpServer())

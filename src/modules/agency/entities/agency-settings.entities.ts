@@ -79,7 +79,7 @@ export class AgencyUserProfileEntity {
   @Column({ type: 'varchar', length: 160, default: '' })
   email!: string;
 
-  @Column({ type: 'varchar', length: 40, nullable: true })
+  @Column({ type: 'varchar', length: 32, nullable: true })
   phone!: string | null;
 
   /**
@@ -100,6 +100,14 @@ export class AgencyUserProfileEntity {
 
   @Column({ name: 'avatar_path', type: 'varchar', length: 255, nullable: true })
   avatarPath!: string | null;
+
+  @Column({
+    name: 'avatar_asset_key',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  avatarAssetKey!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

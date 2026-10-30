@@ -315,6 +315,7 @@ export const CLIENT_AREA_ERROR_CODES = {
   invitationRequiresSignup: 'client_area_invitation_requires_signup',
   emailInvalid: 'client_area_email_invalid',
   passwordPolicy: 'client_area_password_policy',
+  invalidProfile: 'client_area_invalid_profile',
   resetTokenInvalid: 'client_area_reset_token_invalid',
   // PD3 — self-context. `selfContextNotFound` mirrors `companyNotFound`: one
   // generic answer for "not enabled", "no access", "revoked", "wrong tenant"

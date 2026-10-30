@@ -54,6 +54,7 @@ export type ClientAreaUserResponse = {
   id: string;
   email: string;
   displayName: string;
+  avatarUrl: string | null;
 };
 
 export type ClientAreaAuthenticatedResponse = {
@@ -357,6 +358,9 @@ export class ClientAreaAuthService {
       id: identity.userId,
       email: identity.currentEmail,
       displayName: profile?.displayName?.trim() || identity.currentEmail,
+      avatarUrl: profile?.avatarAssetKey
+        ? `/client-area/me/profile/avatar?v=${profile.updatedAt.getTime()}`
+        : null,
     };
   }
 

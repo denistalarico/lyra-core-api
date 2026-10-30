@@ -37,6 +37,9 @@ export class UserProfileEntity {
   @Column({ name: 'job_title', type: 'varchar', length: 80, nullable: true })
   jobTitle!: string | null;
 
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  phone!: string | null;
+
   @Column({ type: 'varchar', length: 280, nullable: true })
   bio!: string | null;
 
