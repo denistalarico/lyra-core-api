@@ -12,6 +12,7 @@ import { AddClientAreaAnalyticsAccess1801300000000 } from './migrations/18013000
 import { AddClientAreaLoginImage1801400000000 } from './migrations/1801400000000-add-client-area-login-image';
 import { AddClientAreaDomainTlsStatus1801500000000 } from './migrations/1801500000000-add-client-area-domain-tls-status';
 import { AddClientAreaProfilePreferences1801600000000 } from './migrations/1801600000000-add-client-area-profile-preferences';
+import { ReconcileUserProfileSchema1801700000000 } from './migrations/1801700000000-reconcile-user-profile-schema';
 import { AddSurfaceToTrustedDevices1800200000000 } from './migrations/1800200000000-add-surface-to-trusted-devices';
 import { CreateClientAreaAnalyticsDashboards1800100000000 } from './migrations/1800100000000-create-client-area-analytics-dashboards';
 import { CreateFinanceReceivableWriteOffs1799900000000 } from './migrations/1799900000000-create-finance-receivable-write-offs';
@@ -584,5 +585,6 @@ export const AgencyDataSource = new DataSource({
     AddClientAreaLoginImage1801400000000,
     AddClientAreaDomainTlsStatus1801500000000,
     AddClientAreaProfilePreferences1801600000000,
+    ReconcileUserProfileSchema1801700000000,
   ],
 });
