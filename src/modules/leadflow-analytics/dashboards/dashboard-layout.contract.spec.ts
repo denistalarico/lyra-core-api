@@ -2,6 +2,7 @@ import { projectOperationalAnalytics } from '../services/operational-analytics-p
 import { projectCommercialJourney } from '../services/commercial-journey-projector';
 import {
   DASHBOARD_CHANNEL_IDS,
+  normalizeLeadFlowLayout,
   parseDashboardLayout,
 } from './dashboard-layout.contract';
 import {
@@ -113,6 +114,22 @@ describe('CA12 LeadFlow canvas contract', () => {
       expect(typeof metric.additive).toBe('boolean');
       expect(metric.grain).toBeTruthy();
     }
+    expect(LEADFLOW_SECTIONS[0].label).toBe('Resumo');
+    expect(
+      LEADFLOW_METRIC_CATALOG.find(
+        (metric) => metric.id === 'commercial.stages',
+      )?.kind,
+    ).toBe('funnel');
+    expect(
+      LEADFLOW_METRIC_CATALOG.find(
+        (metric) => metric.id === 'commercial.funnel',
+      )?.kind,
+    ).toBe('comparison');
+    expect(
+      LEADFLOW_METRIC_CATALOG.find(
+        (metric) => metric.id === 'leadScore.distribution',
+      ),
+    ).toMatchObject({ label: 'Lead Score', kind: 'funnel' });
   });
   it('round-trips valid KPI layout and rejects unknown section, metric, duplicate and oversized cards', () => {
     const card = {
@@ -154,5 +171,89 @@ describe('CA12 LeadFlow canvas contract', () => {
         sections: [{ ...layout.sections[0], channel: 'facebook' }],
       }),
     ).toThrow();
+  });
+  it('accepts card presentation options and normalizes legacy visual card kinds', () => {
+    const legacy = {
+      version: 1,
+      sections: [
+        {
+          id: 'commercial',
+          channel: 'commercial',
+          title: 'Comercial',
+          cards: [
+            {
+              id: 'commercial.stages',
+              kind: 'table',
+              source: 'commercial.stages',
+              title: 'Etapas',
+              description: null,
+              size: { w: 10, h: 5 },
+            },
+            {
+              id: 'commercial.funnel',
+              kind: 'funnel',
+              source: 'commercial.funnel',
+              title: 'Oportunidades → ganhas',
+              description: null,
+              orientation: 'horizontal',
+              size: { w: 10, h: 5 },
+            },
+          ],
+        },
+      ],
+    };
+    const normalized = normalizeLeadFlowLayout(legacy);
+    expect(normalized.sections[0].cards).toEqual([
+      expect.objectContaining({ kind: 'funnel', source: 'commercial.stages' }),
+      expect.objectContaining({
+        kind: 'comparison',
+        metric: 'commercial.funnel',
+      }),
+    ]);
+    const funnel = normalized.sections[0].cards[0];
+    const parsed = parseDashboardLayout({
+      ...normalized,
+      sections: [
+        {
+          ...normalized.sections[0],
+          cards: [
+            {
+              ...funnel,
+              decimals: 1,
+              display: 'percent',
+              steps: [{ id: 'stage-new', metric: 'Novo', label: 'Novos' }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed.sections[0].cards[0]).toMatchObject({
+      decimals: 1,
+      display: 'percent',
+      steps: [{ id: 'stage-new', metric: 'Novo', label: 'Novos' }],
+    });
+    expect(() =>
+      parseDashboardLayout({
+        ...normalized,
+        sections: [
+          {
+            ...normalized.sections[0],
+            cards: [
+              {
+                ...funnel,
+                steps: [
+                  { id: 'duplicated', metric: 'Novo', label: 'Novos' },
+                  {
+                    id: 'duplicated',
+                    metric: 'Qualificado',
+                    label: 'Qualificados',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow('Há etapas repetidas no funil.');
   });
 });

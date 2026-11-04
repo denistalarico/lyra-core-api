@@ -19,6 +19,7 @@ export const DASHBOARD_CARD_KINDS = [
   'chart',
   'table',
   'funnel',
+  'comparison',
   'insight',
   'breakdown',
   // A sub-block holds one level of cards; nested groups are refused.
@@ -93,7 +94,7 @@ export function emptyDashboardLayout(
 }
 
 const DEFAULT_SECTION_TITLES: Record<DashboardChannelId, string> = {
-  overview: 'Visão geral',
+  overview: 'Resumo',
   service: 'Atendimento',
   commercial: 'Comercial',
   lead_quality: 'Qualidade dos leads',
@@ -262,14 +263,10 @@ function parseCard(
   const ids =
     raw.kind === 'chart'
       ? raw.metricIds
-      : raw.kind === 'funnel'
-        ? Array.isArray(raw.steps)
-          ? raw.steps.map((step: unknown) =>
-              isPlainObject(step) ? step.metric : null,
-            )
-          : [raw.source]
-        : raw.kind === 'table'
-          ? [raw.source]
+      : raw.kind === 'funnel' || raw.kind === 'table'
+        ? [raw.source]
+        : raw.kind === 'comparison'
+          ? [raw.metric]
           : raw.kind === 'insight'
             ? []
             : [raw.metric];
@@ -306,6 +303,64 @@ function parseCard(
     throw new DashboardLayoutError('Descrição do card inválida.');
   if (raw.kind === 'insight' && typeof raw.body !== 'string')
     throw new DashboardLayoutError('Análise inválida.');
+  if (
+    raw.decimals !== undefined &&
+    (typeof raw.decimals !== 'number' ||
+      !Number.isInteger(raw.decimals) ||
+      raw.decimals < 0 ||
+      raw.decimals > 6)
+  )
+    throw new DashboardLayoutError('Casas decimais inválidas.');
+  if (
+    raw.display !== undefined &&
+    (typeof raw.display !== 'string' ||
+      !['absolute', 'percent'].includes(raw.display))
+  )
+    throw new DashboardLayoutError('Exibição inválida.');
+  if (raw.kind === 'table' && raw.columns !== undefined) {
+    if (
+      !Array.isArray(raw.columns) ||
+      raw.columns.length > 40 ||
+      raw.columns.some(
+        (column) =>
+          !isPlainObject(column) ||
+          typeof column.id !== 'string' ||
+          column.id.length === 0 ||
+          column.id.length > 64 ||
+          typeof column.visible !== 'boolean',
+      )
+    )
+      throw new DashboardLayoutError('Colunas da tabela inválidas.');
+    if (
+      new Set((raw.columns as Array<{ id: string }>).map((column) => column.id))
+        .size !== raw.columns.length
+    )
+      throw new DashboardLayoutError('Há colunas repetidas na tabela.');
+  }
+  if (raw.kind === 'funnel' && raw.steps !== undefined) {
+    if (
+      !Array.isArray(raw.steps) ||
+      raw.steps.length > 8 ||
+      raw.steps.some(
+        (step) =>
+          !isPlainObject(step) ||
+          typeof step.id !== 'string' ||
+          step.id.length === 0 ||
+          step.id.length > 64 ||
+          typeof step.metric !== 'string' ||
+          step.metric.length === 0 ||
+          step.metric.length > 120 ||
+          typeof step.label !== 'string' ||
+          step.label.length > 40,
+      )
+    )
+      throw new DashboardLayoutError('Etapas do funil inválidas.');
+    if (
+      new Set((raw.steps as Array<{ id: string }>).map((step) => step.id))
+        .size !== raw.steps.length
+    )
+      throw new DashboardLayoutError('Há etapas repetidas no funil.');
+  }
   const defaults =
     raw.kind === 'chart'
       ? { chartType: 'line' }
@@ -334,7 +389,75 @@ function parseCard(
     (typeof raw.render !== 'string' || !['chart', 'table'].includes(raw.render))
   )
     throw new DashboardLayoutError('Distribuição inválida.');
+  if (
+    raw.kind === 'breakdown' &&
+    raw.orientation !== undefined &&
+    (typeof raw.orientation !== 'string' ||
+      !['horizontal', 'vertical'].includes(raw.orientation))
+  )
+    throw new DashboardLayoutError('Orientação da distribuição inválida.');
   return { ...defaults, ...raw, id, kind: raw.kind, size };
+}
+
+/**
+ * Upgrades visual-only legacy card shapes while keeping the layout envelope at
+ * version 1. Stored source metrics are unchanged; only their presentation kind
+ * and current product label are normalized before the document reaches a UI.
+ */
+export function normalizeLeadFlowLayout(value: unknown): DashboardLayout {
+  if (!isPlainObject(value) || !Array.isArray(value.sections)) {
+    return emptyDashboardLayout([]);
+  }
+
+  const sections = (value.sections as unknown[]).map((rawSection) => {
+    if (!isPlainObject(rawSection) || !Array.isArray(rawSection.cards))
+      return rawSection;
+    return {
+      ...rawSection,
+      title:
+        rawSection.channel === 'overview' && rawSection.title === 'Visão geral'
+          ? 'Resumo'
+          : rawSection.title,
+      cards: (rawSection.cards as unknown[]).map(normalizeLegacyCard),
+    };
+  });
+
+  return parseDashboardLayout({ ...value, sections });
+}
+
+function normalizeLegacyCard(raw: unknown): unknown {
+  if (!isPlainObject(raw)) return raw;
+  if (raw.kind === 'group' && Array.isArray(raw.cards)) {
+    return {
+      ...raw,
+      cards: (raw.cards as unknown[]).map(normalizeLegacyCard),
+    };
+  }
+
+  const metricValue = raw.source ?? raw.metric ?? raw.id;
+  const metric = typeof metricValue === 'string' ? metricValue : '';
+  if (metric === 'commercial.stages') {
+    return {
+      ...raw,
+      kind: 'funnel',
+      source: metric,
+      orientation: raw.orientation === 'horizontal' ? 'horizontal' : 'vertical',
+    };
+  }
+  if (metric === 'commercial.funnel') {
+    return { ...raw, kind: 'comparison', metric };
+  }
+  if (metric === 'leadScore.distribution') {
+    return {
+      ...raw,
+      kind: 'funnel',
+      source: metric,
+      title: raw.title === 'Frio, morno e quente' ? 'Lead Score' : raw.title,
+      orientation: raw.orientation === 'horizontal' ? 'horizontal' : 'vertical',
+    };
+  }
+  if (raw.kind === 'table') return { ...raw, compact: true };
+  return raw;
 }
 
 function parseSize(raw: unknown): DashboardCardSize {

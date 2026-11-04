@@ -1,6 +1,6 @@
 /** CA12 canonical catalog. Values are read from existing projections, never recomputed. */
 export const LEADFLOW_SECTIONS = [
-  { id: 'overview', label: 'Visão geral', clientVisible: true },
+  { id: 'overview', label: 'Resumo', clientVisible: true },
   { id: 'service', label: 'Atendimento', clientVisible: true },
   { id: 'commercial', label: 'Comercial', clientVisible: true },
   { id: 'lead_quality', label: 'Qualidade dos leads', clientVisible: true },
@@ -24,7 +24,7 @@ export type LeadFlowMetric = {
   grain: string;
   source: string;
   path: string;
-  kind: 'kpi' | 'chart' | 'table' | 'funnel' | 'breakdown';
+  kind: 'kpi' | 'chart' | 'table' | 'funnel' | 'comparison' | 'breakdown';
 };
 export const LEADFLOW_METRIC_CATALOG: readonly LeadFlowMetric[] = [
   {
@@ -685,7 +685,7 @@ export const LEADFLOW_METRIC_CATALOG: readonly LeadFlowMetric[] = [
     grain: 'period_projection',
     source: 'commercial',
     path: 'stages',
-    kind: 'table',
+    kind: 'funnel',
   },
   {
     id: 'commercial.wonValues',
@@ -707,18 +707,18 @@ export const LEADFLOW_METRIC_CATALOG: readonly LeadFlowMetric[] = [
     grain: 'period_projection',
     source: 'commercial',
     path: 'summary',
-    kind: 'funnel',
+    kind: 'comparison',
   },
   {
     id: 'leadScore.distribution',
     section: 'lead_quality',
-    label: 'Frio, morno e quente',
+    label: 'Lead Score',
     unit: 'rows',
     additive: false,
     grain: 'period_projection',
     source: 'operational',
     path: 'leadScore.distribution',
-    kind: 'breakdown',
+    kind: 'funnel',
   },
   {
     id: 'leadScore.businessModes',

@@ -12,6 +12,7 @@ import {
   DASHBOARD_CHANNEL_IDS,
   DashboardLayoutError,
   emptyDashboardLayout,
+  normalizeLeadFlowLayout,
   parseDashboardLayout,
   type DashboardChannelId,
   type DashboardLayout,
@@ -29,7 +30,7 @@ import {
 
 /** Stable alias for the scope's built-in dashboard, resolved before writes. */
 export const DEFAULT_DASHBOARD_ALIAS = 'overview';
-export const DEFAULT_DASHBOARD_NAME = 'Visão Geral';
+export const DEFAULT_DASHBOARD_NAME = 'Resumo';
 
 /** Fixed channel screens complement the default dashboard. */
 export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
@@ -247,7 +248,7 @@ export class LeadFlowAnalyticsDashboardsService {
     // would strand those URLs, and the next read would seed it straight back.
     if (dashboard.isDefault) {
       throw new BadRequestException(
-        'O dashboard "Visão Geral" não pode ser excluído.',
+        'O dashboard "Resumo" não pode ser excluído.',
       );
     }
 
@@ -454,12 +455,12 @@ export class LeadFlowAnalyticsDashboardsService {
   ): LeadFlowAnalyticsDashboardView {
     return {
       id: row.id,
-      name: row.name,
+      name: row.isDefault ? DEFAULT_DASHBOARD_NAME : row.name,
       description: row.description ?? null,
       isDefault: row.isDefault,
       channelKey: row.channelKey ?? null,
       channels: row.channels ?? [],
-      layout: row.layout ?? emptyDashboardLayout([]),
+      layout: normalizeLeadFlowLayout(row.layout ?? emptyDashboardLayout([])),
       ownedByMe:
         row.clientAreaOwnerUserId != null &&
         row.clientAreaOwnerUserId === principal.clientAreaUserId,
@@ -482,16 +483,28 @@ export function defaultLeadFlowLayout(
       title: metric.label,
       description: null,
       ...(metric.kind === 'funnel'
-        ? { orientation: 'horizontal' }
+        ? { orientation: 'vertical' }
         : metric.kind === 'breakdown'
           ? { render: 'chart' }
           : {}),
-      size: metric.kind === 'kpi' ? { w: 2, h: 1 } : { w: 10, h: 5 },
+      size:
+        metric.kind === 'kpi'
+          ? { w: 2, h: 1 }
+          : metric.kind === 'comparison'
+            ? { w: 5, h: 2 }
+            : metric.kind === 'funnel'
+              ? { w: 5, h: 6 }
+              : { w: 10, h: 5 },
       ...(metric.kind === 'table' || metric.kind === 'funnel'
-        ? { source: metric.id }
-        : metric.kind === 'chart'
-          ? { metricIds: [metric.id], chartType: 'line' }
-          : { metric: metric.id }),
+        ? {
+            source: metric.id,
+            ...(metric.kind === 'table' ? { compact: true } : {}),
+          }
+        : metric.kind === 'comparison'
+          ? { metric: metric.id }
+          : metric.kind === 'chart'
+            ? { metricIds: [metric.id], chartType: 'line' }
+            : { metric: metric.id }),
     }));
   }
   return layout;
