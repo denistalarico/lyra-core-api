@@ -388,19 +388,6 @@ export class PatchAgencyFinanceDto {
   fiscalEmail?: string | null;
 }
 
-export class PatchAgencySubscriptionsDto {
-  @IsString()
-  @MaxLength(40)
-  planKey!: string;
-
-  @IsString()
-  @MaxLength(30)
-  status!: string;
-
-  @IsObject()
-  limits!: Record<string, unknown>;
-}
-
 export class PatchAgencyAdvancedDto {
   @IsBoolean()
   developerMode!: boolean;

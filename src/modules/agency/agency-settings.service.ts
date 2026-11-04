@@ -50,7 +50,6 @@ import {
   PatchAgencyNotificationsDto,
   PatchAgencyPermissionMatrixDto,
   PatchAgencySecurityDto,
-  PatchAgencySubscriptionsDto,
   PatchAgencyUserPreferencesDto,
   PatchAgencyUserProfileDto,
   PatchAgencyUserPermissionOverrideDto,
@@ -915,19 +914,6 @@ export class AgencySettingsService {
         where: { tenantId, workspaceId },
       })) ?? this.subscriptionsRepo.create({ tenantId, workspaceId })
     );
-  }
-
-  async patchSubscriptions(
-    tenantId: string,
-    workspaceId: string,
-    dto: PatchAgencySubscriptionsDto,
-  ) {
-    await this.subscriptionsRepo.upsert(
-      { tenantId, workspaceId, ...dto, limits: dto.limits as never },
-      ['tenantId', 'workspaceId'],
-    );
-
-    return this.getSubscriptions(tenantId, workspaceId);
   }
 
   async getAdvanced(tenantId: string, workspaceId: string) {

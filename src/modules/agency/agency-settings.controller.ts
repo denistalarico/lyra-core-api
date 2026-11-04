@@ -27,7 +27,6 @@ import {
   PatchAgencyIntegrationsDto,
   PatchAgencyNotificationsDto,
   PatchAgencyPermissionMatrixDto,
-  PatchAgencySubscriptionsDto,
   PatchAgencyUserPermissionOverrideDto,
   PatchAgencyUserPreferencesDto,
   PatchAgencyUserProfileDto,
@@ -419,21 +418,6 @@ export class AgencySettingsController {
     return this.agencySettingsService.getSubscriptions(
       ctx.tenantId,
       ctx.workspaceId,
-    );
-  }
-
-  @Patch('subscriptions')
-  @DangerousAction()
-  @RequirePermission('agency.settings.billing.manage.owner_only')
-  patchSubscriptions(
-    @RequestContextData() ctx: RequestContext,
-    @Body() dto: PatchAgencySubscriptionsDto,
-  ) {
-    this.assertWorkspaceContext(ctx);
-    return this.agencySettingsService.patchSubscriptions(
-      ctx.tenantId,
-      ctx.workspaceId,
-      dto,
     );
   }
 
