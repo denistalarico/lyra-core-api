@@ -7,6 +7,7 @@ import {
   socialChannelDefaultLayout,
   type SocialChannelDefaultId,
 } from './defaults/social-channel-default-layouts';
+import { socialOverviewDefaultLayout } from './defaults/social-overview-default-layout';
 import type { SocialAnalyticsDashboardEntity } from './entities';
 import {
   SEEDED_CHANNEL_DASHBOARDS,
@@ -286,9 +287,7 @@ describe('SocialAnalyticsDashboardsService', () => {
       await service.list(scope, null);
 
       const seededChannels = repository.save.mock.calls
-        .map(
-          ([entity]) => (entity as SocialAnalyticsDashboardEntity).channelKey,
-        )
+        .map(([entity]) => entity.channelKey)
         .filter(Boolean);
 
       expect(seededChannels).toEqual(['facebook', 'instagram', 'meta_ads']);
@@ -321,15 +320,11 @@ describe('SocialAnalyticsDashboardsService', () => {
         );
       }
 
-      // The Visão Geral seed is untouched: empty blocks, one per channel.
+      // Visão Geral uses the configured product snapshot only at creation.
       const overview = repository.save.mock.calls
         .map(([entity]) => entity)
         .find((entity) => entity.isDefault);
-      expect(
-        overview?.layout.sections.every(
-          (section) => section.cards.length === 0,
-        ),
-      ).toBe(true);
+      expect(overview?.layout).toEqual(socialOverviewDefaultLayout());
     });
 
     it('does not promote an operator-made dashboard into a channel screen', async () => {

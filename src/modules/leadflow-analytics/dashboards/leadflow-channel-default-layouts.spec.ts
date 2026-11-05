@@ -20,9 +20,22 @@ describe('LeadFlow channel default layouts', () => {
   });
 
   it('uses the configured Visão Geral snapshot for every new scope', () => {
-    expect(defaultLeadFlowLayout([...DASHBOARD_CHANNEL_IDS])).toEqual(
-      leadFlowOverviewDefaultLayout(),
-    );
+    const layout = leadFlowOverviewDefaultLayout();
+
+    expect(defaultLeadFlowLayout([...DASHBOARD_CHANNEL_IDS])).toEqual(layout);
+    expect(parseDashboardLayout(layout)).toEqual(layout);
+    expect(
+      layout.sections.map((section) => [
+        section.channel,
+        section.cards.length,
+        section.cards.filter((card) => card.highlighted === true).length,
+      ]),
+    ).toEqual([
+      ['overview', 5, 2],
+      ['service', 13, 8],
+      ['commercial', 11, 3],
+      ['lead_quality', 6, 2],
+    ]);
   });
 
   it.each([

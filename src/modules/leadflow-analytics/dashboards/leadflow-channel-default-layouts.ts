@@ -2,6 +2,7 @@ import type {
   DashboardLayout,
   DashboardSection,
 } from './dashboard-layout.contract';
+import { leadFlowConfiguredOverviewDefaultLayout } from './leadflow-overview-default-layout';
 
 export const LEADFLOW_FIXED_CHANNEL_IDS = [
   'service',
@@ -14,13 +15,14 @@ export type LeadFlowFixedChannelId =
   (typeof LEADFLOW_FIXED_CHANNEL_IDS)[number];
 
 /**
- * Snapshot of Visão Geral as configured in production on 2026-11-04.
+ * Channel template captured from Visão Geral on 2026-11-04.
  *
- * Keep this literal stable: it is the product default for new scopes. The four
- * channel screens use exact clones of their matching sections, including card
- * order, grid positions, dimensions, highlights and presentation options.
+ * Keep this literal stable: the four fixed channel screens use exact clones of
+ * their matching sections. The newer built-in Visão Geral snapshot lives in
+ * `leadflow-overview-default-layout.ts`, so changing its initial screen does
+ * not silently change these channel defaults.
  */
-export const LEADFLOW_OVERVIEW_DEFAULT_LAYOUT: DashboardLayout = {
+export const LEADFLOW_CHANNEL_DEFAULT_TEMPLATE: DashboardLayout = {
   version: 1,
   sections: [
     {
@@ -810,7 +812,7 @@ export const LEADFLOW_OVERVIEW_DEFAULT_LAYOUT: DashboardLayout = {
 };
 
 function configuredSection(channel: LeadFlowFixedChannelId): DashboardSection {
-  const section = LEADFLOW_OVERVIEW_DEFAULT_LAYOUT.sections.find(
+  const section = LEADFLOW_CHANNEL_DEFAULT_TEMPLATE.sections.find(
     (entry) => entry.channel === channel,
   );
   if (!section) {
@@ -827,7 +829,7 @@ export const LEADFLOW_CHANNEL_DEFAULT_SECTIONS = Object.fromEntries(
 ) as Record<LeadFlowFixedChannelId, DashboardSection>;
 
 export function leadFlowOverviewDefaultLayout(): DashboardLayout {
-  return structuredClone(LEADFLOW_OVERVIEW_DEFAULT_LAYOUT);
+  return leadFlowConfiguredOverviewDefaultLayout();
 }
 
 export function leadFlowChannelDefaultLayout(

@@ -19,6 +19,7 @@ import {
   socialChannelDefaultLayout,
   type SocialChannelDefaultId,
 } from './defaults/social-channel-default-layouts';
+import { socialOverviewDefaultLayout } from './defaults/social-overview-default-layout';
 import {
   CreateSocialAnalyticsDashboardDto,
   UpdateSocialAnalyticsDashboardDto,
@@ -318,7 +319,7 @@ export class SocialAnalyticsDashboardsService {
           name: DEFAULT_DASHBOARD_NAME,
           isDefault: true,
           channels,
-          layout: emptyDashboardLayout(channels),
+          layout: socialOverviewDefaultLayout(),
           createdById: actorId,
         }),
       );
