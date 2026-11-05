@@ -27,10 +27,16 @@ import {
   assertClientAreaMayChange,
   type AnalyticsDashboardPrincipal,
 } from '../../analytics-overview/analytics-dashboard-client-area.policy';
+import {
+  LEADFLOW_FIXED_CHANNEL_IDS,
+  leadFlowChannelDefaultLayout,
+  leadFlowOverviewDefaultLayout,
+  type LeadFlowFixedChannelId,
+} from './leadflow-channel-default-layouts';
 
 /** Stable alias for the scope's built-in dashboard, resolved before writes. */
 export const DEFAULT_DASHBOARD_ALIAS = 'overview';
-export const DEFAULT_DASHBOARD_NAME = 'Resumo';
+export const DEFAULT_DASHBOARD_NAME = 'Visão Geral';
 
 /** Fixed channel screens complement the default dashboard. */
 export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
@@ -248,7 +254,7 @@ export class LeadFlowAnalyticsDashboardsService {
     // would strand those URLs, and the next read would seed it straight back.
     if (dashboard.isDefault) {
       throw new BadRequestException(
-        'O dashboard "Resumo" não pode ser excluído.',
+        'O dashboard "Visão Geral" não pode ser excluído.',
       );
     }
 
@@ -473,6 +479,18 @@ export class LeadFlowAnalyticsDashboardsService {
 export function defaultLeadFlowLayout(
   channels: DashboardChannelId[],
 ): DashboardLayout {
+  const isCompleteOverview =
+    channels.length === DASHBOARD_CHANNEL_IDS.length &&
+    DASHBOARD_CHANNEL_IDS.every((channel) => channels.includes(channel));
+  if (isCompleteOverview) return leadFlowOverviewDefaultLayout();
+
+  if (
+    channels.length === 1 &&
+    LEADFLOW_FIXED_CHANNEL_IDS.includes(channels[0] as LeadFlowFixedChannelId)
+  ) {
+    return leadFlowChannelDefaultLayout(channels[0] as LeadFlowFixedChannelId);
+  }
+
   const layout = emptyDashboardLayout(channels);
   for (const section of layout.sections) {
     section.cards = LEADFLOW_METRIC_CATALOG.filter(
