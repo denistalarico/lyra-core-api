@@ -441,6 +441,11 @@ export class FinanceProfitabilityService {
     const activeRecurringProfiles = clientRecurringProfiles.filter(
       (profile) => String(profile.status) === 'active',
     );
+    const clientRevenueRecurringProfiles =
+      this.deduplicateAgencyClientRecurringProfiles(
+        activeRecurringProfiles,
+        new Set(customerClientIds.values()),
+      );
 
     const projectsProfitability = projects.map((project) => {
       const projectTasks = tasksByProjectId.get(project.id) ?? [];
@@ -516,7 +521,7 @@ export class FinanceProfitabilityService {
 
       const recurringRevenue = this.sumClientRecurringRevenue(
         clientId,
-        activeRecurringProfiles,
+        clientRevenueRecurringProfiles,
       );
 
       const directCosts = directCostByClientId.get(clientId) ?? 0;
@@ -1727,6 +1732,33 @@ export class FinanceProfitabilityService {
     return profiles
       .filter((profile) => profile.customerId === clientId)
       .reduce((sum, profile) => sum + this.normalizeRecurringAmount(profile), 0);
+  }
+
+  private deduplicateAgencyClientRecurringProfiles(
+    profiles: FinanceRecurringProfile[],
+    agencyClientIds: Set<string>,
+  ) {
+    const independentProfiles: FinanceRecurringProfile[] = [];
+    const latestProfileByClient = new Map<string, FinanceRecurringProfile>();
+
+    for (const profile of profiles) {
+      const clientId = profile.customerId ?? '';
+      if (!agencyClientIds.has(clientId)) {
+        independentProfiles.push(profile);
+        continue;
+      }
+
+      const current = latestProfileByClient.get(clientId);
+      const profileTimestamp =
+        profile.updatedAt?.getTime() ?? profile.createdAt?.getTime() ?? 0;
+      const currentTimestamp =
+        current?.updatedAt?.getTime() ?? current?.createdAt?.getTime() ?? 0;
+      if (!current || profileTimestamp >= currentTimestamp) {
+        latestProfileByClient.set(clientId, profile);
+      }
+    }
+
+    return [...independentProfiles, ...latestProfileByClient.values()];
   }
 
   private sumProjectDirectCosts(projectId: string, bills: FinanceBill[]) {

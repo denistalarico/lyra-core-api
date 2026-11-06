@@ -431,6 +431,44 @@ describe('FinanceProfitabilityService — direct profitability', () => {
     expect(client?.margin).not.toBe(1);
   });
 
+  it('counts only one active recurrence in an Agency client revenue', async () => {
+    const data = baseData({
+      clients: [{ id: CLIENT, contactId: 'contact-client-1' }],
+      projects: [],
+      tasks: [],
+      checklistItems: [],
+      timeEntries: [],
+      invoices: [],
+      bills: [],
+      billLines: [],
+      recurringProfiles: [
+        {
+          id: 'older-duplicate',
+          customerId: 'contact-client-1',
+          status: 'active',
+          interval: 'monthly',
+          amount: '4897',
+          updatedAt: new Date('2026-11-01T12:00:00Z'),
+        },
+        {
+          id: 'newer-duplicate',
+          customerId: 'contact-client-1',
+          status: 'active',
+          interval: 'monthly',
+          amount: '4897',
+          updatedAt: new Date('2026-11-02T12:00:00Z'),
+        },
+      ],
+    });
+
+    const overview = await makeService(data).getOverview(ctx());
+
+    expect(overview.clients.find((item) => item.id === CLIENT)?.revenue).toBe(
+      4897,
+    );
+    expect(overview.summary.revenue).toBe(4897);
+  });
+
   it('falls back to monthlyCost / contracted hours when no hourly cost is set', async () => {
     const data = baseData();
     data.members = [
