@@ -233,6 +233,25 @@ describe('FinanceService reports overview', () => {
     expect(result.cards.activeContracts).toBe(4);
   });
 
+  it('counts only one monthly recurrence per active Agency client', async () => {
+    const { service } = makeService({
+      clients: [client('duplicated', 'active', 4897)],
+      profiles: [
+        profile('older-duplicate', 'contact-duplicated', 4897, {
+          updatedAt: new Date('2026-10-01T12:00:00Z'),
+        }),
+        profile('newer-duplicate', 'contact-duplicated', 4897, {
+          updatedAt: new Date('2026-10-02T12:00:00Z'),
+        }),
+      ],
+    });
+
+    const result = await service.getReportsOverview(context);
+
+    expect(result.cards.mrr).toBe(4897);
+    expect(result.cards.activeContracts).toBe(1);
+  });
+
   it('excludes expired, future and non-active recurring profiles', async () => {
     const { service } = makeService({
       profiles: [

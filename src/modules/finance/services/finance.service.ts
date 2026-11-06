@@ -751,6 +751,44 @@ export class FinanceService {
     const activeMonthlyProfiles = activeRecurringProfiles.filter(
       (profile) => profile.interval === FinanceRecurringInterval.Monthly,
     );
+    const activeClientIdByCustomerId = new Map<string, string>();
+    for (const client of activeClients) {
+      activeClientIdByCustomerId.set(client.id, client.id);
+      if (client.contactId) {
+        activeClientIdByCustomerId.set(client.contactId, client.id);
+      }
+    }
+    const standaloneMonthlyProfiles: (typeof activeMonthlyProfiles)[number][] =
+      [];
+    const monthlyProfileByClient = new Map<
+      string,
+      (typeof activeMonthlyProfiles)[number]
+    >();
+    for (const profile of activeMonthlyProfiles) {
+      const clientId = profile.customerId
+        ? activeClientIdByCustomerId.get(profile.customerId)
+        : undefined;
+      if (!clientId) {
+        standaloneMonthlyProfiles.push(profile);
+        continue;
+      }
+      const current = monthlyProfileByClient.get(clientId);
+      const profileTimestamp =
+        profile.updatedAt?.getTime() ?? profile.createdAt?.getTime() ?? 0;
+      const currentTimestamp =
+        current?.updatedAt?.getTime() ?? current?.createdAt?.getTime() ?? 0;
+      if (!current || profileTimestamp >= currentTimestamp) {
+        monthlyProfileByClient.set(clientId, profile);
+      }
+    }
+    // Agency clients represent one active contract in the product. Legacy or
+    // retried writes can leave more than one active recurrence for the same
+    // client, so only its latest monthly profile contributes to MRR. Finance-
+    // only profiles remain independent and continue to be summed normally.
+    const monthlyMrrProfiles = [
+      ...standaloneMonthlyProfiles,
+      ...monthlyProfileByClient.values(),
+    ];
     const recurringProfileCustomerIds = new Set(
       activeMonthlyProfiles
         .map((profile) => profile.customerId)
@@ -767,7 +805,7 @@ export class FinanceService {
       .filter((fee) => fee > 0);
 
     const mrr =
-      activeMonthlyProfiles.reduce(
+      monthlyMrrProfiles.reduce(
         (sum, profile) => sum + this.toNumber(profile.amount),
         0,
       ) + contractedClientMonthlyFees.reduce((sum, fee) => sum + fee, 0);
