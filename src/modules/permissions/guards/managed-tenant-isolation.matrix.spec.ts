@@ -200,6 +200,8 @@ function createFixture() {
     platformContextService,
     { assertScope: jest.fn().mockResolvedValue(undefined) } as never,
     managedContextDirectory,
+    createFakeRepository([]) as never,
+    createFakeRepository([]) as never,
   );
 
   const resolver = new OperationalContextResolver(

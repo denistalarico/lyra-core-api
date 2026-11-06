@@ -10,7 +10,13 @@ import {
 
 export type AgencyWorkspaceRole = 'owner' | 'admin' | 'manager' | 'member';
 export type AgencyWorkspaceUserStatus = 'active' | 'invited' | 'inactive';
-export type AgencyPermissionAccess = 'full' | 'partial' | 'blocked';
+export type AgencyPermissionAccess =
+  | 'manager'
+  | 'member'
+  | 'blocked'
+  // Legacy app-access values, read as "the role's level" / "member".
+  | 'full'
+  | 'partial';
 
 @Entity('user_preferences')
 @Unique('uq_agency_user_preferences_tenant_user', ['tenantId', 'userId'])

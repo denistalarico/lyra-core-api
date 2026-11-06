@@ -30,12 +30,16 @@ export class PlatformPermissionsController {
       throw new BadRequestException('Missing authenticated tenant context.');
     }
 
-    const permissions = await this.permissionService.getEffectivePermissions({
+    const context = {
       tenantId: user.tenantId,
       workspaceId: user.workspaceId,
       userId: user.sub,
       role: user.role,
-    });
+    };
+    const [permissions, moduleAccess] = await Promise.all([
+      this.permissionService.getEffectivePermissions(context),
+      this.permissionService.getModuleAccess(context),
+    ]);
     const dangerousPermissionKeys = new Set(getDangerousPermissionKeys());
     const effectivePermissionKeys = [...permissions].sort();
 
@@ -45,6 +49,9 @@ export class PlatformPermissionsController {
       userId: user.sub,
       role: user.role,
       permissions: effectivePermissionKeys,
+      // Product/module levels (`manager` | `member` | null) driving which
+      // products and modules the shell shows (Settings > Users).
+      moduleAccess,
       dangerousPermissions: effectivePermissionKeys.filter((permissionKey) =>
         dangerousPermissionKeys.has(permissionKey),
       ),
@@ -84,17 +91,22 @@ export class PlatformPermissionsController {
       role: user.role,
     };
 
-    const [agencyAvailable, clients] = await Promise.all([
+    const [entitled, moduleAccess, clients] = await Promise.all([
       this.permissionService.canAccessProduct(context, productKey),
+      this.permissionService.getModuleAccess(context),
       this.permissionService.listAuthorizedManagedClients(context, productKey),
     ]);
+    // A user without the product (level null) sees neither the agency's own
+    // context nor any client of it.
+    const hasProduct = moduleAccess[productKey] !== null;
+    const agencyAvailable = entitled && hasProduct;
 
     return {
       productKey,
       tenantId: user.tenantId,
       workspaceId: user.workspaceId,
       agency: { available: agencyAvailable },
-      clients,
+      clients: hasProduct ? clients : [],
     };
   }
 

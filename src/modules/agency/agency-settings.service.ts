@@ -66,6 +66,12 @@ import {
 } from '../permissions';
 
 const AGENCY_CONNECTION = 'agency';
+import {
+  ACCESS_KEYS,
+  resolveModuleAccess,
+} from '../permissions/catalog/module-access.catalog';
+import { PlatformRoleKey } from '../permissions/enums/permission.enums';
+
 const AGENCY_APP_KEYS = [
   'dashboard',
   'messages',
@@ -1021,15 +1027,19 @@ export class AgencySettingsService {
       profiles.map((profile) => [profile.userId, profile]),
     );
 
+    const clientProducts =
+      await this.platformPermissionService.listUsersClientProductAccess(
+        tenantId,
+        workspaceId,
+        userIds,
+      );
+
     return Promise.all(
       users.map(async (user) => {
-        const overrides = user.userId
-          ? await this.platformPermissionService.listUserPermissionOverrides(
-              tenantId,
-              user.userId,
-              workspaceId,
-            )
-          : [];
+        const permissions = await this.permissionsRepo.find({
+          where: { tenantId, workspaceId, workspaceUserId: user.id },
+          order: { appKey: 'ASC' },
+        });
 
         return {
           ...user,
@@ -1039,11 +1049,18 @@ export class AgencySettingsService {
           avatarPath: user.userId
             ? (profileByUserId.get(user.userId)?.avatarPath ?? null)
             : null,
-          permissions: await this.permissionsRepo.find({
-            where: { tenantId, workspaceId, workspaceUserId: user.id },
-            order: { appKey: 'ASC' },
-          }),
-          hasCustomPermissions: overrides.length > 0,
+          permissions,
+          // Resolved levels (role defaults + stored rows) for the access editor.
+          moduleAccess: resolveModuleAccess(
+            user.role as PlatformRoleKey,
+            permissions,
+          ),
+          clientProducts: clientProducts
+            .filter((grant) => grant.userId === user.userId)
+            .map(({ clientId, productKey }) => ({ clientId, productKey })),
+          hasCustomPermissions: permissions.some((row) =>
+            ACCESS_KEYS.includes(row.appKey),
+          ),
         };
       }),
     );
@@ -1055,10 +1072,6 @@ export class AgencySettingsService {
     dto: InviteAgencyWorkspaceUserDto,
   ) {
     const normalizedEmail = dto.email.trim().toLowerCase();
-    const permissionMatrix = await this.getPermissionMatrix(
-      tenantId,
-      workspaceId,
-    );
 
     const user = await this.workspaceUsersRepo.save(
       this.workspaceUsersRepo.create({
@@ -1073,18 +1086,8 @@ export class AgencySettingsService {
       }),
     );
 
-    await this.permissionsRepo.save(
-      AGENCY_APP_KEYS.map((appKey) =>
-        this.permissionsRepo.create({
-          tenantId,
-          workspaceId,
-          workspaceUserId: user.id,
-          appKey,
-          access: permissionMatrix.matrix[appKey]?.[dto.role] ?? 'partial',
-        }),
-      ),
-    );
-
+    // No access rows on invite: the role defaults apply until an Admin
+    // customizes them in "Gerenciar acesso".
     return this.getWorkspaceUsers(tenantId, workspaceId);
   }
 
@@ -1199,6 +1202,7 @@ export class AgencySettingsService {
     workspaceId: string,
     workspaceUserId: string,
     dto: PatchAgencyWorkspaceUserAccessDto,
+    actorUserId?: string,
   ) {
     const user = await this.workspaceUsersRepo.findOne({
       where: { tenantId, workspaceId, id: workspaceUserId },
@@ -1223,17 +1227,38 @@ export class AgencySettingsService {
       { role: dto.role },
     );
 
-    for (const permission of dto.permissions) {
-      await this.permissionsRepo.upsert(
-        {
-          tenantId,
-          workspaceId,
-          workspaceUserId,
-          appKey: permission.appKey,
-          access: permission.access,
-        },
-        ['workspaceUserId', 'appKey'],
+    // Full replacement: also drops the legacy per-app rows (`full`/`partial`).
+    await this.permissionsRepo.delete({ tenantId, workspaceId, workspaceUserId });
+    const rows = [
+      ...new Map(dto.permissions.map((item) => [item.appKey, item])).values(),
+    ];
+    if (rows.length > 0) {
+      await this.permissionsRepo.save(
+        rows.map((permission) =>
+          this.permissionsRepo.create({
+            tenantId,
+            workspaceId,
+            workspaceUserId,
+            appKey: permission.appKey,
+            access: permission.access,
+          }),
+        ),
       );
+    }
+
+    if (dto.clientProducts && user.userId) {
+      const levels = resolveModuleAccess(
+        dto.role as PlatformRoleKey,
+        rows,
+      );
+      await this.platformPermissionService.replaceUserClientProductAccess({
+        tenantId,
+        workspaceId,
+        userId: user.userId,
+        actorUserId: actorUserId ?? null,
+        grants: dto.clientProducts,
+        levels: { leadflow: levels.leadflow, social: levels.social },
+      });
     }
 
     return this.getWorkspaceUsers(tenantId, workspaceId);

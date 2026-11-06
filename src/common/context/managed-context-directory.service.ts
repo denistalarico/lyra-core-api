@@ -92,6 +92,29 @@ export class ManagedContextDirectoryService {
    * Checks whether the caller can operate a product contracted by a managed
    * client (blueprint sections 8.3 and 10/11).
    */
+  /** Active, managed clients of a workspace among `clientIds` (Settings > Users grants). */
+  async findWorkspaceClients(
+    tenantId: string,
+    workspaceId: string,
+    clientIds: string[],
+  ): Promise<Array<{ id: string; managedTenantId: string }>> {
+    const clients = await this.clientsRepository.find({
+      where: {
+        tenantId,
+        workspaceId,
+        id: In(clientIds),
+        status: AgencyClientStatus.Active,
+        archivedAt: IsNull(),
+      },
+    });
+    return clients
+      .filter((client) => Boolean(client.managedTenantId))
+      .map((client) => ({
+        id: client.id,
+        managedTenantId: client.managedTenantId as string,
+      }));
+  }
+
   async canAccessClientProduct(
     check: ManagedClientAccessCheck,
   ): Promise<boolean> {

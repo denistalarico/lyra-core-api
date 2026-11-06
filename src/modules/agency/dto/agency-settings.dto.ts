@@ -11,9 +11,12 @@ import {
   IsString,
   MaxLength,
   Min,
+  IsUUID,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ACCESS_KEYS } from '../../permissions/catalog/module-access.catalog';
+import type { ClientProductKey } from '../../permissions/enums/permission.enums';
 import type {
   AgencyPermissionAccess,
   AgencyWorkspaceRole,
@@ -432,22 +435,38 @@ export class PatchAgencyIntegrationsDto {
 }
 
 export class AgencyWorkspaceUserPermissionDto {
-  @IsString()
-  @MaxLength(40)
+  /** A product (`agency`, `leadflow`, `social`) or an Agency module key. */
+  @IsIn([...ACCESS_KEYS])
   appKey!: string;
 
-  @IsIn(['full', 'partial', 'blocked'])
-  access!: AgencyPermissionAccess;
+  @IsIn(['manager', 'member', 'blocked'])
+  access!: Extract<AgencyPermissionAccess, 'manager' | 'member' | 'blocked'>;
+}
+
+export class AgencyWorkspaceUserClientProductDto {
+  @IsUUID()
+  clientId!: string;
+
+  @IsIn(['leadflow', 'social'])
+  productKey!: ClientProductKey;
 }
 
 export class PatchAgencyWorkspaceUserAccessDto {
   @IsIn(['owner', 'admin', 'manager', 'member'])
   role!: AgencyWorkspaceRole;
 
+  /** Full replacement of the user's product/module levels. */
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AgencyWorkspaceUserPermissionDto)
   permissions!: AgencyWorkspaceUserPermissionDto[];
+
+  /** Full replacement of the user's LeadFlow/Social client grants. */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AgencyWorkspaceUserClientProductDto)
+  clientProducts?: AgencyWorkspaceUserClientProductDto[];
 }
 
 export class PatchAgencyPermissionMatrixDto {

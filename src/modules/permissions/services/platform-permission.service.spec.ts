@@ -26,6 +26,8 @@ function createService() {
   const contactsRepository = createRepositoryMock();
   const entitlementsRepository = createRepositoryMock();
   const auditRepository = createRepositoryMock();
+  const workspaceUsersRepository = createRepositoryMock();
+  const moduleAccessRepository = createRepositoryMock();
   const platformContextService = {
     getContext: jest.fn().mockResolvedValue({ products: [] }),
   };
@@ -59,10 +61,14 @@ function createService() {
     platformContextService as never,
     scopeEvaluator as never,
     managedContextDirectory,
+    workspaceUsersRepository as never,
+    moduleAccessRepository as never,
   );
 
   return {
     service,
+    workspaceUsersRepository,
+    moduleAccessRepository,
     managedContextDirectory,
     rolesRepository,
     rolePermissionsRepository,
@@ -349,21 +355,9 @@ describe('PlatformPermissionService', () => {
   });
 
   it('allows any permission alternative that passes role and scope', async () => {
-    const {
-      service,
-      rolesRepository,
-      rolePermissionsRepository,
-      userPermissionsRepository,
-      scopeEvaluator,
-    } = createService();
-    rolesRepository.findOne.mockResolvedValue({ id: 'role-1' });
-    rolePermissionsRepository.find.mockResolvedValue([
-      {
-        permissionKey: 'agency.calendar.events.view.department',
-        enabled: true,
-      },
-    ]);
-    userPermissionsRepository.find.mockResolvedValue([]);
+    const { service, scopeEvaluator } = createService();
+    // `view.self` is held but its scope fails; the alternative must win.
+    scopeEvaluator.assertScope.mockRejectedValueOnce(new Error('out of scope'));
 
     await expect(
       service.assertAny(
@@ -399,36 +393,112 @@ describe('PlatformPermissionService', () => {
     );
   });
 
-  it('applies only tenant-global and active-workspace user overrides', async () => {
-    const {
-      service,
-      rolesRepository,
-      rolePermissionsRepository,
-      userPermissionsRepository,
-    } = createService();
-    rolesRepository.findOne.mockResolvedValue({ id: 'role-1' });
-    rolePermissionsRepository.find.mockResolvedValue([]);
+  it('gives a Member the default modules at member level only', async () => {
+    const { service } = createService();
 
-    await service.getEffectivePermissions({
+    const permissions = await service.getEffectivePermissions({
       tenantId: 'tenant-1',
       workspaceId: 'workspace-1',
       userId: 'user-1',
       role: PlatformRoleKey.Member,
     });
 
-    expect(userPermissionsRepository.find).toHaveBeenCalledWith({
-      where: [
-        expect.objectContaining({
-          tenantId: 'tenant-1',
-          userId: 'user-1',
-        }),
-        {
-          tenantId: 'tenant-1',
-          workspaceId: 'workspace-1',
-          userId: 'user-1',
-        },
-      ],
+    expect(permissions.has('agency.tasks.task.create.assigned')).toBe(true);
+    expect(permissions.has('agency.knowledge.articles.comment')).toBe(true);
+    expect(permissions.has('agency.knowledge.wall.post')).toBe(false);
+    expect(permissions.has('agency.projects.project.create.department')).toBe(
+      false,
+    );
+    // Finance and Team are off by default.
+    expect(permissions.has('agency.finance.summary.view.finance_or_owner')).toBe(
+      false,
+    );
+    expect(permissions.has('agency.team.directory.view.all_members')).toBe(
+      false,
+    );
+    // Settings follow the role: own profile only.
+    expect(permissions.has('agency.settings.account.view.self')).toBe(true);
+    expect(permissions.has('agency.settings.users.manage.admin')).toBe(false);
+  });
+
+  it('cuts a Manager by module level and keeps settings Admin-only', async () => {
+    const { service, workspaceUsersRepository, moduleAccessRepository } =
+      createService();
+    workspaceUsersRepository.findOne.mockResolvedValue({ id: 'wu-1' });
+    moduleAccessRepository.find.mockResolvedValue([
+      { appKey: 'finance', access: 'member' },
+      { appKey: 'sales', access: 'blocked' },
+    ]);
+
+    const permissions = await service.getEffectivePermissions({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      userId: 'manager-1',
+      role: PlatformRoleKey.Manager,
     });
+
+    expect(workspaceUsersRepository.findOne).toHaveBeenCalledWith({
+      where: {
+        tenantId: 'tenant-1',
+        workspaceId: 'workspace-1',
+        userId: 'manager-1',
+      },
+    });
+    expect(permissions.has('agency.projects.project.delete.owner_only')).toBe(
+      true,
+    );
+    expect(permissions.has('agency.projects.stages.manage.admin')).toBe(false);
+    expect(permissions.has('agency.finance.summary.view.finance_or_owner')).toBe(
+      true,
+    );
+    expect(
+      permissions.has('agency.finance.transactions.manage.finance_or_owner'),
+    ).toBe(false);
+    expect(permissions.has('agency.sales.quotes.create')).toBe(false);
+  });
+
+  it('removes every Agency module when the Agency product is off', async () => {
+    const { service, workspaceUsersRepository, moduleAccessRepository } =
+      createService();
+    workspaceUsersRepository.findOne.mockResolvedValue({ id: 'wu-1' });
+    moduleAccessRepository.find.mockResolvedValue([
+      { appKey: 'agency', access: 'blocked' },
+    ]);
+    const context = {
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      role: PlatformRoleKey.Member,
+    };
+
+    const permissions = await service.getEffectivePermissions(context);
+    const access = await service.getModuleAccess(context);
+
+    expect(permissions.has('agency.tasks.task.create.assigned')).toBe(false);
+    expect(permissions.has('leadflow.inbox.conversation.view.assigned')).toBe(
+      true,
+    );
+    expect(access.agency).toBeNull();
+    expect(access.projects).toBeNull();
+    expect(access.leadflow).toBe('member');
+  });
+
+  it('gives Admin everything except deleting the account', async () => {
+    const { service } = createService();
+    const permissions = await service.getEffectivePermissions({
+      tenantId: 'tenant-1',
+      workspaceId: 'workspace-1',
+      userId: 'admin-1',
+      role: PlatformRoleKey.Admin,
+    });
+
+    expect(permissions.has('agency.settings.billing.manage.owner_only')).toBe(
+      true,
+    );
+    expect(permissions.has('agency.finance.fiscal.manage.owner_only')).toBe(true);
+    expect(
+      permissions.has('agency.settings.danger_zone.manage.owner_only'),
+    ).toBe(false);
   });
 
   describe('listAuthorizedManagedClients', () => {

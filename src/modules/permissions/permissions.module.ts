@@ -67,6 +67,10 @@ import {
   PlatformRolePermissionEntity,
   PlatformUserPermissionEntity,
 } from './entities';
+import {
+  AgencyWorkspaceUserEntity,
+  AgencyWorkspaceUserPermissionEntity,
+} from '../agency/entities/agency-settings.entities';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { PermissionScopeEvaluatorService } from './services/permission-scope-evaluator.service';
 import { PlatformPermissionService } from './services/platform-permission.service';
@@ -132,6 +136,8 @@ const AGENCY_CONNECTION = 'agency';
         AgencyKnowledgeQuickNote,
         AgencyKnowledgeVaultItem,
         ScheduledItemEntity,
+        AgencyWorkspaceUserEntity,
+        AgencyWorkspaceUserPermissionEntity,
       ],
       AGENCY_CONNECTION,
     ),

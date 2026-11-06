@@ -484,6 +484,7 @@ export class AgencySettingsController {
       ctx.workspaceId,
       workspaceUserId,
       dto,
+      ctx.userId,
     );
   }
 

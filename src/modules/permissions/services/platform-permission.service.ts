@@ -4,7 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type FindOptionsWhere, IsNull, Repository } from 'typeorm';
+import { type FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
 import {
   getPermissionDefinition,
   isKnownPermissionKey,
@@ -13,6 +13,8 @@ import {
 import { isOwnerOnlyPermissionKey } from '../catalog/permission-groups.catalog';
 import {
   CLIENT_ACCESS_LEVEL_ORDER,
+  ClientAccessLevel,
+  type ClientProductKey,
   ClientProductRoleKey,
   PlatformRoleKey,
 } from '../enums/permission.enums';
@@ -33,6 +35,17 @@ import {
   PermissionScopeRequest,
 } from '../types/permission-context.types';
 import { PermissionScopeEvaluatorService } from './permission-scope-evaluator.service';
+import { DEFAULT_ROLE_PERMISSION_MATRIX } from '../catalog/role-permission-matrix.catalog';
+import {
+  isModuleScopedRole,
+  type ModuleAccessLevel,
+  permissionsForModuleAccess,
+  resolveModuleAccess,
+} from '../catalog/module-access.catalog';
+import {
+  AgencyWorkspaceUserEntity,
+  AgencyWorkspaceUserPermissionEntity,
+} from '../../agency/entities/agency-settings.entities';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -62,6 +75,10 @@ export class PlatformPermissionService {
     private readonly platformContextService: PlatformContextService,
     private readonly scopeEvaluator: PermissionScopeEvaluatorService,
     private readonly managedContextDirectory: ManagedContextDirectoryService,
+    @InjectRepository(AgencyWorkspaceUserEntity, AGENCY_CONNECTION)
+    private readonly workspaceUsersRepository: Repository<AgencyWorkspaceUserEntity>,
+    @InjectRepository(AgencyWorkspaceUserPermissionEntity, AGENCY_CONNECTION)
+    private readonly moduleAccessRepository: Repository<AgencyWorkspaceUserPermissionEntity>,
   ) {}
 
   /**
@@ -100,40 +117,45 @@ export class PlatformPermissionService {
       return new Set(PERMISSION_KEYS);
     }
 
-    const role = await this.resolveRole(context.tenantId, roleKey);
-
-    if (!role) {
-      return new Set();
+    // The catalog is the single source of truth (Settings > Users
+    // simplification): Admin holds its role keys; Manager/Member are cut by
+    // their level per product/module. Role rows in `platform_role_permissions`
+    // and per-key user overrides are no longer read.
+    if (!isModuleScopedRole(roleKey)) {
+      return new Set(DEFAULT_ROLE_PERMISSION_MATRIX[roleKey]);
     }
 
-    const [systemRows, tenantRows] = await Promise.all([
-      this.rolePermissionsRepository.find({
-        where: { roleId: role.id, tenantId: IsNull() },
-      }),
-      this.rolePermissionsRepository.find({
-        where: { roleId: role.id, tenantId: context.tenantId },
-      }),
-    ]);
+    const levels = await this.getModuleAccess(context);
+    return new Set(permissionsForModuleAccess(roleKey, levels));
+  }
 
-    const effective = new Map<string, boolean>();
+  /**
+   * Resolved product/module levels for the caller (`null` = no access).
+   * Owner/Admin get `manager` on everything.
+   */
+  async getModuleAccess(
+    context: PermissionContext,
+  ): Promise<Record<string, ModuleAccessLevel | null>> {
+    const roleKey = normalizeRole(context.role);
 
-    for (const row of systemRows) {
-      effective.set(row.permissionKey, row.enabled);
+    if (!isModuleScopedRole(roleKey) || !context.workspaceId) {
+      return resolveModuleAccess(roleKey, []);
     }
 
-    for (const row of tenantRows) {
-      effective.set(row.permissionKey, row.enabled);
-    }
+    const workspaceUser = await this.workspaceUsersRepository.findOne({
+      where: {
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+        userId: context.userId,
+      },
+    });
+    const rows = workspaceUser
+      ? await this.moduleAccessRepository.find({
+          where: { workspaceUserId: workspaceUser.id },
+        })
+      : [];
 
-    const permissions = new Set(
-      [...effective.entries()]
-        .filter(([, enabled]) => enabled)
-        .map(([key]) => key),
-    );
-
-    await this.applyUserOverrides(context, permissions);
-
-    return permissions;
+    return resolveModuleAccess(roleKey, rows);
   }
 
   async can(
@@ -317,6 +339,120 @@ export class PlatformPermissionService {
     return rows.map((row) => ({ userId: row.userId, roleKey: row.roleKey }));
   }
 
+  /** Per-client LeadFlow/Social grants for the given users (Settings > Users). */
+  async listUsersClientProductAccess(
+    tenantId: string,
+    workspaceId: string,
+    userIds: string[],
+  ): Promise<Array<{ userId: string; clientId: string; productKey: string }>> {
+    if (userIds.length === 0) return [];
+    const rows = await this.clientProductAccessRepository.find({
+      where: { tenantId, workspaceId, userId: In(userIds) },
+    });
+    return rows.map((row) => ({
+      userId: row.userId,
+      clientId: row.clientId,
+      productKey: row.productKey,
+    }));
+  }
+
+  /**
+   * Replaces a user's LeadFlow/Social client grants. Each grant also ensures
+   * the `agency_client_access` row the managed-context check requires. The
+   * stored product role mirrors the user's level in that product.
+   */
+  async replaceUserClientProductAccess(params: {
+    tenantId: string;
+    workspaceId: string;
+    userId: string;
+    actorUserId: string | null;
+    grants: Array<{ clientId: string; productKey: ClientProductKey }>;
+    levels: Partial<Record<ClientProductKey, ModuleAccessLevel | null>>;
+  }): Promise<void> {
+    const { tenantId, workspaceId, userId } = params;
+    const clientIds = [...new Set(params.grants.map((grant) => grant.clientId))];
+    const clients = clientIds.length
+      ? await this.managedContextDirectory.findWorkspaceClients(
+          tenantId,
+          workspaceId,
+          clientIds,
+        )
+      : [];
+    const managedTenantByClientId = new Map(
+      clients.map((client) => [client.id, client.managedTenantId]),
+    );
+
+    await this.clientProductAccessRepository.delete({
+      tenantId,
+      workspaceId,
+      userId,
+    });
+
+    const rows = params.grants
+      .filter((grant) => managedTenantByClientId.has(grant.clientId))
+      .map((grant) =>
+        this.clientProductAccessRepository.create({
+          tenantId,
+          workspaceId,
+          userId,
+          clientId: grant.clientId,
+          managedTenantId: managedTenantByClientId.get(grant.clientId) ?? null,
+          productKey: grant.productKey,
+          roleKey:
+            params.levels[grant.productKey] === 'manager'
+              ? ClientProductRoleKey.Manager
+              : ClientProductRoleKey.Member,
+          scopeKey: null,
+          createdById: params.actorUserId,
+        }),
+      );
+    if (rows.length > 0) await this.clientProductAccessRepository.save(rows);
+
+    const grantedClientIds = [...new Set(rows.map((row) => row.clientId))];
+    const existingAccess = grantedClientIds.length
+      ? await this.clientAccessRepository.find({
+          where: {
+            tenantId,
+            workspaceId,
+            userId,
+            clientId: In(grantedClientIds),
+          },
+        })
+      : [];
+    const withAccess = new Set(existingAccess.map((row) => row.clientId));
+    const missing = grantedClientIds.filter((id) => !withAccess.has(id));
+    if (missing.length > 0) {
+      await this.clientAccessRepository.save(
+        missing.map((clientId) =>
+          this.clientAccessRepository.create({
+            tenantId,
+            workspaceId,
+            userId,
+            clientId,
+            managedTenantId: managedTenantByClientId.get(clientId) ?? null,
+            roleKey: PlatformRoleKey.Member,
+            accessLevel: ClientAccessLevel.Basic,
+            createdById: params.actorUserId,
+          }),
+        ),
+      );
+    }
+
+    await this.auditPermissionDecision({
+      tenantId,
+      workspaceId,
+      actorUserId: params.actorUserId,
+      targetUserId: userId,
+      action: 'client_product_access_granted',
+      metadata: {
+        grants: rows.map((row) => ({
+          clientId: row.clientId,
+          productKey: row.productKey,
+        })),
+      },
+    });
+  }
+
   isDangerousAction(permissionKey: string): boolean {
     return getPermissionDefinition(permissionKey)?.isDangerous ?? false;
   }
@@ -464,59 +600,5 @@ export class PlatformPermissionService {
       permissionKey: params.permissionKey,
       riskLevel: getPermissionDefinition(params.permissionKey)?.riskLevel ?? null,
     });
-  }
-
-  private async resolveRole(
-    tenantId: string,
-    roleKey: PlatformRoleKey,
-  ): Promise<PlatformRoleEntity | null> {
-    const tenantRole = await this.rolesRepository.findOne({
-      where: { tenantId, key: roleKey },
-    });
-
-    if (tenantRole) {
-      return tenantRole;
-    }
-
-    return this.rolesRepository.findOne({
-      where: { tenantId: IsNull(), key: roleKey },
-    });
-  }
-
-  private async applyUserOverrides(
-    context: PermissionContext,
-    permissions: Set<string>,
-  ): Promise<void> {
-    const now = new Date();
-
-    const where: FindOptionsWhere<PlatformUserPermissionEntity>[] = [
-      {
-        tenantId: context.tenantId,
-        userId: context.userId,
-        workspaceId: IsNull(),
-      },
-    ];
-
-    if (context.workspaceId) {
-      where.push({
-        tenantId: context.tenantId,
-        userId: context.userId,
-        workspaceId: context.workspaceId,
-      });
-    }
-
-    const overrides = await this.userPermissionsRepository.find({ where });
-
-    for (const override of overrides) {
-      if (override.expiresAt && override.expiresAt <= now) {
-        continue;
-      }
-
-      if (override.enabled) {
-        permissions.add(override.permissionKey);
-      } else {
-        permissions.delete(override.permissionKey);
-      }
-    }
   }
 }

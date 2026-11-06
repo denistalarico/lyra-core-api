@@ -113,28 +113,28 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['shared.contacts.view.assigned', ALL_ROLES],
   ['shared.contacts.view.client', MANAGER_UP],
   ['shared.contacts.view.department', MANAGER_UP],
-  ['shared.contacts.view.all', ADMIN_UP],
+  ['shared.contacts.view.all', MANAGER_UP],
   ['shared.contacts.create', ALL_ROLES],
   ['shared.contacts.update.assigned', ALL_ROLES],
   ['shared.contacts.update.client', MANAGER_UP],
   ['shared.contacts.import.admin', ADMIN_UP],
   ['shared.contacts.export.admin', ADMIN_UP, true],
   ['shared.contacts.merge.admin', ADMIN_UP, true],
-  ['shared.contacts.delete.owner_only', OWNER_ONLY, true],
+  ['shared.contacts.delete.owner_only', MANAGER_UP, true],
 
   // 9.1 Dashboards
   ['agency.dashboards.view.self', ALL_ROLES],
   ['agency.dashboards.view.department', MANAGER_UP],
   ['agency.dashboards.view.agency', ADMIN_UP],
-  ['agency.dashboards.view.executive', OWNER_ONLY],
+  ['agency.dashboards.view.executive', ADMIN_UP],
 
   // 9.2 Team Chat
   ['agency.chat.channels.view.assigned', ALL_ROLES],
   ['agency.chat.messages.send.assigned', ALL_ROLES],
   ['agency.chat.channels.manage_members.assigned', MANAGER_UP],
   ['agency.chat.channels.create.department', MANAGER_UP],
-  ['agency.chat.channels.archive.all', ADMIN_UP],
-  ['agency.chat.channels.delete.owner_only', OWNER_ONLY, true],
+  ['agency.chat.channels.archive.all', MANAGER_UP],
+  ['agency.chat.channels.delete.owner_only', ADMIN_UP, true],
 
   // 9.2b Client Conversations (CCOM1 §28)
   // Deliberately NOT folded into `agency.chat.*`: those keys govern internal
@@ -150,8 +150,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.projects.project.update.department', MANAGER_UP],
   ['agency.projects.project.archive.own', MANAGER_UP],
   ['agency.projects.project.archive.department', MANAGER_UP],
-  ['agency.projects.project.delete.owner_only', OWNER_ONLY, true],
-  ['agency.projects.stages.manage.admin', MANAGER_UP],
+  ['agency.projects.project.delete.owner_only', MANAGER_UP, true],
+  ['agency.projects.stages.manage.admin', ADMIN_UP],
   ['agency.tasks.task.create.assigned', ALL_ROLES],
   ['agency.tasks.task.update.assigned', ALL_ROLES],
   ['agency.tasks.task.manage.department', MANAGER_UP],
@@ -162,28 +162,28 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.calendar.events.manage.self', ALL_ROLES],
   ['agency.calendar.events.view.department', MANAGER_UP],
   ['agency.calendar.events.manage.department', MANAGER_UP],
-  ['agency.calendar.events.view.all', ADMIN_UP],
+  ['agency.calendar.events.view.all', MANAGER_UP],
   ['agency.calendar.settings.manage.admin', ADMIN_UP],
 
   // 9.5 Knowledge
   ['agency.knowledge.articles.view.published', ALL_ROLES],
   ['agency.knowledge.articles.comment', ALL_ROLES],
-  ['agency.knowledge.wall.post', ALL_ROLES],
+  ['agency.knowledge.wall.post', MANAGER_UP],
   ['agency.knowledge.articles.create.department', MANAGER_UP],
   ['agency.knowledge.articles.publish.department', MANAGER_UP],
   ['agency.knowledge.categories.manage.admin', ADMIN_UP],
-  ['agency.knowledge.articles.delete.owner_only', OWNER_ONLY, true],
+  ['agency.knowledge.articles.delete.owner_only', MANAGER_UP, true],
 
   // 9.6 Clients
-  ['agency.clients.profile.view.basic.assigned', MANAGER_UP],
-  ['agency.clients.profile.view.relationship.assigned', MANAGER_UP],
+  ['agency.clients.profile.view.basic.assigned', ALL_ROLES],
+  ['agency.clients.profile.view.relationship.assigned', ALL_ROLES],
   ['agency.clients.profile.view.business.admin', ADMIN_UP],
-  ['agency.clients.profile.create.admin', ADMIN_UP],
+  ['agency.clients.profile.create.admin', MANAGER_UP],
   ['agency.clients.profile.update.assigned', MANAGER_UP],
-  ['agency.clients.profile.archive.admin', ADMIN_UP],
-  ['agency.clients.profile.delete.owner_only', OWNER_ONLY, true],
-  ['agency.clients.profitability.view.owner_or_finance', OWNER_ONLY],
-  ['agency.clients.products.view.assigned', MANAGER_UP],
+  ['agency.clients.profile.archive.admin', MANAGER_UP],
+  ['agency.clients.profile.delete.owner_only', ADMIN_UP, true],
+  ['agency.clients.profitability.view.owner_or_finance', ADMIN_UP],
+  ['agency.clients.products.view.assigned', ALL_ROLES],
   ['agency.clients.products.manage.admin', ADMIN_UP],
   // CC2G. Reconciling legacy data permanently rewrites which company owns
   // historical Social/LeadFlow records across every migrated boundary, so it
@@ -197,8 +197,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   // CA3. Agency-wide configuration and support preview of the Client Area.
   ['agency.client_area.manage.admin', ADMIN_UP],
   ['agency.clients.managed_tenant.view.admin', ADMIN_UP],
-  ['agency.clients.managed_tenant.manage.owner_only', OWNER_ONLY, true],
-  ['agency.clients.lifecycle.view.assigned', MANAGER_UP],
+  ['agency.clients.managed_tenant.manage.owner_only', ADMIN_UP, true],
+  ['agency.clients.lifecycle.view.assigned', ALL_ROLES],
   ['agency.clients.lifecycle.manage.assigned', MANAGER_UP],
   ['agency.clients.lifecycle.settings.manage.admin', ADMIN_UP],
 
@@ -209,21 +209,21 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.sales.crm.view.department', MANAGER_UP],
   ['agency.sales.crm.manage.department', MANAGER_UP],
   ['agency.sales.pipeline.manage.admin', ADMIN_UP],
-  ['agency.sales.stages.manage.manager_or_admin', MANAGER_UP],
+  ['agency.sales.stages.manage.manager_or_admin', ADMIN_UP],
   ['agency.sales.quotes.create', ALL_ROLES],
   ['agency.sales.quotes.approve.department', MANAGER_UP],
   ['agency.sales.products.manage.admin', ADMIN_UP],
   ['agency.sales.plans.manage.admin', ADMIN_UP],
 
   // 9.8 Finance
-  ['agency.finance.summary.view.finance_or_owner', ADMIN_UP],
-  ['agency.finance.transactions.view.finance_or_owner', ADMIN_UP],
-  ['agency.finance.transactions.manage.finance_or_owner', OWNER_ONLY],
-  ['agency.finance.reports.view.finance_or_owner', ADMIN_UP],
-  ['agency.finance.profitability.view.finance_or_owner', OWNER_ONLY],
+  ['agency.finance.summary.view.finance_or_owner', ALL_ROLES],
+  ['agency.finance.transactions.view.finance_or_owner', ALL_ROLES],
+  ['agency.finance.transactions.manage.finance_or_owner', MANAGER_UP],
+  ['agency.finance.reports.view.finance_or_owner', ALL_ROLES],
+  ['agency.finance.profitability.view.finance_or_owner', ADMIN_UP],
   ['agency.finance.settings.manage.admin_or_owner', ADMIN_UP],
-  ['agency.finance.fiscal.manage.owner_only', OWNER_ONLY, true],
-  ['agency.finance.billing.manage.owner_only', OWNER_ONLY, true],
+  ['agency.finance.fiscal.manage.owner_only', ADMIN_UP, true],
+  ['agency.finance.billing.manage.owner_only', ADMIN_UP, true],
 
   // 9.9 Team
   ['agency.team.directory.view.all_members', ALL_ROLES],
@@ -232,24 +232,24 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.team.member.view.department', MANAGER_UP],
   ['agency.team.member.update.department', MANAGER_UP],
   ['agency.team.structure.manage.admin', ADMIN_UP],
-  ['agency.team.structure.delete.owner_only', OWNER_ONLY, true],
+  ['agency.team.structure.delete.owner_only', ADMIN_UP, true],
   ['agency.team.attendance.view.self', ALL_ROLES],
   ['agency.team.attendance.view.department', MANAGER_UP],
   ['agency.team.attendance.approve.department', MANAGER_UP],
-  ['agency.team.contracts.view.hr_or_owner', OWNER_ONLY],
-  ['agency.team.compensation.view.owner_or_hr', OWNER_ONLY],
+  ['agency.team.contracts.view.hr_or_owner', ADMIN_UP],
+  ['agency.team.compensation.view.owner_or_hr', ADMIN_UP],
   ['agency.team.users.invite.admin', ADMIN_UP],
   ['agency.team.users.deactivate.admin', ADMIN_UP],
-  ['agency.team.users.delete.owner_only', OWNER_ONLY, true],
+  ['agency.team.users.delete.owner_only', ADMIN_UP, true],
 
   // 9.10 Contracts
-  ['agency.contracts.view.assigned', MANAGER_UP],
+  ['agency.contracts.view.assigned', ALL_ROLES],
   ['agency.contracts.create.from_template', MANAGER_UP],
   ['agency.contracts.send_signature.manager_or_admin', MANAGER_UP],
   ['agency.contracts.templates.manage.admin', ADMIN_UP],
-  ['agency.contracts.archive.admin', ADMIN_UP],
-  ['agency.contracts.delete.owner_only', OWNER_ONLY, true],
-  ['agency.contracts.integrations.manage.owner_only', OWNER_ONLY, true],
+  ['agency.contracts.archive.admin', MANAGER_UP],
+  ['agency.contracts.delete.owner_only', ADMIN_UP, true],
+  ['agency.contracts.integrations.manage.owner_only', ADMIN_UP, true],
 
   // 9.11 Settings
   ['agency.settings.account.view.self', ALL_ROLES],
@@ -261,9 +261,9 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.settings.integrations.manage.admin', ADMIN_UP],
   ['agency.settings.email.manage.admin', ADMIN_UP],
   ['agency.settings.apps.manage.admin', ADMIN_UP],
-  ['agency.settings.billing.view.owner_only', OWNER_ONLY],
-  ['agency.settings.billing.manage.owner_only', OWNER_ONLY, true],
-  ['agency.settings.domains.manage.owner_only', OWNER_ONLY, true],
+  ['agency.settings.billing.view.owner_only', ADMIN_UP],
+  ['agency.settings.billing.manage.owner_only', ADMIN_UP, true],
+  ['agency.settings.domains.manage.owner_only', ADMIN_UP, true],
   ['agency.settings.danger_zone.manage.owner_only', OWNER_ONLY, true],
 
   // 10.5 LeadFlow - Inbox
@@ -276,7 +276,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.inbox.conversation.close.assigned', ALL_ROLES],
   ['leadflow.inbox.conversation.close.client', MANAGER_UP],
   ['leadflow.inbox.conversation.export.admin', ADMIN_UP],
-  ['leadflow.inbox.conversation.delete.owner_only', OWNER_ONLY, true],
+  ['leadflow.inbox.conversation.delete.owner_only', ADMIN_UP, true],
   // IX3 — post/ad comments: no assignment exists, so every role that works
   // the Inbox sees and answers them; deleting is irreversible on Meta and stays
   // with Owner/Admin (D-IX-11).
@@ -289,8 +289,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.channels.channel.manage_members.client', MANAGER_UP],
   ['leadflow.channels.channel.create.admin', ADMIN_UP],
   ['leadflow.channels.channel.update.admin', ADMIN_UP],
-  ['leadflow.channels.channel.disconnect.owner_or_explicit', OWNER_ONLY, true],
-  ['leadflow.channels.channel.delete.owner_only', OWNER_ONLY, true],
+  ['leadflow.channels.channel.disconnect.owner_or_explicit', ADMIN_UP, true],
+  ['leadflow.channels.channel.delete.owner_only', ADMIN_UP, true],
 
   // 10.5 LeadFlow - CRM
   ['leadflow.crm.records.view.assigned', ALL_ROLES],
@@ -299,8 +299,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.crm.records.update.assigned', ALL_ROLES],
   ['leadflow.crm.records.update.client', MANAGER_UP],
   ['leadflow.crm.pipeline.manage.admin', ADMIN_UP],
-  ['leadflow.crm.stage.manage.manager_or_admin', MANAGER_UP],
-  ['leadflow.crm.records.delete.owner_or_admin_explicit', OWNER_ONLY, true],
+  ['leadflow.crm.stage.manage.manager_or_admin', ADMIN_UP],
+  ['leadflow.crm.records.delete.owner_or_admin_explicit', MANAGER_UP, true],
 
   // 10.5 LeadFlow - Agents
   ['leadflow.agents.agent.view.client', MANAGER_UP],
@@ -311,9 +311,9 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.agents.agent.publish.admin', ADMIN_UP],
   ['leadflow.agents.channel.manage.admin', ADMIN_UP],
   ['leadflow.agents.runtime.preview.admin', ADMIN_UP],
-  ['leadflow.agents.agent.delete.owner_only', OWNER_ONLY, true],
-  ['leadflow.agents.developer.manage.owner_only', OWNER_ONLY, true],
-  ['leadflow.agents.system.manage.owner_only', OWNER_ONLY, true],
+  ['leadflow.agents.agent.delete.owner_only', ADMIN_UP, true],
+  ['leadflow.agents.developer.manage.owner_only', ADMIN_UP, true],
+  ['leadflow.agents.system.manage.owner_only', ADMIN_UP, true],
 
   // 10.5 LeadFlow - Automations
   ['leadflow.automations.automation.view.client', MANAGER_UP],
@@ -323,7 +323,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.automations.automation.pause.manager_or_admin', MANAGER_UP],
   [
     'leadflow.automations.automation.delete.owner_or_admin_explicit',
-    OWNER_ONLY,
+    ADMIN_UP,
     true,
   ],
   // Automations Recipes & Rules Contract sprint (config-only)
@@ -334,13 +334,13 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.automations.logs.view.admin', ADMIN_UP],
   ['leadflow.automations.runtime.preview.admin', ADMIN_UP],
   ['leadflow.automations.execution.execute.admin', ADMIN_UP],
-  ['leadflow.automations.developer.manage.owner_only', OWNER_ONLY, true],
+  ['leadflow.automations.developer.manage.owner_only', ADMIN_UP, true],
 
   // 10.5 LeadFlow - Event Contract (contract-only, sem runtime)
   ['leadflow.events.catalog.view', MANAGER_UP],
   ['leadflow.events.validate.admin', ADMIN_UP],
   ['leadflow.events.runtime.preview.admin', ADMIN_UP],
-  ['leadflow.events.developer.manage.owner_only', OWNER_ONLY, true],
+  ['leadflow.events.developer.manage.owner_only', ADMIN_UP, true],
 
   // 10.5 LeadFlow - Briefing (RFC/entities/migration only, sem extração/UI)
   ['leadflow.briefing.sources.manage.admin', ADMIN_UP],
@@ -361,8 +361,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.settings.integrations.manage.admin', ADMIN_UP],
   ['leadflow.settings.permissions.manage.admin', ADMIN_UP],
   ['leadflow.settings.telemetry.view.admin', ADMIN_UP],
-  ['leadflow.settings.telemetry.manage.owner_only', OWNER_ONLY, true],
-  ['leadflow.settings.danger_zone.manage.owner_only', OWNER_ONLY, true],
+  ['leadflow.settings.telemetry.manage.owner_only', ADMIN_UP, true],
+  ['leadflow.settings.danger_zone.manage.owner_only', ADMIN_UP, true],
 
   // 10.5 LeadFlow - Appointments
   ['leadflow.appointments.item.view.assigned', ALL_ROLES],
@@ -370,14 +370,14 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['leadflow.appointments.item.create.client', ALL_ROLES],
   ['leadflow.appointments.item.update.assigned', ALL_ROLES],
   ['leadflow.appointments.item.update.client', MANAGER_UP],
-  ['leadflow.appointments.item.delete.owner_only', OWNER_ONLY, true],
+  ['leadflow.appointments.item.delete.owner_only', MANAGER_UP, true],
 
   // 11.5 Social - Planner
   ['social.planner.calendar.view.assigned', ALL_ROLES],
   ['social.planner.calendar.view.client', MANAGER_UP],
   ['social.planner.calendar.create.manager', MANAGER_UP],
   ['social.planner.calendar.update.manager', MANAGER_UP],
-  ['social.planner.calendar.delete.owner_or_admin_explicit', OWNER_ONLY, true],
+  ['social.planner.calendar.delete.owner_or_admin_explicit', MANAGER_UP, true],
 
   // 11.5 Social - Creative Studio
   ['social.creative.content.view.assigned', ALL_ROLES],
@@ -385,7 +385,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.creative.content.create_draft.assigned', ALL_ROLES],
   ['social.creative.content.update.assigned', ALL_ROLES],
   ['social.creative.content.submit_review.assigned', ALL_ROLES],
-  ['social.creative.content.delete.owner_or_admin_explicit', OWNER_ONLY, true],
+  ['social.creative.content.delete.owner_or_admin_explicit', MANAGER_UP, true],
 
   // 11.5 Social - Campaigns & Ads
   ['social.campaigns.campaign.view.client', MANAGER_UP],
@@ -394,7 +394,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.campaigns.campaign.manage_status.manager', MANAGER_UP],
   [
     'social.campaigns.campaign.delete.owner_or_admin_explicit',
-    OWNER_ONLY,
+    ADMIN_UP,
     true,
   ],
   ['social.ads.campaign.view.client', MANAGER_UP],
@@ -404,7 +404,7 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.ads.budget.execute.admin_or_explicit', ADMIN_UP],
   ['social.ads.schedule.execute.admin_or_explicit', ADMIN_UP],
   ['social.ads.boost.execute.admin_or_explicit', ADMIN_UP, true],
-  ['social.ads.delete.execute.owner_only', OWNER_ONLY, true],
+  ['social.ads.delete.execute.owner_only', ADMIN_UP, true],
 
   // 11.5 Social - Approvals
   ['social.approvals.review.view.assigned', ALL_ROLES],
@@ -414,14 +414,14 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.approvals.review.approve_final.admin_or_client', ADMIN_UP],
   [
     'social.approvals.review.override.owner_or_admin_explicit',
-    OWNER_ONLY,
+    ADMIN_UP,
     true,
   ],
 
   // 11.5 Social - Brand Kit
   ['social.brandkit.asset.view.client', ALL_ROLES],
   ['social.brandkit.asset.update.manager_or_admin', MANAGER_UP],
-  ['social.brandkit.asset.delete.owner_or_admin_explicit', OWNER_ONLY, true],
+  ['social.brandkit.asset.delete.owner_or_admin_explicit', ADMIN_UP, true],
   ['social.brandkit.assets.manage.manager_or_admin', MANAGER_UP],
 
   // 11.5 Social - Analytics
@@ -438,8 +438,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['social.settings.integrations.manage.admin', ADMIN_UP],
   ['social.settings.permissions.manage.admin', ADMIN_UP],
   ['social.settings.telemetry.view.admin', ADMIN_UP],
-  ['social.settings.telemetry.manage.owner_only', OWNER_ONLY, true],
-  ['social.settings.danger_zone.manage.owner_only', OWNER_ONLY, true],
+  ['social.settings.telemetry.manage.owner_only', ADMIN_UP, true],
+  ['social.settings.danger_zone.manage.owner_only', ADMIN_UP, true],
 
   // 11.5 Social - Publishing
   ['social.publishing.publication.view.assigned', ALL_ROLES],
