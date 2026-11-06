@@ -6,6 +6,7 @@ import {
   TeamMemberLifecycleProcess,
   TeamMemberPresence,
 } from '../entities';
+import { ContractRecord } from '../../contracts/entities';
 import { TeamLifecycleProcessStatus, TeamLifecycleProcessType } from '../enums';
 import { TeamDashboardQueryService } from './team-dashboard-query.service';
 
@@ -49,12 +50,16 @@ describe('TeamDashboardQueryService lifecycle summary', () => {
         },
       ]),
     };
+    const contractRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    };
     const service = new TeamDashboardQueryService(
       memberRepository as unknown as Repository<TeamMember>,
       presenceRepository as unknown as Repository<TeamMemberPresence>,
       attendanceRepository as unknown as Repository<TeamAttendanceEntry>,
       departmentRepository as unknown as Repository<TeamDepartment>,
       lifecycleProcessRepository as unknown as Repository<TeamMemberLifecycleProcess>,
+      contractRepository as unknown as Repository<ContractRecord>,
     );
 
     const result = await service.getSummary({
@@ -73,5 +78,6 @@ describe('TeamDashboardQueryService lifecycle summary', () => {
         href: '/team/members/member-1?tab=lifecycle&process=onboarding',
       },
     ]);
+    expect(result.contractAlerts).toEqual([]);
   });
 });

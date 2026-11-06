@@ -169,9 +169,21 @@ export class TeamChatMeetingAiService {
   async configuration(
     context: Pick<MeetingAiContext, 'tenantId' | 'workspaceId'>,
   ): Promise<MeetingAiConfig> {
-    const row = await this.settings.findOne({
-      where: { tenantId: context.tenantId, workspaceId: context.workspaceId },
-    });
+    let row: AgencyMeetingAiSettings | null;
+    try {
+      row = await this.settings.findOne({
+        where: { tenantId: context.tenantId, workspaceId: context.workspaceId },
+      });
+    } catch (error) {
+      const databaseError = error as { code?: string; message?: string };
+      if (
+        databaseError.code === '42P01' &&
+        databaseError.message?.includes('agency_meeting_ai_settings')
+      ) {
+        return { ...DEFAULT_MEETING_AI_CONFIG };
+      }
+      throw error;
+    }
     return { ...DEFAULT_MEETING_AI_CONFIG, ...row?.config };
   }
 

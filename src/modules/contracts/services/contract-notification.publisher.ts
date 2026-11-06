@@ -233,6 +233,23 @@ export class ContractNotificationPublisher {
     });
   }
 
+  publishRenewed(
+    input: ContractNotificationInput & { previousContractId?: string | null },
+  ) {
+    return this.publishContractEvent({
+      ...input,
+      eventType: 'contract.renewed',
+      eventIdParts: [
+        'contract.renewed',
+        input.contract.id,
+        input.previousContractId,
+      ],
+      title: 'Contrato renovado',
+      body: `O contrato "${input.contract.title}" foi renovado.`,
+      payload: { previousContractId: input.previousContractId ?? null },
+    });
+  }
+
   publishSignatureReminderDue(input: ContractNotificationInput) {
     return this.publishContractEvent({
       ...input,

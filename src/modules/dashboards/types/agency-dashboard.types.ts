@@ -43,7 +43,9 @@ export type AgencyDashboardPriorityType =
   | 'overdue_activities'
   | 'client_health_critical'
   | 'client_health_attention'
-  | 'client_health_unknown';
+  | 'client_health_unknown'
+  | 'team_contract_expiring'
+  | 'team_contract_expired';
 
 export type AgencyDashboardPriority = {
   id: string;
@@ -56,7 +58,8 @@ export type AgencyDashboardPriority = {
     | 'tasks'
     | 'finance'
     | 'activities'
-    | 'clients';
+    | 'clients'
+    | 'team';
   href: string;
   entityId: string;
   dueAt: string | null;

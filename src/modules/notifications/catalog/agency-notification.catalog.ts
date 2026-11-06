@@ -1176,6 +1176,16 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     },
   ),
   standard(
+    'contract.renewed',
+    'contracts',
+    NotificationCategory.CONTRACT,
+    NotificationRecipientStrategy.RESOURCE_OWNER,
+    {
+      defaultPriority: NotificationPriority.HIGH,
+      selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
+  standard(
     'contract.manual_signature_pending',
     'contracts',
     NotificationCategory.APPROVAL,

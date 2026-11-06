@@ -11,6 +11,7 @@ import type {
   AgencyDashboardPriority,
   AgencyDashboardPreset,
 } from '../types';
+import type { TeamDashboardSummary } from '../../team/types';
 
 @Injectable()
 export class AgencyDashboardPrioritiesService {
@@ -21,6 +22,7 @@ export class AgencyDashboardPrioritiesService {
       finance?: AgencyDashboardFinanceWidget | null;
       clients?: AgencyDashboardClientsWidget | null;
       activities?: AgencyDashboardActivitiesWidget | null;
+      team?: TeamDashboardSummary | null;
     },
   ): AgencyDashboardPriority[] {
     const projectPriorities =
@@ -49,6 +51,9 @@ export class AgencyDashboardPrioritiesService {
 
     const activityPriorities =
       this.buildActivityPriorities(sources?.activities);
+    const teamPriorities = preset !== 'member'
+      ? this.buildTeamPriorities(sources?.team)
+      : [];
 
     return [
       ...projectPriorities,
@@ -56,9 +61,27 @@ export class AgencyDashboardPrioritiesService {
       ...financePriorities,
       ...clientPriorities,
       ...activityPriorities,
+      ...teamPriorities,
     ]
       .sort((a, b) => b.score - a.score)
       .slice(0, preset === 'member' ? 6 : 10);
+  }
+
+  private buildTeamPriorities(
+    team: TeamDashboardSummary | null | undefined,
+  ): AgencyDashboardPriority[] {
+    return (team?.contractAlerts ?? []).map((alert) => ({
+      id: `team-contract-${alert.status}:${alert.contractId}`,
+      type: alert.status === 'expired' ? 'team_contract_expired' : 'team_contract_expiring',
+      severity: alert.status === 'expired' ? 'critical' : 'high',
+      title: alert.status === 'expired' ? 'Contrato de membro vencido' : 'Contrato de membro vencendo',
+      description: `${alert.memberName} — vencimento em ${alert.validUntil}.`,
+      sourceModule: 'team',
+      href: alert.href,
+      entityId: alert.contractId,
+      dueAt: alert.validUntil,
+      score: alert.status === 'expired' ? 142 : 108,
+    }));
   }
 
   private mapProject(

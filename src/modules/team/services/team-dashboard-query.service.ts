@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ContractRecord } from '../../contracts/entities';
+import {
+  ContractDocumentKind,
+  ContractStatus,
+  ContractTargetType,
+} from '../../contracts/enums';
 import {
   TeamAttendanceEntry,
   TeamDepartment,
@@ -8,7 +14,7 @@ import {
   TeamMemberLifecycleProcess,
   TeamMemberPresence,
 } from '../entities';
-import { TeamLifecycleProcessStatus } from '../enums';
+import { TeamLifecycleProcessStatus, TeamMemberStatus } from '../enums';
 import type { TeamDashboardSummary } from '../types';
 
 type TeamDashboardContext = {
@@ -33,6 +39,9 @@ export class TeamDashboardQueryService {
 
     @InjectRepository(TeamMemberLifecycleProcess, 'agency')
     private readonly lifecycleProcessRepository: Repository<TeamMemberLifecycleProcess>,
+
+    @InjectRepository(ContractRecord, 'agency')
+    private readonly contractRepository: Repository<ContractRecord>,
   ) {}
 
   async getSummary(
@@ -48,6 +57,7 @@ export class TeamDashboardQueryService {
       departments,
       attendanceToday,
       lifecycleProcesses,
+      contracts,
     ] = await Promise.all([
         this.memberRepository.find({
           where: {
@@ -96,6 +106,15 @@ export class TeamDashboardQueryService {
             startedAt: 'DESC',
             createdAt: 'DESC',
           },
+        }),
+        this.contractRepository.find({
+          where: {
+            tenantId: context.tenantId,
+            workspaceId: context.workspaceId,
+            targetType: ContractTargetType.TeamMember,
+            documentKind: ContractDocumentKind.Contract,
+          },
+          order: { validFrom: 'DESC', createdAt: 'DESC' },
         }),
       ]);
 
@@ -223,7 +242,52 @@ export class TeamDashboardQueryService {
           },
         ];
       }),
+      contractAlerts: this.contractAlerts(contracts, memberById, now),
     };
+  }
+
+  private contractAlerts(
+    contracts: ContractRecord[],
+    memberById: Map<string, TeamMember>,
+    now: Date,
+  ): TeamDashboardSummary['contractAlerts'] {
+    const today = now.toISOString().slice(0, 10);
+    const warning = new Date(now);
+    warning.setUTCDate(warning.getUTCDate() + 30);
+    const warningDate = warning.toISOString().slice(0, 10);
+    const seenMembers = new Set<string>();
+
+    return contracts.flatMap((contract) => {
+      if (
+        !contract.targetId ||
+        seenMembers.has(contract.targetId) ||
+        !contract.validUntil ||
+        contract.archivedAt ||
+        contract.cancelledAt ||
+        [ContractStatus.Cancelled, ContractStatus.Archived].includes(contract.status)
+      ) return [];
+      seenMembers.add(contract.targetId);
+      const member = memberById.get(contract.targetId);
+      if (
+        !member ||
+        member.archivedAt ||
+        member.status !== TeamMemberStatus.Active
+      )
+        return [];
+      const status = contract.status === ContractStatus.Expired || contract.validUntil < today
+        ? 'expired' as const
+        : contract.validUntil <= warningDate
+          ? 'expiring' as const
+          : null;
+      return status ? [{
+        contractId: contract.id,
+        memberId: member.id,
+        memberName: member.displayName,
+        validUntil: contract.validUntil,
+        status,
+        href: `/team/members/${member.id}?tab=contracts`,
+      }] : [];
+    });
   }
 
   async getMemberNamesByUserIds(

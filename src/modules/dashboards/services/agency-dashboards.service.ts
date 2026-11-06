@@ -347,6 +347,7 @@ export class AgencyDashboardsService {
         finance,
         clients,
         activities,
+        team,
       },
     );
 

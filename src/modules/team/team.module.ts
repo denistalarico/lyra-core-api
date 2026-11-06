@@ -35,6 +35,7 @@ import { FilesModule } from '../../common/files/files.module';
 import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { ContractsModule } from '../contracts/contracts.module';
+import { ContractRecord } from '../contracts/entities';
 import { AgencyContactsModule } from '../agency/agency-contacts.module';
 import { TeamNotificationPublisher } from './services/team-notification.publisher';
 
@@ -68,6 +69,7 @@ const AGENCY_CONNECTION = 'agency';
         AgencyActivityLink,
         // Read-only here: used solely for the Team→Finance idempotency lookup.
         FinanceBill,
+        ContractRecord,
       ],
       AGENCY_CONNECTION,
     ),

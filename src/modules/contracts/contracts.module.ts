@@ -16,6 +16,9 @@ import { ContractsService } from './services/contracts.service';
 import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { ContractNotificationPublisher } from './services/contract-notification.publisher';
+import { TeamContractLifecycleNotificationsService } from './services/team-contract-lifecycle-notifications.service';
+import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
+import { TeamMember } from '../team/entities';
 import {
   ContractDefaults,
   ContractDocument,
@@ -48,6 +51,8 @@ const AGENCY_CONNECTION = 'agency';
         ContractParty,
         ContractDocument,
         ContractEvent,
+        WorkspaceUserEntity,
+        TeamMember,
       ],
       AGENCY_CONNECTION,
     ),
@@ -62,6 +67,7 @@ const AGENCY_CONNECTION = 'agency';
     ContractDefaultsService,
     ContractAdjustmentIndexService,
     ContractNotificationPublisher,
+    TeamContractLifecycleNotificationsService,
     ContractAiAssistConfigService,
     ContractAiAssistProvider,
     ContractAiAssistService,

@@ -43,4 +43,12 @@ export type TeamDashboardSummary = {
     membersWithEntries: number;
   };
   lifecycleProcesses: TeamDashboardLifecycleProcess[];
+  contractAlerts: Array<{
+    contractId: string;
+    memberId: string;
+    memberName: string;
+    validUntil: string;
+    status: 'expiring' | 'expired';
+    href: string;
+  }>;
 };
