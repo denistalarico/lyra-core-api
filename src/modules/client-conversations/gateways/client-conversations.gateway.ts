@@ -452,19 +452,17 @@ export class ClientConversationsGateway
     }
 
     try {
+      // TC-CL1 — a live client seat is required on both paths (membership is
+      // explicit; a company member who was not added is not in the room).
+      const scope = toConversationScope(toCompanyAwareScope(context));
+      const actor = {
+        surface: 'client_area' as const,
+        userId: context.userId,
+        membershipId: context.membershipId,
+      };
       const conversation = payload?.conversationId
-        ? await this.conversations.findAccessible(
-            toConversationScope(toCompanyAwareScope(context)),
-            payload.conversationId,
-          )
-        : await this.conversations.ensureDefaultConversation(
-            toConversationScope(toCompanyAwareScope(context)),
-            {
-              surface: 'client_area',
-              userId: context.userId,
-              membershipId: context.membershipId,
-            },
-          );
+        ? await this.conversations.detail(scope, actor, payload.conversationId)
+        : await this.conversations.ensureDefaultConversation(scope, actor);
 
       return { context, conversationId: conversation.id };
     } catch {

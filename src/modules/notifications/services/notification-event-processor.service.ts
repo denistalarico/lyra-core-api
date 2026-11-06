@@ -618,7 +618,7 @@ export class NotificationEventProcessorService {
     }
 
     try {
-      return await surface.resolveAudience({
+      const resolved = await surface.resolveAudience({
         tenantId: event.tenantId,
         workspaceId: event.workspaceId,
         companyContextId: query.companyContextId,
@@ -626,6 +626,9 @@ export class NotificationEventProcessorService {
         requiredModule: query.requiredModule,
         eventType: event.eventType,
       });
+      if (!query.restrictToUserIds) return resolved;
+      const allowed = new Set(query.restrictToUserIds);
+      return resolved.filter((recipient) => allowed.has(recipient.userId));
     } catch (error) {
       this.logger.error(
         `Failed to resolve client recipients for ${event.eventType}`,

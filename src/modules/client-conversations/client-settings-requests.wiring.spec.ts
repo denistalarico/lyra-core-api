@@ -53,7 +53,7 @@ describe('CA14 settings requests', () => {
   });
   it('uses the canonical system-card writer, broadcasts and excludes unassigned Agency admins', async () => {
     const conversations = {
-      ensureDefaultConversation: jest
+      ensureConversation: jest
         .fn()
         .mockResolvedValue({ id: 'conversation' }),
       publishCard: jest.fn().mockResolvedValue({
@@ -63,7 +63,7 @@ describe('CA14 settings requests', () => {
       }),
     };
     const access = {
-      resolveScope: jest
+      resolveManageScope: jest
         .fn()
         .mockImplementation((actor: { userId: string }) =>
           actor.userId === 'unassigned-admin'

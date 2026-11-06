@@ -292,12 +292,12 @@ export class AgencyClientConversationsGateway
     }
 
     try {
+      // TC-CL1 — both paths prove a live Agency seat: `resolveScope` no longer
+      // checks client access, so the seat is the authorization.
+      const actor = { surface: 'agency' as const, userId: auth.userId };
       const conversation = payload?.conversationId
-        ? await this.conversations.findAccessible(scope, payload.conversationId)
-        : await this.conversations.ensureDefaultConversation(scope, {
-            surface: 'agency',
-            userId: auth.userId,
-          });
+        ? await this.conversations.detail(scope, actor, payload.conversationId)
+        : await this.conversations.ensureDefaultConversation(scope, actor);
 
       return {
         auth,

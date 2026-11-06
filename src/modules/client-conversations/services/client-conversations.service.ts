@@ -5,12 +5,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
 import { AgencyClientStatus } from '../../clients/enums';
 import { ClientAreaMembershipEntity } from '../../client-area/entities/client-area-membership.entity';
-import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
+import {
+  AgencyUserProfileEntity,
+  AgencyWorkspaceUserEntity,
+} from '../../agency/entities/agency-settings.entities';
 import {
   approvalCardBody,
   CLIENT_CONVERSATION_ERROR_CODES,
@@ -43,6 +46,10 @@ const MAX_PAGE_SIZE = 100;
 const DEFAULT_PAGE_SIZE = 50;
 /** Keeps one message from being a denial-of-service against the timeline. */
 const MAX_BODY_LENGTH = 8000;
+/** TC-CL1 — a 256px avatar as base64 JPEG/PNG/WebP fits well under this. */
+const MAX_AVATAR_LENGTH = 400_000;
+const AVATAR_PATTERN =
+  /^(data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+|https?:\/\/\S+)$/;
 
 function conversationNotFound() {
   // One answer for "no such conversation", "another company's conversation"
@@ -102,6 +109,36 @@ export type ConversationView = {
   lastMessageAt: Date | null;
   unreadCount: number;
   lastReadAt: Date | null;
+  /** TC-CL1 — overrides shown on both surfaces; null = company name/logo. */
+  title: string | null;
+  description: string | null;
+  avatarUrl: string | null;
+  /** The reader's own mute, or null. */
+  mutedUntil: Date | null;
+};
+
+/** TC-CL1 — one live seat, as the Agency members panel shows it. */
+export type ConversationParticipantView = {
+  id: string;
+  surface: 'agency' | 'client_area';
+  userId: string;
+  membershipId: string | null;
+  role: string;
+  displayName: string;
+  email: string | null;
+  avatarUrl: string | null;
+  joinedAt: Date;
+};
+
+/** TC-CL1 — someone who could be seated, and whether they already are. */
+export type ConversationMemberCandidateView = {
+  surface: 'agency' | 'client_area';
+  userId: string;
+  membershipId: string | null;
+  displayName: string;
+  email: string | null;
+  avatarUrl: string | null;
+  isMember: boolean;
 };
 
 /**
@@ -133,6 +170,8 @@ export class ClientConversationsService {
     private readonly memberships: Repository<ClientAreaMembershipEntity>,
     @InjectRepository(AgencyWorkspaceUserEntity, AGENCY_CONNECTION)
     private readonly workspaceUsers: Repository<AgencyWorkspaceUserEntity>,
+    @InjectRepository(AgencyUserProfileEntity, AGENCY_CONNECTION)
+    private readonly profiles: Repository<AgencyUserProfileEntity>,
   ) {}
 
   /**
@@ -191,10 +230,28 @@ export class ClientConversationsService {
     scope: ClientConversationScope,
     actor: ConversationActor,
   ): Promise<ClientConversationEntity> {
-    await this.assertCompany(scope);
     await this.assertActorEligible(scope, actor);
+    const conversation = await this.ensureConversation(scope);
+    // TC-CL1 — membership is explicit: provisioning the row never seats.
+    await this.requireParticipant(conversation, actor);
+    return conversation;
+  }
 
-    const existing = await this.conversations.findOne({
+  /**
+   * TC-CL1 — the company's default conversation, created if absent, seating
+   * nobody. Used by platform publishers and by the Agency "start" path, which
+   * then seats people explicitly.
+   */
+  async ensureConversation(
+    scope: ClientConversationScope,
+  ): Promise<ClientConversationEntity> {
+    await this.assertCompany(scope);
+    const existing = await this.findDefaultEntity(scope);
+    return existing ?? (await this.insertConversation(scope));
+  }
+
+  private findDefaultEntity(scope: ClientConversationScope) {
+    return this.conversations.findOne({
       where: {
         tenantId: scope.tenantId,
         workspaceId: scope.workspaceId,
@@ -204,10 +261,6 @@ export class ClientConversationsService {
         status: 'active',
       },
     });
-
-    const conversation = existing ?? (await this.insertConversation(scope));
-    await this.ensureParticipant(conversation, actor);
-    return conversation;
   }
 
   private async insertConversation(
@@ -320,9 +373,37 @@ export class ClientConversationsService {
    * the unique key is `(conversation, surface, user)`, and re-granting access
    * should restore the seat, not fork it.
    */
-  private async ensureParticipant(
+  /**
+   * TC-CL1 — the actor's live seat, or 404.
+   *
+   * Membership is explicit since TC-CL1: access to the client (Agency) or a
+   * company membership (Client Area) makes someone *eligible* to be seated,
+   * never seated. A missing or left seat answers exactly like a conversation
+   * that does not exist, so a non-member learns nothing about it.
+   */
+  private async requireParticipant(
     conversation: ClientConversationEntity,
     actor: ConversationActor,
+  ): Promise<ClientConversationParticipantEntity> {
+    const participant = await this.findParticipant(conversation.id, actor);
+    if (!participant || participant.leftAt) throw conversationNotFound();
+    return participant;
+  }
+
+  /**
+   * Seats someone, idempotently. A row whose `left_at` is set is revived rather
+   * than duplicated (the unique key is `(conversation, surface, user)`), with
+   * the watermark reset so the history before joining is not unread.
+   */
+  private async seatParticipant(
+    conversation: ClientConversationEntity,
+    seat: {
+      surface: 'agency' | 'client_area';
+      userId: string;
+      membershipId: string | null;
+      role: 'member' | 'owner';
+      addedByUserId: string | null;
+    },
   ): Promise<ClientConversationParticipantEntity> {
     const now = new Date();
 
@@ -334,31 +415,40 @@ export class ClientConversationsService {
         workspaceId: conversation.workspaceId,
         conversationId: conversation.id,
         companyContextId: conversation.companyContextId,
-        participantSurface: actor.surface,
-        userId: actor.userId,
-        membershipId:
-          actor.surface === 'client_area' ? (actor.membershipId ?? null) : null,
-        role: 'member',
+        participantSurface: seat.surface,
+        userId: seat.userId,
+        membershipId: seat.surface === 'client_area' ? seat.membershipId : null,
+        role: seat.role,
         joinedAt: now,
         lastReadAt: now,
+        addedByUserId: seat.addedByUserId,
       })
       .orIgnore()
       .execute();
 
-    const participant = await this.findParticipant(conversation.id, actor);
+    const participant = await this.findParticipant(conversation.id, {
+      surface: seat.surface,
+      userId: seat.userId,
+    });
     if (!participant) throw conversationNotFound();
 
     if (participant.leftAt) {
       participant.leftAt = null;
       participant.joinedAt = now;
       participant.lastReadAt = now;
+      participant.addedByUserId = seat.addedByUserId;
+      if (seat.surface === 'client_area')
+        participant.membershipId = seat.membershipId;
       await this.participants.save(participant);
     }
 
     return participant;
   }
 
-  private findParticipant(conversationId: string, actor: ConversationActor) {
+  private findParticipant(
+    conversationId: string,
+    actor: Pick<ConversationActor, 'surface' | 'userId'>,
+  ) {
     return this.participants.findOne({
       where: {
         conversationId,
@@ -418,7 +508,14 @@ export class ClientConversationsService {
     actor: ConversationActor,
     companyDisplayName: string | null = null,
   ): Promise<ConversationView[]> {
-    const conversation = await this.ensureDefaultConversation(scope, actor);
+    // TC-CL1 — a non-member sees no conversation (not an error): listing never
+    // provisions and never seats.
+    await this.assertCompany(scope);
+    await this.assertActorEligible(scope, actor);
+    const conversation = await this.findDefaultEntity(scope);
+    if (!conversation) return [];
+    const participant = await this.findParticipant(conversation.id, actor);
+    if (!participant || participant.leftAt) return [];
     return [await this.project(conversation, actor, companyDisplayName)];
   }
 
@@ -430,8 +527,318 @@ export class ClientConversationsService {
   ): Promise<ConversationView> {
     const conversation = await this.findAccessible(scope, conversationId);
     await this.assertActorEligible(scope, actor);
-    await this.ensureParticipant(conversation, actor);
+    await this.requireParticipant(conversation, actor);
     return this.project(conversation, actor, companyDisplayName);
+  }
+
+  /**
+   * TC-CL1 — the default conversation as an Agency manager sees it, member or
+   * not. Read-state fields are the manager's own (zero when not seated).
+   */
+  async managedView(
+    scope: ClientConversationScope,
+    userId: string,
+    companyDisplayName: string | null,
+  ): Promise<ConversationView & { isMember: boolean }> {
+    const conversation = await this.ensureConversation(scope);
+    const actor = { surface: 'agency' as const, userId };
+    const participant = await this.findParticipant(conversation.id, actor);
+    const view = await this.project(conversation, actor, companyDisplayName);
+    return { ...view, isMember: Boolean(participant && !participant.leftAt) };
+  }
+
+  /** TC-CL1 — edits the overrides. `undefined` keeps, `''`/null clears. */
+  async updateDetails(
+    scope: ClientConversationScope,
+    conversationId: unknown,
+    input: {
+      title?: string | null;
+      description?: string | null;
+      avatarUrl?: string | null;
+    },
+  ): Promise<ClientConversationEntity> {
+    const conversation = await this.findAccessible(scope, conversationId, {
+      requireActive: true,
+    });
+    const clean = (value: string | null | undefined, max: number) =>
+      value === undefined ? undefined : value?.trim().slice(0, max) || null;
+    const patch: Partial<ClientConversationEntity> = {};
+    const title = clean(input.title, 120);
+    const description = clean(input.description, 500);
+    const avatarUrl = clean(input.avatarUrl, MAX_AVATAR_LENGTH);
+    // Only an inline raster image or an http(s) URL; anything else (e.g. a
+    // `javascript:` or SVG data URL) would be rendered on both surfaces.
+    if (avatarUrl && !AVATAR_PATTERN.test(avatarUrl))
+      throw new BadRequestException('Invalid avatar.');
+    if (title !== undefined) patch.title = title;
+    if (description !== undefined) patch.description = description;
+    if (avatarUrl !== undefined) patch.avatarUrl = avatarUrl;
+    if (Object.keys(patch).length)
+      await this.conversations.update({ id: conversation.id }, patch);
+    return { ...conversation, ...patch };
+  }
+
+  /** TC-CL1 — the reader's own mute (null = notifications on). */
+  async setMuted(
+    scope: ClientConversationScope,
+    actor: ConversationActor,
+    conversationId: unknown,
+    mutedUntil: Date | null,
+  ): Promise<{ mutedUntil: Date | null }> {
+    const conversation = await this.findAccessible(scope, conversationId);
+    await this.assertActorEligible(scope, actor);
+    const participant = await this.requireParticipant(conversation, actor);
+    await this.participants.update({ id: participant.id }, { mutedUntil });
+    return { mutedUntil };
+  }
+
+  /** TC-CL1 — live seats with identity, for the Agency members panel. */
+  async listParticipants(
+    scope: ClientConversationScope,
+    conversationId: unknown,
+  ): Promise<ConversationParticipantView[]> {
+    const conversation = await this.findAccessible(scope, conversationId);
+    const rows = await this.participants.find({
+      where: { conversationId: conversation.id, leftAt: IsNull() },
+      order: { joinedAt: 'ASC' },
+    });
+    const identity = await this.identities(
+      scope,
+      rows.map((row) => row.userId),
+    );
+    return rows.map((row) => {
+      const who = identity.get(row.userId);
+      return {
+        id: row.id,
+        surface: row.participantSurface,
+        userId: row.userId,
+        membershipId: row.membershipId,
+        role: row.role,
+        displayName: who?.displayName || who?.email || 'Usuário',
+        email: who?.email ?? null,
+        avatarUrl: who?.avatarUrl ?? null,
+        joinedAt: row.joinedAt,
+      };
+    });
+  }
+
+  /**
+   * TC-CL1 — who may be seated: every active Agency workspace user (seating
+   * one grants this conversation only, never the client's assets), and every
+   * active Client Area membership *of this company* — nobody without a link to
+   * the company can ever appear here.
+   */
+  async listMemberCandidates(
+    scope: ClientConversationScope,
+    conversationId: unknown,
+  ): Promise<ConversationMemberCandidateView[]> {
+    const conversation = await this.findAccessible(scope, conversationId);
+    const [operators, memberships, seats] = await Promise.all([
+      this.workspaceUsers.find({
+        where: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          status: 'active',
+        },
+      }),
+      this.memberships.find({
+        where: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          agencyClientId: scope.agencyClientId,
+          companyContextId: scope.companyContextId,
+          status: 'active',
+        },
+      }),
+      this.participants.find({
+        where: { conversationId: conversation.id, leftAt: IsNull() },
+      }),
+    ]);
+    const seated = new Set(
+      seats.map((seat) => `${seat.participantSurface}:${seat.userId}`),
+    );
+    const agencyIds = operators
+      .map((row) => row.userId)
+      .filter((id): id is string => Boolean(id));
+    const identity = await this.identities(scope, [
+      ...agencyIds,
+      ...memberships.map((row) => row.userId),
+    ]);
+
+    const agency = operators
+      .filter((row): row is typeof row & { userId: string } =>
+        Boolean(row.userId),
+      )
+      .map((row) => {
+        const who = identity.get(row.userId);
+        return {
+          surface: 'agency' as const,
+          userId: row.userId,
+          membershipId: null,
+          displayName: who?.displayName || row.name || row.email,
+          email: row.email || who?.email || null,
+          avatarUrl: who?.avatarUrl ?? null,
+          isMember: seated.has(`agency:${row.userId}`),
+        };
+      });
+    const client = memberships.map((row) => {
+      const who = identity.get(row.userId);
+      return {
+        surface: 'client_area' as const,
+        userId: row.userId,
+        membershipId: row.id,
+        displayName: who?.displayName || who?.email || 'Usuário do cliente',
+        email: who?.email ?? null,
+        avatarUrl: who?.avatarUrl ?? null,
+        isMember: seated.has(`client_area:${row.userId}`),
+      };
+    });
+    return [...agency, ...client].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName, 'pt-BR'),
+    );
+  }
+
+  /**
+   * TC-CL1 — seats people chosen by an Agency manager. Each entry is re-proved
+   * against the same rule `listMemberCandidates` shows, so a forged id (an
+   * operator of another workspace, a membership of another company) is
+   * rejected rather than seated.
+   */
+  async addParticipants(
+    scope: ClientConversationScope,
+    conversationId: unknown,
+    entries: Array<{ surface: 'agency' | 'client_area'; userId: string }>,
+    addedByUserId: string,
+  ): Promise<ConversationParticipantView[]> {
+    const conversation = await this.findAccessible(scope, conversationId, {
+      requireActive: true,
+    });
+    for (const entry of entries) {
+      if (!isUuid(entry.userId)) throw new BadRequestException('Invalid user.');
+      if (entry.surface === 'agency') {
+        const operator = await this.workspaceUsers.exists({
+          where: {
+            tenantId: scope.tenantId,
+            workspaceId: scope.workspaceId,
+            userId: entry.userId,
+            status: 'active',
+          },
+        });
+        if (!operator)
+          throw new BadRequestException('User is not an active agency user.');
+        await this.seatParticipant(conversation, {
+          surface: 'agency',
+          userId: entry.userId,
+          membershipId: null,
+          role: 'member',
+          addedByUserId,
+        });
+        continue;
+      }
+      const membership = await this.memberships.findOne({
+        where: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          agencyClientId: scope.agencyClientId,
+          companyContextId: scope.companyContextId,
+          userId: entry.userId,
+          status: 'active',
+        },
+      });
+      if (!membership)
+        throw new BadRequestException(
+          'User has no active link with this company.',
+        );
+      await this.seatParticipant(conversation, {
+        surface: 'client_area',
+        userId: entry.userId,
+        membershipId: membership.id,
+        role: 'member',
+        addedByUserId,
+      });
+    }
+    return this.listParticipants(scope, conversation.id);
+  }
+
+  /** TC-CL1 — seats the Agency manager themself (the "start/join" path). */
+  async joinAsAgency(
+    scope: ClientConversationScope,
+    userId: string,
+  ): Promise<ClientConversationEntity> {
+    await this.assertActorEligible(scope, { surface: 'agency', userId });
+    const conversation = await this.ensureConversation(scope);
+    const seats = await this.participants.count({
+      where: {
+        conversationId: conversation.id,
+        participantSurface: 'agency',
+        leftAt: IsNull(),
+      },
+    });
+    await this.seatParticipant(conversation, {
+      surface: 'agency',
+      userId,
+      membershipId: null,
+      // The first Agency seat of a conversation is its owner.
+      role: seats === 0 ? 'owner' : 'member',
+      addedByUserId: userId,
+    });
+    return conversation;
+  }
+
+  /** TC-CL1 — closes a seat (history stays; the row can be revived later). */
+  async removeParticipant(
+    scope: ClientConversationScope,
+    conversationId: unknown,
+    participantId: unknown,
+  ): Promise<void> {
+    const conversation = await this.findAccessible(scope, conversationId);
+    if (!isUuid(participantId)) throw conversationNotFound();
+    const participant = await this.participants.findOne({
+      where: { id: participantId, conversationId: conversation.id },
+    });
+    if (!participant || participant.leftAt) throw conversationNotFound();
+    await this.participants.update(
+      { id: participant.id },
+      { leftAt: new Date() },
+    );
+  }
+
+  /** Live seat user ids of one surface (notification fan-out). */
+  async liveUserIds(
+    conversationId: string,
+    surface: 'agency' | 'client_area',
+  ): Promise<string[]> {
+    const rows = await this.participants.find({
+      where: { conversationId, participantSurface: surface, leftAt: IsNull() },
+      select: { userId: true },
+    });
+    return rows.map((row) => row.userId);
+  }
+
+  private async identities(
+    scope: ClientConversationScope,
+    userIds: string[],
+  ): Promise<
+    Map<
+      string,
+      { displayName: string; email: string | null; avatarUrl: string | null }
+    >
+  > {
+    const ids = [...new Set(userIds)];
+    if (!ids.length) return new Map();
+    const profiles = await this.profiles.find({
+      where: { tenantId: scope.tenantId, userId: In(ids) },
+    });
+    return new Map(
+      profiles.map((row) => [
+        row.userId,
+        {
+          displayName: row.displayName?.trim() ?? '',
+          email: row.email?.trim() || null,
+          avatarUrl: row.avatarUrl ?? null,
+        },
+      ]),
+    );
   }
 
   private async project(
@@ -450,6 +857,10 @@ export class ClientConversationsService {
       lastMessageAt: conversation.lastMessageAt,
       unreadCount: await this.countUnread(conversation.id, watermark),
       lastReadAt: participant?.lastReadAt ?? null,
+      title: conversation.title ?? null,
+      description: conversation.description ?? null,
+      avatarUrl: conversation.avatarUrl ?? null,
+      mutedUntil: participant?.mutedUntil ?? null,
     };
   }
 
@@ -491,7 +902,7 @@ export class ClientConversationsService {
   }> {
     const conversation = await this.findAccessible(scope, conversationId);
     await this.assertActorEligible(scope, actor);
-    await this.ensureParticipant(conversation, actor);
+    await this.requireParticipant(conversation, actor);
 
     return this.pageMessages(conversation.id, query);
   }
@@ -657,7 +1068,7 @@ export class ClientConversationsService {
       requireActive: true,
     });
     await this.assertActorEligible(scope, actor);
-    const participant = await this.ensureParticipant(conversation, actor);
+    const participant = await this.requireParticipant(conversation, actor);
 
     const body = normalizeBody(input.body);
     const attachmentIds = (input.attachmentIds ?? []).filter(
@@ -925,7 +1336,7 @@ export class ClientConversationsService {
   ): Promise<{ lastReadAt: Date; unreadCount: number }> {
     const conversation = await this.findAccessible(scope, conversationId);
     await this.assertActorEligible(scope, actor);
-    const participant = await this.ensureParticipant(conversation, actor);
+    const participant = await this.requireParticipant(conversation, actor);
 
     const lastReadAt = new Date();
     await this.participants.update({ id: participant.id }, { lastReadAt });
@@ -968,6 +1379,10 @@ export class ClientConversationsService {
       // operator's reading must never move or report someone else's watermark.
       unreadCount: 0,
       lastReadAt: null,
+      title: conversation.title ?? null,
+      description: conversation.description ?? null,
+      avatarUrl: conversation.avatarUrl ?? null,
+      mutedUntil: null,
     };
   }
 

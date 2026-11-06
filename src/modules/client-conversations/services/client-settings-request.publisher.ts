@@ -36,15 +36,9 @@ export class ClientSettingsRequestPublisher {
   ) {}
   async publish(context: ClientAreaContext, input: ClientAreaSettingsRequest) {
     const scope = toCompanyAwareScope(context);
-    const actor = {
-      surface: 'client_area' as const,
-      userId: context.userId,
-      membershipId: context.membershipId,
-    };
-    const conversation = await this.conversations.ensureDefaultConversation(
-      scope,
-      actor,
-    );
+    // TC-CL1 — a platform card: the conversation is provisioned, but the
+    // requester is not seated (membership is explicit).
+    const conversation = await this.conversations.ensureConversation(scope);
     const body =
       input.kind === 'invitation_request'
         ? `Solicitação de convite: ${input.displayName} (${input.email}). Níveis sugeridos: ${JSON.stringify(input.moduleLevels)}`
@@ -96,7 +90,7 @@ export class ClientSettingsRequestPublisher {
             ))
           )
             continue;
-          await this.access.resolveScope(
+          await this.access.resolveManageScope(
             {
               tenantId: scope.tenantId,
               workspaceId: scope.workspaceId,

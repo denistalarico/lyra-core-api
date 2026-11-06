@@ -71,6 +71,16 @@ export class ClientConversationEntity {
   @Column({ type: 'varchar', length: 16, default: 'active' })
   status!: ClientConversationStatus;
 
+  /** TC-CL1 — optional overrides; null falls back to the company name/logo. */
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  title!: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  description!: string | null;
+
+  @Column({ name: 'avatar_url', type: 'text', nullable: true })
+  avatarUrl!: string | null;
+
   /**
    * Denormalized from the newest message, so a conversation list can order by
    * recency without a correlated subquery per row. It is a cache of an

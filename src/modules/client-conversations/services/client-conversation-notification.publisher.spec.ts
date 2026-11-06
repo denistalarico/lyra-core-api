@@ -132,13 +132,18 @@ describe('client conversation message notifications', () => {
       expect(events[0].clientAudience).toBeUndefined();
 
       // Only live participants of the Agency surface.
+      // TC-CL1 — live seats, excluding an active mute.
+      const base = {
+        conversationId: 'conversation-1',
+        participantSurface: 'agency',
+        leftAt: IsNull(),
+        userId: Not(IsNull()),
+      };
       expect(participantsRepo.find).toHaveBeenCalledWith({
-        where: {
-          conversationId: 'conversation-1',
-          participantSurface: 'agency',
-          leftAt: IsNull(),
-          userId: Not(IsNull()),
-        },
+        where: [
+          { ...base, mutedUntil: IsNull() },
+          { ...base, mutedUntil: expect.anything() },
+        ],
       });
     });
 

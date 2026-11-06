@@ -98,6 +98,10 @@ export class ClientConversationParticipantEntity {
   @Column({ name: 'left_at', type: 'timestamptz', nullable: true })
   leftAt!: Date | null;
 
+  /** TC-CL1 — who seated this member (null for seats from before TC-CL1). */
+  @Column({ name: 'added_by_user_id', type: 'uuid', nullable: true })
+  addedByUserId!: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

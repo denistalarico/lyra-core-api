@@ -41,6 +41,12 @@ export type NotificationClientAudience = {
   /** Client-facing copy, when it should differ from the Agency wording. */
   title?: string;
   body?: string;
+  /**
+   * TC-CL1 — when set, only these client user ids (still subject to the
+   * permission/module resolution above) receive it. Used by explicit-member
+   * resources such as a client conversation.
+   */
+  restrictToUserIds?: string[];
 };
 
 export type NotificationSourceEvent = {

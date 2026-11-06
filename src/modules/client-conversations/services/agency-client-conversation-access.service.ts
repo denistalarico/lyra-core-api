@@ -68,6 +68,15 @@ export class AgencyClientConversationAccessService {
    * caller: that is what stops a request from pairing a company it may reach
    * with a client it may not, or vice versa.
    */
+  /**
+   * TC-CL1 — the scope a *member* converses in: company active + module on.
+   *
+   * Client access (`canAccessClient`) is no longer required here: membership
+   * is explicit, and an operator seated by a manager reads and writes this
+   * conversation without reaching the client's assets (LeadFlow, Social). The
+   * seat itself is proved by `ClientConversationsService` on every call — a
+   * non-member gets the same 404 as a company that does not exist.
+   */
   async resolveScope(
     actor: {
       tenantId: string;
@@ -77,6 +86,42 @@ export class AgencyClientConversationAccessService {
     },
     companyContextId: unknown,
   ): Promise<ClientConversationScope> {
+    const company = await this.findCompany(actor, companyContextId);
+    return this.withModuleGate(actor, company);
+  }
+
+  /**
+   * TC-CL1 — the scope a *manager* acts in (start, members, details): the
+   * member scope plus `canAccessClient`, the platform's rule for reaching a
+   * client (Owner implied, everyone else needs a grant).
+   */
+  async resolveManageScope(
+    actor: {
+      tenantId: string;
+      workspaceId: string;
+      userId: string;
+      role?: string | null;
+    },
+    companyContextId: unknown,
+  ): Promise<ClientConversationScope> {
+    const company = await this.findCompany(actor, companyContextId);
+    const allowed = await this.permissions.canAccessClient({
+      tenantId: actor.tenantId,
+      workspaceId: actor.workspaceId,
+      userId: actor.userId,
+      role: actor.role ?? 'member',
+      clientId: company.agencyClientId,
+    });
+    // 404 rather than 403: knowing a conversation or company UUID must not
+    // confirm that it exists (§51).
+    if (!allowed) throw companyNotFound();
+    return this.withModuleGate(actor, company);
+  }
+
+  async findCompany(
+    actor: { tenantId: string; workspaceId: string },
+    companyContextId: unknown,
+  ): Promise<AgencyClientCompanyContext> {
     if (!isUuid(companyContextId)) throw companyNotFound();
 
     const company = await this.companyContexts.findOne({
@@ -90,19 +135,13 @@ export class AgencyClientConversationAccessService {
     if (!company || company.status !== 'active' || company.archivedAt) {
       throw companyNotFound();
     }
+    return company;
+  }
 
-    const allowed = await this.permissions.canAccessClient({
-      tenantId: actor.tenantId,
-      workspaceId: actor.workspaceId,
-      userId: actor.userId,
-      role: actor.role ?? 'member',
-      clientId: company.agencyClientId,
-    });
-
-    // 404 rather than 403: knowing a conversation or company UUID must not
-    // confirm that it exists (§51).
-    if (!allowed) throw companyNotFound();
-
+  private async withModuleGate(
+    actor: { tenantId: string; workspaceId: string },
+    company: AgencyClientCompanyContext,
+  ): Promise<ClientConversationScope> {
     const modules = await this.management.resolveCompanyModules({
       tenantId: actor.tenantId,
       workspaceId: actor.workspaceId,
@@ -132,6 +171,53 @@ export class AgencyClientConversationAccessService {
    * and the per-conversation check cannot drift — the divergence that made
    * `assertChannel` wrong in the Agency chat.
    */
+  /**
+   * TC-CL1 — companies whose default conversation seats this operator (the
+   * sidebar of a non-manager). Same company + module gate as `resolveScope`.
+   */
+  async listMemberCompanies(actor: {
+    tenantId: string;
+    workspaceId: string;
+    userId: string;
+  }): Promise<
+    Array<{
+      companyContextId: string;
+      agencyClientId: string;
+      companyContactId: string;
+    }>
+  > {
+    const rows: Array<{ company_context_id: string }> =
+      await this.companyContexts.query(
+        `SELECT DISTINCT c.company_context_id
+           FROM client_conversation_participants p
+           JOIN client_conversations c ON c.id = p.conversation_id
+          WHERE p.tenant_id = $1 AND p.workspace_id = $2
+            AND p.participant_surface = 'agency' AND p.user_id = $3
+            AND p.left_at IS NULL
+            AND c.status = 'active' AND c.kind = 'default'`,
+        [actor.tenantId, actor.workspaceId, actor.userId],
+      );
+    const result: Array<{
+      companyContextId: string;
+      agencyClientId: string;
+      companyContactId: string;
+    }> = [];
+    for (const row of rows) {
+      try {
+        const company = await this.findCompany(actor, row.company_context_id);
+        await this.withModuleGate(actor, company);
+        result.push({
+          companyContextId: company.id,
+          agencyClientId: company.agencyClientId,
+          companyContactId: company.companyContactId,
+        });
+      } catch {
+        // Archived company or module off: not listed, like `resolveScope`.
+      }
+    }
+    return result;
+  }
+
   async listEligibleCompanies(actor: {
     tenantId: string;
     workspaceId: string;

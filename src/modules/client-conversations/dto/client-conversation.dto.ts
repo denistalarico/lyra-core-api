@@ -1,11 +1,16 @@
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsIn,
+  IsISO8601,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 
 /**
@@ -43,4 +48,50 @@ export class SendClientConversationMessageDto {
   @IsOptional()
   @IsIn(['orion'])
   assistantMention?: 'orion';
+}
+
+/** TC-CL1 — editable overrides; `null`/`''` clears back to the company. */
+export class UpdateClientConversationDetailsDto {
+  @IsOptional()
+  @ValidateIf((_object: unknown, value: unknown) => value !== null)
+  @IsString()
+  @MaxLength(120)
+  title?: string | null;
+
+  @IsOptional()
+  @ValidateIf((_object: unknown, value: unknown) => value !== null)
+  @IsString()
+  @MaxLength(500)
+  description?: string | null;
+
+  /** Inline raster data URL or http(s) URL; the service validates the shape. */
+  @IsOptional()
+  @ValidateIf((_object: unknown, value: unknown) => value !== null)
+  @IsString()
+  @MaxLength(400_000)
+  avatarUrl?: string | null;
+}
+
+export class ClientConversationMemberRefDto {
+  @IsIn(['agency', 'client_area'])
+  surface!: 'agency' | 'client_area';
+
+  @IsUUID()
+  userId!: string;
+}
+
+export class AddClientConversationMembersDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => ClientConversationMemberRefDto)
+  members!: ClientConversationMemberRefDto[];
+}
+
+/** TC-CL1 — the reader's own mute; null turns notifications back on. */
+export class UpdateClientConversationNotificationsDto {
+  @ValidateIf((_object: unknown, value: unknown) => value !== null)
+  @IsISO8601()
+  mutedUntil!: string | null;
 }

@@ -3,8 +3,11 @@ import { CompanyLogoRegistry } from '../../../common/client-area-bridge/company-
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -28,7 +31,12 @@ import { ClientConversationsService } from '../services/client-conversations.ser
 import { ClientConversationTimelineService } from '../services/client-conversation-timeline.service';
 import { ClientConversationsGateway } from '../gateways/client-conversations.gateway';
 import { AgencyClientConversationsGateway } from '../gateways/agency-client-conversations.gateway';
-import { SendClientConversationMessageDto } from '../dto/client-conversation.dto';
+import {
+  AddClientConversationMembersDto,
+  SendClientConversationMessageDto,
+  UpdateClientConversationDetailsDto,
+  UpdateClientConversationNotificationsDto,
+} from '../dto/client-conversation.dto';
 import { NotificationRecipientSurface } from '../../notifications/enums';
 import { ClientConversationNotificationPublisher } from '../services/client-conversation-notification.publisher';
 import {
@@ -42,6 +50,14 @@ export const CLIENT_CONVERSATION_VIEW_PERMISSION =
   'agency.client_conversations.view.assigned';
 export const CLIENT_CONVERSATION_SEND_PERMISSION =
   'agency.client_conversations.send.assigned';
+/**
+ * TC-CL1 — starting a client conversation, editing it and choosing its
+ * members. The existing Client Area management key (Owner/Admin), checked
+ * together with `canAccessClient` by `resolveManageScope`: whoever configures
+ * a client's Client Area is who staffs its conversation.
+ */
+export const CLIENT_CONVERSATION_MANAGE_PERMISSION =
+  'agency.client_area.manage.admin';
 
 /**
  * CCOM1 — the Agency boundary for Client Conversations (§27–§29).
@@ -116,12 +132,225 @@ export class AgencyClientConversationsController {
   @Get('companies')
   @RequirePermission(CLIENT_CONVERSATION_VIEW_PERMISSION)
   async companies(@AuthenticatedUser() user: AuthTokenPayload) {
+    // TC-CL1 — only companies whose conversation seats this operator.
+    const actor = this.actorOf(user);
+    const seated = await this.access.listMemberCompanies(actor);
+    const companies: Array<Record<string, unknown>> = [];
+    for (const entry of await this.decorate(actor, seated)) {
+      const scope = { ...this.baseScope(actor), ...entry.scope };
+      const [conversation] = await this.conversations.list(
+        scope,
+        this.participant(user),
+        entry.name,
+      );
+      if (!conversation) continue;
+      companies.push({ ...entry.company, conversation });
+    }
+    return { companies };
+  }
+
+  /**
+   * TC-CL1 — every company a manager may staff, member or not, for the
+   * "start conversation" picker. Reading this provisions nothing.
+   */
+  @Get('manageable-companies')
+  @RequirePermission(CLIENT_CONVERSATION_MANAGE_PERMISSION)
+  async manageableCompanies(@AuthenticatedUser() user: AuthTokenPayload) {
     const actor = this.actorOf(user);
     const eligible = await this.access.listEligibleCompanies(actor);
+    const seated = new Set(
+      (await this.access.listMemberCompanies(actor)).map(
+        (item) => item.companyContextId,
+      ),
+    );
+    return {
+      companies: (await this.decorate(actor, eligible)).map((entry) => ({
+        ...entry.company,
+        isMember: seated.has(entry.company.companyContextId),
+      })),
+    };
+  }
 
-    const contacts = eligible.length
+  /** TC-CL1 — a manager starts (or rejoins) a company's conversation. */
+  @Post('companies/:companyContextId/join')
+  @RequirePermission(CLIENT_CONVERSATION_MANAGE_PERMISSION)
+  @HttpCode(200)
+  async join(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('companyContextId') companyContextId: string,
+  ) {
+    const actor = this.actorOf(user);
+    const scope = await this.access.resolveManageScope(actor, companyContextId);
+    await this.conversations.joinAsAgency(scope, user.sub);
+    const [entry] = await this.decorate(actor, [
+      {
+        companyContextId: scope.companyContextId,
+        agencyClientId: scope.agencyClientId,
+        companyContactId: (
+          await this.access.findCompany(actor, scope.companyContextId)
+        ).companyContactId,
+      },
+    ]);
+    const [conversation] = await this.conversations.list(
+      scope,
+      this.participant(user),
+      entry.name,
+    );
+    return { company: { ...entry.company, conversation } };
+  }
+
+  @Patch('companies/:companyContextId/conversations/:conversationId')
+  @RequirePermission(CLIENT_CONVERSATION_MANAGE_PERMISSION)
+  async updateDetails(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('companyContextId') companyContextId: string,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: UpdateClientConversationDetailsDto,
+  ) {
+    const scope = await this.access.resolveManageScope(
+      this.actorOf(user),
+      companyContextId,
+    );
+    const row = await this.conversations.updateDetails(
+      scope,
+      conversationId,
+      dto,
+    );
+    return {
+      title: row.title,
+      description: row.description,
+      avatarUrl: row.avatarUrl,
+    };
+  }
+
+  /** Members are visible to members (and to managers of the client). */
+  @Get('companies/:companyContextId/conversations/:conversationId/members')
+  @RequirePermission(CLIENT_CONVERSATION_VIEW_PERMISSION)
+  async members(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('companyContextId') companyContextId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const scope = await this.access.resolveScope(
+      this.actorOf(user),
+      companyContextId,
+    );
+    await this.conversations.detail(
+      scope,
+      this.participant(user),
+      conversationId,
+    );
+    return {
+      members: await this.conversations.listParticipants(scope, conversationId),
+    };
+  }
+
+  @Get(
+    'companies/:companyContextId/conversations/:conversationId/member-candidates',
+  )
+  @RequirePermission(CLIENT_CONVERSATION_MANAGE_PERMISSION)
+  async memberCandidates(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('companyContextId') companyContextId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const scope = await this.access.resolveManageScope(
+      this.actorOf(user),
+      companyContextId,
+    );
+    return {
+      candidates: await this.conversations.listMemberCandidates(
+        scope,
+        conversationId,
+      ),
+    };
+  }
+
+  @Post('companies/:companyContextId/conversations/:conversationId/members')
+  @RequirePermission(CLIENT_CONVERSATION_MANAGE_PERMISSION)
+  async addMembers(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('companyContextId') companyContextId: string,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: AddClientConversationMembersDto,
+  ) {
+    const scope = await this.access.resolveManageScope(
+      this.actorOf(user),
+      companyContextId,
+    );
+    return {
+      members: await this.conversations.addParticipants(
+        scope,
+        conversationId,
+        dto.members,
+        user.sub,
+      ),
+    };
+  }
+
+  @Delete(
+    'companies/:companyContextId/conversations/:conversationId/members/:participantId',
+  )
+  @RequirePermission(CLIENT_CONVERSATION_MANAGE_PERMISSION)
+  @HttpCode(204)
+  async removeMember(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('companyContextId') companyContextId: string,
+    @Param('conversationId') conversationId: string,
+    @Param('participantId') participantId: string,
+  ) {
+    const scope = await this.access.resolveManageScope(
+      this.actorOf(user),
+      companyContextId,
+    );
+    await this.conversations.removeParticipant(
+      scope,
+      conversationId,
+      participantId,
+    );
+  }
+
+  @Patch(
+    'companies/:companyContextId/conversations/:conversationId/notifications',
+  )
+  @RequirePermission(CLIENT_CONVERSATION_VIEW_PERMISSION)
+  async notifications(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('companyContextId') companyContextId: string,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: UpdateClientConversationNotificationsDto,
+  ) {
+    const scope = await this.access.resolveScope(
+      this.actorOf(user),
+      companyContextId,
+    );
+    return this.conversations.setMuted(
+      scope,
+      this.participant(user),
+      conversationId,
+      dto.mutedUntil ? new Date(dto.mutedUntil) : null,
+    );
+  }
+
+  private baseScope(actor: { tenantId: string; workspaceId: string }) {
+    return { tenantId: actor.tenantId, workspaceId: actor.workspaceId };
+  }
+
+  /**
+   * Company display name (organization Contact, never the Agency Client's
+   * commercial label — §40) and logo, for a list of eligible companies.
+   */
+  private async decorate(
+    actor: { tenantId: string; workspaceId: string },
+    items: Array<{
+      companyContextId: string;
+      agencyClientId: string;
+      companyContactId: string;
+    }>,
+  ) {
+    const contacts = items.length
       ? await this.contacts.find({
-          where: eligible.map((item) => ({
+          where: items.map((item) => ({
             id: item.companyContactId,
             tenantId: actor.tenantId,
             workspaceId: actor.workspaceId,
@@ -129,47 +358,32 @@ export class AgencyClientConversationsController {
         })
       : [];
     const nameBy = new Map(contacts.map((item) => [item.id, item]));
-
-    const companies: Array<{
-      companyContextId: string;
-      agencyClientId: string;
-      displayName: string | null;
-      companyLogoUrl?: string | null;
-      conversation: Awaited<
-        ReturnType<ClientConversationsService['list']>
-      >[number];
-    }> = [];
     const urls = await this.logos?.resolveMany(
-      eligible.map((item) => ({
+      items.map((item) => ({
         tenantId: actor.tenantId,
         workspaceId: actor.workspaceId,
         agencyClientId: item.agencyClientId,
         companyContextId: item.companyContextId,
       })),
     );
-    for (const [index, item] of eligible.entries()) {
+    return items.map((item, index) => {
       const contact = nameBy.get(item.companyContactId);
-      const scope = {
-        tenantId: actor.tenantId,
-        workspaceId: actor.workspaceId,
-        agencyClientId: item.agencyClientId,
-        companyContextId: item.companyContextId,
+      const name =
+        contact?.displayName?.trim() || contact?.legalName?.trim() || 'Empresa';
+      return {
+        name,
+        scope: {
+          agencyClientId: item.agencyClientId,
+          companyContextId: item.companyContextId,
+        },
+        company: {
+          companyContextId: item.companyContextId,
+          agencyClientId: item.agencyClientId,
+          displayName: name,
+          ...(this.logos ? { companyLogoUrl: urls?.[index] ?? null } : {}),
+        },
       };
-      const [conversation] = await this.conversations.list(
-        scope,
-        this.participant(user),
-        contact?.displayName?.trim() || contact?.legalName?.trim() || 'Empresa',
-      );
-      companies.push({
-        companyContextId: item.companyContextId,
-        agencyClientId: item.agencyClientId,
-        displayName: conversation.companyDisplayName,
-        ...(this.logos ? { companyLogoUrl: urls?.[index] ?? null } : {}),
-        conversation,
-      });
-    }
-
-    return { companies };
+    });
   }
 
   @Get('companies/:companyContextId')

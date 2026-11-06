@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { IsNull, Not, Repository } from 'typeorm';
+import { IsNull, LessThan, Not, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   NotificationActorType,
@@ -99,7 +99,13 @@ export class ClientConversationNotificationPublisher {
           ? await this.agencyParticipants(notice)
           : // An Agency-authored message addresses only the client surface.
             [],
-        clientAudience: fromClient ? undefined : this.clientAudience(notice),
+        clientAudience: fromClient
+          ? undefined
+          : {
+              ...this.clientAudience(notice),
+              // TC-CL1 — explicit membership: only seated, unmuted clients.
+              restrictToUserIds: await this.liveUserIds(notice, 'client_area'),
+            },
         payload: {
           title: 'Nova mensagem',
           body: fromClient
@@ -151,17 +157,39 @@ export class ClientConversationNotificationPublisher {
    * the participant table rather than from a permission sweep, so a message
    * notifies the operators actually in the thread.
    */
+  /**
+   * TC-CL1 — live, unmuted seats of one surface. A mute is `muted_until` in
+   * the future; null or past means notifications are on.
+   */
+  private async liveRows(
+    notice: ClientConversationMessageNotice,
+    surface: 'agency' | 'client_area',
+  ) {
+    const base = {
+      conversationId: notice.conversationId,
+      participantSurface: surface,
+      leftAt: IsNull(),
+      userId: Not(IsNull()),
+    };
+    return this.participants.find({
+      where: [
+        { ...base, mutedUntil: IsNull() },
+        { ...base, mutedUntil: LessThan(new Date()) },
+      ],
+    });
+  }
+
+  private async liveUserIds(
+    notice: ClientConversationMessageNotice,
+    surface: 'agency' | 'client_area',
+  ): Promise<string[]> {
+    return (await this.liveRows(notice, surface)).map((row) => row.userId);
+  }
+
   private async agencyParticipants(
     notice: ClientConversationMessageNotice,
   ): Promise<NotificationExplicitRecipient[]> {
-    const rows = await this.participants.find({
-      where: {
-        conversationId: notice.conversationId,
-        participantSurface: 'agency',
-        leftAt: IsNull(),
-        userId: Not(IsNull()),
-      },
-    });
+    const rows = await this.liveRows(notice, 'agency');
 
     if (!rows.length && notice.agencyFallbackRecipientUserIds?.length) {
       return notice.agencyFallbackRecipientUserIds

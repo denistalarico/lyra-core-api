@@ -118,6 +118,30 @@ export class ClientAreaConversationsController {
     };
   }
 
+  /**
+   * TC-CL1 — who is in the conversation, for the composer's `@` list. Display
+   * names only: no e-mail, no user id of the Agency side beyond the opaque
+   * seat id. Requires the reader's own live seat (via `detail`).
+   */
+  @Get(':conversationId/members')
+  @RequireClientAreaPermission('client_area.conversations.view')
+  async members(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const scope = this.scope(context);
+    await this.conversations.detail(scope, this.actor(context), conversationId);
+    const members = await this.conversations.listParticipants(
+      scope,
+      conversationId,
+    );
+    return {
+      members: members
+        .filter((member) => member.userId !== context.userId)
+        .map((member) => ({ id: member.id, displayName: member.displayName })),
+    };
+  }
+
   @Get(':conversationId/messages')
   @RequireClientAreaPermission('client_area.conversations.view')
   messages(

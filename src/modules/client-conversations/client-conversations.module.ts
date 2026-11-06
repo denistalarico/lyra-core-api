@@ -8,7 +8,10 @@ import { FilesModule } from '../../common/files/files.module';
 import { AgencyClient } from '../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../clients/entities/agency-client-company-context.entity';
 import { ContactEntity } from '../contacts/entities/contact.entity';
-import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
+import {
+  AgencyUserProfileEntity,
+  AgencyWorkspaceUserEntity,
+} from '../agency/entities/agency-settings.entities';
 import { ClientAreaModule } from '../client-area/client-area.module';
 import { ClientAreaMembershipEntity } from '../client-area/entities/client-area-membership.entity';
 import { PermissionsModule } from '../permissions';
@@ -58,6 +61,7 @@ const AGENCY_CONNECTION = 'agency';
         ContactEntity,
         ClientAreaMembershipEntity,
         AgencyWorkspaceUserEntity,
+        AgencyUserProfileEntity,
       ],
       AGENCY_CONNECTION,
     ),
