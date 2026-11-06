@@ -778,6 +778,7 @@ export class ClientAreaManagementService {
           approvalsEnabled: config?.approvalsEnabled ?? false,
           conversationsEnabled: config?.conversationsEnabled ?? false,
           defaultRole: config?.defaultRole ?? 'client_viewer',
+          analyticsOverviewFirst: config?.analyticsOverviewFirst ?? 'leadflow',
           membersCount: memberships.filter(
             (item) => item.companyContextId === context.id,
           ).length,
