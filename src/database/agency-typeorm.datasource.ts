@@ -15,6 +15,7 @@ import { AddClientAreaProfilePreferences1801600000000 } from './migrations/18016
 import { ReconcileUserProfileSchema1801700000000 } from './migrations/1801700000000-reconcile-user-profile-schema';
 import { ApplyLeadflowChannelDefaultLayouts1801800000000 } from './migrations/1801800000000-apply-leadflow-channel-default-layouts';
 import { AddClientConversationDetailsAndExplicitMembers1801900000000 } from './migrations/1801900000000-add-client-conversation-details-and-explicit-members';
+import { SeatClientConversationDefaultMembers1802000000000 } from './migrations/1802000000000-seat-client-conversation-default-members';
 import { AddSurfaceToTrustedDevices1800200000000 } from './migrations/1800200000000-add-surface-to-trusted-devices';
 import { CreateClientAreaAnalyticsDashboards1800100000000 } from './migrations/1800100000000-create-client-area-analytics-dashboards';
 import { CreateFinanceReceivableWriteOffs1799900000000 } from './migrations/1799900000000-create-finance-receivable-write-offs';
@@ -590,5 +591,6 @@ export const AgencyDataSource = new DataSource({
     ReconcileUserProfileSchema1801700000000,
     ApplyLeadflowChannelDefaultLayouts1801800000000,
     AddClientConversationDetailsAndExplicitMembers1801900000000,
+    SeatClientConversationDefaultMembers1802000000000,
   ],
 });

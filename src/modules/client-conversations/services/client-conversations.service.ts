@@ -306,7 +306,78 @@ export class ClientConversationsService {
     });
 
     if (!conversation) throw conversationNotFound();
+    await this.seatDefaultMembers(conversation);
     return conversation;
+  }
+
+  /**
+   * TC-CL1 — the seats a conversation is born with, so turning the module on
+   * never yields an empty room: every active Agency Owner/Admin and the
+   * company's active Client Owner. Insert-only (`ON CONFLICT DO NOTHING`, no
+   * revival): someone removed later is not re-added by a concurrent first
+   * request, and nobody else is ever seated automatically.
+   */
+  private async seatDefaultMembers(
+    conversation: ClientConversationEntity,
+  ): Promise<void> {
+    const [operators, owners] = await Promise.all([
+      this.workspaceUsers.find({
+        where: {
+          tenantId: conversation.tenantId,
+          workspaceId: conversation.workspaceId,
+          status: 'active',
+          role: In(['owner', 'admin']),
+        },
+      }),
+      this.memberships.find({
+        where: {
+          tenantId: conversation.tenantId,
+          workspaceId: conversation.workspaceId,
+          agencyClientId: conversation.agencyClientId,
+          companyContextId: conversation.companyContextId,
+          status: 'active',
+          role: 'client_owner',
+        },
+      }),
+    ]);
+    const now = new Date();
+    const rows = [
+      ...operators
+        .filter((row) => row.userId)
+        .map((row) => ({
+          surface: 'agency' as const,
+          userId: row.userId as string,
+          membershipId: null,
+          role: row.role === 'owner' ? ('owner' as const) : ('member' as const),
+        })),
+      ...owners.map((row) => ({
+        surface: 'client_area' as const,
+        userId: row.userId,
+        membershipId: row.id,
+        role: 'member' as const,
+      })),
+    ];
+    if (!rows.length) return;
+    await this.participants
+      .createQueryBuilder()
+      .insert()
+      .values(
+        rows.map((row) => ({
+          tenantId: conversation.tenantId,
+          workspaceId: conversation.workspaceId,
+          conversationId: conversation.id,
+          companyContextId: conversation.companyContextId,
+          participantSurface: row.surface,
+          userId: row.userId,
+          membershipId: row.membershipId,
+          role: row.role,
+          joinedAt: now,
+          lastReadAt: now,
+          addedByUserId: null,
+        })),
+      )
+      .orIgnore()
+      .execute();
   }
 
   /**
@@ -512,8 +583,9 @@ export class ClientConversationsService {
     // provisions and never seats.
     await this.assertCompany(scope);
     await this.assertActorEligible(scope, actor);
-    const conversation = await this.findDefaultEntity(scope);
-    if (!conversation) return [];
+    // Provisioning (with its default seats) happens on the first visit of
+    // either side once the module is on; it never seats the viewer as such.
+    const conversation = await this.ensureConversation(scope);
     const participant = await this.findParticipant(conversation.id, actor);
     if (!participant || participant.leftAt) return [];
     return [await this.project(conversation, actor, companyDisplayName)];

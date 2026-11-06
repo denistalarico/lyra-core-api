@@ -134,6 +134,16 @@ export class AgencyClientConversationsController {
   async companies(@AuthenticatedUser() user: AuthTokenPayload) {
     // TC-CL1 — only companies whose conversation seats this operator.
     const actor = this.actorOf(user);
+    // TC-CL1 — an Owner/Admin visit provisions conversations that do not exist
+    // yet, so default seats (Owners/Admins + Client Owner) appear as soon as
+    // the module is on. Existing conversations and their members are untouched.
+    if (user.role === 'owner' || user.role === 'admin') {
+      for (const item of await this.access.listEligibleCompanies(actor)) {
+        await this.conversations
+          .ensureConversation({ ...this.baseScope(actor), ...item })
+          .catch(() => undefined);
+      }
+    }
     const seated = await this.access.listMemberCompanies(actor);
     const companies: Array<Record<string, unknown>> = [];
     for (const entry of await this.decorate(actor, seated)) {
