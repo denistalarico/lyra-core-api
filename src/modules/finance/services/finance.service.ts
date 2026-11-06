@@ -726,11 +726,15 @@ export class FinanceService {
       (client) =>
         client.status === AgencyClientStatus.Active && !client.archivedAt,
     );
-    const clientContactIds = new Set(
-      clients.map((client) => client.contactId).filter(Boolean),
+    const clientCustomerIds = new Set(
+      clients.flatMap((client) =>
+        client.contactId ? [client.id, client.contactId] : [client.id],
+      ),
     );
-    const activeClientContactIds = new Set(
-      activeClients.map((client) => client.contactId).filter(Boolean),
+    const activeClientCustomerIds = new Set(
+      activeClients.flatMap((client) =>
+        client.contactId ? [client.id, client.contactId] : [client.id],
+      ),
     );
     // A recurrence can remain active after its Agency client has left.
     // Standalone Finance customers still count; known clients must be active.
@@ -740,14 +744,14 @@ export class FinanceService {
         profile.startDate <= today &&
         (!profile.endDate || profile.endDate >= today) &&
         (!profile.customerId ||
-          !clientContactIds.has(profile.customerId) ||
-          activeClientContactIds.has(profile.customerId)),
+          !clientCustomerIds.has(profile.customerId) ||
+          activeClientCustomerIds.has(profile.customerId)),
     );
 
     const activeMonthlyProfiles = activeRecurringProfiles.filter(
       (profile) => profile.interval === FinanceRecurringInterval.Monthly,
     );
-    const recurringProfileContactIds = new Set(
+    const recurringProfileCustomerIds = new Set(
       activeMonthlyProfiles
         .map((profile) => profile.customerId)
         .filter((customerId): customerId is string => Boolean(customerId)),
@@ -755,8 +759,9 @@ export class FinanceService {
     const contractedClientMonthlyFees = activeClients
       .filter(
         (client) =>
-          !client.contactId ||
-          !recurringProfileContactIds.has(client.contactId),
+          !recurringProfileCustomerIds.has(client.id) &&
+          (!client.contactId ||
+            !recurringProfileCustomerIds.has(client.contactId)),
       )
       .map((client) => this.readClientMonthlyFee(client))
       .filter((fee) => fee > 0);
@@ -851,8 +856,9 @@ export class FinanceService {
       .filter(
         (client) =>
           this.readClientMonthlyFee(client) > 0 &&
+          !recurringProfileCustomerIds.has(client.id) &&
           (!client.contactId ||
-            !recurringProfileContactIds.has(client.contactId)),
+            !recurringProfileCustomerIds.has(client.contactId)),
       )
       .map((client) => client.id);
     const activeContracts = new Set([
@@ -861,7 +867,7 @@ export class FinanceService {
         .filter(
           (profile) =>
             !profile.customerId ||
-            !activeClientContactIds.has(profile.customerId),
+            !activeClientCustomerIds.has(profile.customerId),
         )
         .map((profile) => profile.id),
     ]).size;

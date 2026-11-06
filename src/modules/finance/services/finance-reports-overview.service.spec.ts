@@ -198,6 +198,24 @@ describe('FinanceService reports overview', () => {
     expect(result.cards.activeContracts).toBe(1);
   });
 
+  it('excludes an archived client recurrence linked by the legacy client id', async () => {
+    const { service } = makeService({
+      clients: [
+        client('active', 'active', 1000),
+        client('archived', 'archived', 3000, createdAt),
+      ],
+      profiles: [
+        profile('active-profile', 'active', 1100),
+        profile('archived-profile', 'archived', 3000),
+      ],
+    });
+
+    const result = await service.getReportsOverview(context);
+
+    expect(result.cards.mrr).toBe(1100);
+    expect(result.cards.activeContracts).toBe(1);
+  });
+
   it('keeps standalone recurrence and contracted fees without counting a linked client twice', async () => {
     const { service } = makeService({
       clients: [
