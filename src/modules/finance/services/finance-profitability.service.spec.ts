@@ -20,6 +20,10 @@ import {
   FinanceRecurringProfile,
   FinanceSetting,
 } from '../entities';
+import {
+  FinanceRecurringInterval,
+  FinanceRecurringProfileStatus,
+} from '../enums';
 import type {
   AiCostFilter,
   AiCostGroupBy,
@@ -445,16 +449,16 @@ describe('FinanceProfitabilityService — direct profitability', () => {
         {
           id: 'older-duplicate',
           customerId: 'contact-client-1',
-          status: 'active',
-          interval: 'monthly',
+          status: FinanceRecurringProfileStatus.Active,
+          interval: FinanceRecurringInterval.Monthly,
           amount: '4897',
           updatedAt: new Date('2026-11-01T12:00:00Z'),
         },
         {
           id: 'newer-duplicate',
           customerId: 'contact-client-1',
-          status: 'active',
-          interval: 'monthly',
+          status: FinanceRecurringProfileStatus.Active,
+          interval: FinanceRecurringInterval.Monthly,
           amount: '4897',
           updatedAt: new Date('2026-11-02T12:00:00Z'),
         },
