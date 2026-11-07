@@ -1,6 +1,6 @@
 import { Repository } from 'typeorm';
 /* eslint-disable @typescript-eslint/no-unsafe-assignment -- Jest asymmetric matchers are typed as any. */
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { PlatformPermissionService } from '../../permissions/services/platform-permission.service';
 import { TeamMember } from '../../team/entities';
 import { ContractRecord } from '../entities';

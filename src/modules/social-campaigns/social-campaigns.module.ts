@@ -10,6 +10,7 @@ import {
 import {
   SocialBoostTemplateEntity,
   SocialBoostRequestEntity,
+  SocialScheduledBoostEntity,
   SocialAdActionPolicyEntity,
   SocialAdGovernedActionEntity,
   SocialCampaignAlertEntity,
@@ -28,6 +29,8 @@ import { SocialAdActionsConfigService } from './services/social-ad-actions-confi
 import { SocialAdManualActionService } from './services/social-ad-manual-action.service';
 import { MetaAdsBoostAdapter } from './services/meta-ads-boost.adapter';
 import { SocialBoostRequestService } from './services/social-boost-request.service';
+import { SocialScheduledBoostService } from './services/social-scheduled-boost.service';
+import { SocialScheduledBoostScheduler } from './services/social-scheduled-boost.scheduler';
 import { MetaAdsBoostTargetingService } from './services/meta-ads-boost-targeting.service';
 import { SocialCampaignsController } from './social-campaigns.controller';
 
@@ -39,6 +42,7 @@ import { SocialCampaignsController } from './social-campaigns.controller';
       [
         SocialBoostTemplateEntity,
         SocialBoostRequestEntity,
+        SocialScheduledBoostEntity,
         SocialAdActionPolicyEntity,
         SocialAdGovernedActionEntity,
         SocialCampaignMonitorPolicyEntity,
@@ -57,6 +61,8 @@ import { SocialCampaignsController } from './social-campaigns.controller';
     MetaCampaignHierarchyReadService,
     SocialCampaignMonitorService,
     SocialCampaignMonitorScheduler,
+    SocialScheduledBoostService,
+    SocialScheduledBoostScheduler,
     SocialCampaignRecommendationConfigService,
     SocialCampaignRecommendationProvider,
     SocialCampaignRecommendationService,
@@ -74,6 +80,7 @@ import { SocialCampaignsController } from './social-campaigns.controller';
     SocialCampaignRecommendationService,
     SocialAdManualActionService,
     SocialBoostRequestService,
+    SocialScheduledBoostService,
   ],
 })
 export class SocialCampaignsModule {}

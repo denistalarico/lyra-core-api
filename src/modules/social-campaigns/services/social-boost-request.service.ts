@@ -111,6 +111,40 @@ export class SocialBoostRequestService {
     return this.view(await this.requests.save(row));
   }
 
+  /**
+   * The preflight rules evaluated before the publication exists on Meta, for
+   * a boost authorized at scheduling time. Same chain and codes as
+   * `preflight`; the only rule that cannot hold yet — the post being
+   * published — is the one the scheduled runner waits for.
+   */
+  async evaluateSchedulable(
+    scope: SocialCampaignsScope,
+    input: {
+      connectionId: string;
+      templateId: string;
+      publication: Omit<BoostPublicationSnapshot, 'externalPublicationId'>;
+    },
+  ): Promise<string | null> {
+    const connection = await this.requireConnection(scope, input.connectionId);
+    const template = await this.requireTemplate(scope, input.templateId);
+    const policy = await this.findPolicy(scope, input.connectionId);
+    if (!this.config.writesEnabled) return 'provider_writes_disabled';
+    if (!policy?.enabled || !policy.allowBoost)
+      return 'boost_disabled_by_policy';
+    if (!template.isActive) return 'template_inactive';
+    if (connection.currency && template.currency !== connection.currency)
+      return 'currency_mismatch';
+    if (
+      policy.maxBudgetMinor &&
+      BigInt(template.budgetAmountMinor) > BigInt(policy.maxBudgetMinor)
+    )
+      return 'budget_exceeds_policy';
+    return boostExecutionBlockCode(template, {
+      ...input.publication,
+      externalPublicationId: 'scheduled',
+    });
+  }
+
   async confirm(
     scope: SocialCampaignsScope,
     actorUserId: string | null,

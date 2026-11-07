@@ -9,7 +9,7 @@ import ffmpeg from 'ffmpeg-static';
 import { getAgencyTypeOrmConfig } from '../../../config/typeorm.config';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { FilesService } from '../../../common/files/files.service';
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { FinanceAccount } from '../../finance/entities/finance-account.entity';
 import { FinanceCostCenter } from '../../finance/entities/finance-cost-center.entity';
 import { FinanceAccountType } from '../../finance/enums';

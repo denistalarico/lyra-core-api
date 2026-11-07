@@ -29,7 +29,8 @@ import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { TeamChatNotificationPublisher } from './services/team-chat-notification.publisher';
 import { TeamChatCardPostService } from './services/team-chat-card-post.service';
-import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
+// Agency connection: the agency `workspace_users` mapping (the core entity has no metadata there).
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
 import { AgencyMeetingAiSettings } from './entities/agency-meeting-ai-settings.entity';
 import { FinanceAccount } from '../finance/entities/finance-account.entity';

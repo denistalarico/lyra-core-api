@@ -3,7 +3,7 @@ import { DataSource, type DataSourceOptions } from 'typeorm';
 import { getAgencyTypeOrmConfig } from '../../../config/typeorm.config';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import {
   AgencyMeetingRoom,
   AgencyMeetingAiSummary,

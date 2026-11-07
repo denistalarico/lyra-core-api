@@ -375,22 +375,60 @@ export class SocialPlannerService {
 
     this.assertUniqueDestinations(dto);
 
+    /*
+     * Reconciled, not rebuilt: a destination whose channel and placement are
+     * still requested keeps its row (and id), so the creatives and
+     * publications that hang off it survive a save. Wiping and recreating
+     * every row silently dropped the creatives the editor had just attached
+     * whenever a channel or format was added on the same screen.
+     */
     await this.destinationsRepository.manager.transaction(
       async (transactionManager) => {
         const repository = transactionManager.getRepository(
           SocialContentDestinationEntity,
         );
+        const keyOf = (entry: { channel: string; placement: string }) =>
+          `${entry.channel}:${entry.placement}`;
 
-        await repository.delete({
-          ...this.destinationScopeWhere(scope),
-          contentItemId: item.id,
+        const existing = await repository.find({
+          where: {
+            ...this.destinationScopeWhere(scope),
+            contentItemId: item.id,
+          },
         });
+        const requested = new Map(
+          dto.items.map((input) => [keyOf(input), input] as const),
+        );
 
-        if (dto.items.length === 0) {
+        const removed = existing.filter(
+          (entry) => !requested.has(keyOf(entry)),
+        );
+        if (removed.length > 0) {
+          await repository.delete({
+            ...this.destinationScopeWhere(scope),
+            contentItemId: item.id,
+            id: In(removed.map((entry) => entry.id)),
+          });
+        }
+
+        const kept = existing.filter((entry) => requested.has(keyOf(entry)));
+        const rescheduled = kept.filter((entry) => {
+          const input = requested.get(keyOf(entry))!;
+          if (input.plannedAt === undefined) return false;
+          const next = input.plannedAt ? new Date(input.plannedAt) : null;
+          if (next?.getTime() === entry.plannedAt?.getTime()) return false;
+          entry.plannedAt = next;
+          return true;
+        });
+        if (rescheduled.length > 0) await repository.save(rescheduled);
+
+        const keptKeys = new Set(kept.map(keyOf));
+        const added = dto.items.filter((input) => !keptKeys.has(keyOf(input)));
+        if (added.length === 0) {
           return;
         }
 
-        const destinations = dto.items.map((input) =>
+        const destinations = added.map((input) =>
           repository.create({
             tenantId: scope.tenantId,
             workspaceId: scope.workspaceId,

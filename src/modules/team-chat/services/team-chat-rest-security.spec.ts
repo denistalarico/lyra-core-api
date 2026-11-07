@@ -13,7 +13,7 @@ import {
   TeamChatChannelStatus,
   TeamChatChannelVisibility,
 } from '../enums';
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { TeamChatChannelsService } from './team-chat-channels.service';
 import { TeamChatMessagesService } from './team-chat-messages.service';
 import { TeamChatNotificationPublisher } from './team-chat-notification.publisher';

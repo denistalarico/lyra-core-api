@@ -17,7 +17,8 @@ import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { ContractNotificationPublisher } from './services/contract-notification.publisher';
 import { TeamContractLifecycleNotificationsService } from './services/team-contract-lifecycle-notifications.service';
-import { WorkspaceUserEntity } from '../settings/entities/workspace-user.entity';
+// Agency connection: the agency `workspace_users` mapping (the core entity has no metadata there).
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { TeamMember } from '../team/entities';
 import {
   ContractDefaults,

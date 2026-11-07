@@ -427,10 +427,66 @@ describe('SocialPlannerService', () => {
       expect(destinationsRepository.manager.transaction).not.toHaveBeenCalled();
     });
 
+    it('keeps unchanged destinations, deletes removed ones and creates only new ones in one transaction', async () => {
+      contentRepository.findOne.mockResolvedValue(contentItem);
+
+      const keptDestination = {
+        id: '88888888-8888-4888-8888-888888888888',
+        channel: 'instagram',
+        placement: 'feed',
+        plannedAt: null,
+      };
+      const removedDestination = {
+        id: '99999999-9999-4999-8999-999999999999',
+        channel: 'linkedin',
+        placement: 'feed',
+        plannedAt: null,
+      };
+      const transactionalRepository = {
+        find: jest.fn().mockResolvedValue([keptDestination, removedDestination]),
+        delete: jest.fn().mockResolvedValue({ affected: 1 }),
+        create: jest.fn((value) => value),
+        save: jest.fn(async (value) => value),
+      };
+
+      destinationsRepository.manager.transaction.mockImplementation(
+        async (callback) =>
+          callback({
+            getRepository: jest.fn(() => transactionalRepository),
+          }),
+      );
+      destinationsRepository.find.mockResolvedValue([]);
+
+      await service.replaceDestinations(clientScope, contentItem.id, {
+        items: [
+          { channel: 'instagram', placement: 'feed' },
+          { channel: 'facebook', placement: 'feed' },
+        ],
+      });
+
+      expect(transactionalRepository.delete).toHaveBeenCalledTimes(1);
+      expect(transactionalRepository.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contentItemId: contentItem.id,
+          tenantId: clientScope.tenantId,
+          id: expect.objectContaining({ _value: [removedDestination.id] }),
+        }),
+      );
+      // Only the new facebook row is created; the instagram row (and its
+      // creatives) is left untouched.
+      expect(transactionalRepository.save).toHaveBeenCalledTimes(1);
+      expect(transactionalRepository.save).toHaveBeenCalledWith([
+        expect.objectContaining({ channel: 'facebook', placement: 'feed' }),
+      ]);
+    });
+
     it('replaces all destinations inside one transaction', async () => {
       contentRepository.findOne.mockResolvedValue(contentItem);
 
       const transactionalRepository = {
+        find: jest.fn().mockResolvedValue([
+          { id: '77777777-7777-4777-8777-777777777770', channel: 'facebook', placement: 'feed', plannedAt: null },
+        ]),
         delete: jest.fn().mockResolvedValue({ affected: 1 }),
         create: jest.fn((value) => value),
         save: jest.fn(async (value) => value),

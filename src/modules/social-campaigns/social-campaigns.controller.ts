@@ -36,6 +36,8 @@ import {
   SocialBoostPreflightDto,
   ConfirmSocialBoostDto,
   SocialBoostTargetingQueryDto,
+  ScheduleSocialBoostDto,
+  UpdateScheduledSocialBoostDto,
 } from './dto';
 import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
 import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
@@ -44,6 +46,7 @@ import { SocialBoostTemplateService } from './services/social-boost-template.ser
 import { SocialAdManualActionService } from './services/social-ad-manual-action.service';
 import { SocialBoostRequestService } from './services/social-boost-request.service';
 import { MetaAdsBoostTargetingService } from './services/meta-ads-boost-targeting.service';
+import { SocialScheduledBoostService } from './services/social-scheduled-boost.service';
 import { mapSocialAdSyncError } from '../social-integrations/sync/social-ad-sync.http-error';
 
 const SOCIAL_ADS_VIEW_PERMISSION = 'social.ads.campaign.view.client';
@@ -68,6 +71,7 @@ export class SocialCampaignsController {
     private readonly manualActions: SocialAdManualActionService,
     private readonly boostRequests: SocialBoostRequestService,
     private readonly boostTargeting: MetaAdsBoostTargetingService,
+    private readonly scheduledBoosts: SocialScheduledBoostService,
   ) {}
 
   @Post('meta/boost/preflight')
@@ -101,6 +105,81 @@ export class SocialCampaignsController {
       // reducing every distinct repair to a generic 500 in the browser.
       throw mapSocialAdSyncError(error);
     }
+  }
+
+  /**
+   * Planner boost at scheduling time. Every route here is internal (no
+   * `ClientAreaExposed`): authorizing spend stays with the agency.
+   */
+  @Get('meta/boost/scheduled')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  listBoosts(@RequestContextData() ctx: RequestContext) {
+    return this.scheduledBoosts.list(this.requireScope(ctx));
+  }
+
+  @Get('meta/boost/scheduled/check')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BOOST_ACTION_PERMISSION)
+  checkScheduledBoost(
+    @RequestContextData() ctx: RequestContext,
+    @Query('templateId', ParseUUIDPipe) templateId: string,
+    @Query('connectionId', ParseUUIDPipe) connectionId: string,
+  ) {
+    return this.scheduledBoosts.check(this.requireScope(ctx), {
+      templateId,
+      connectionId,
+    });
+  }
+
+  @Post('meta/boost/scheduled')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BOOST_ACTION_PERMISSION)
+  @DangerousAction()
+  scheduleBoost(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: ScheduleSocialBoostDto,
+  ) {
+    return this.scheduledBoosts.schedule(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+    );
+  }
+
+  @Patch('meta/boost/scheduled/:scheduledBoostId')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BOOST_ACTION_PERMISSION)
+  @DangerousAction()
+  updateScheduledBoost(
+    @RequestContextData() ctx: RequestContext,
+    @Param('scheduledBoostId', ParseUUIDPipe) scheduledBoostId: string,
+    @Body() dto: UpdateScheduledSocialBoostDto,
+  ) {
+    return this.scheduledBoosts.updateTemplate(
+      this.requireScope(ctx),
+      scheduledBoostId,
+      dto,
+    );
+  }
+
+  @Post('meta/boost/scheduled/:scheduledBoostId/cancel')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BOOST_ACTION_PERMISSION)
+  cancelScheduledBoost(
+    @RequestContextData() ctx: RequestContext,
+    @Param('scheduledBoostId', ParseUUIDPipe) scheduledBoostId: string,
+  ) {
+    return this.scheduledBoosts.cancel(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      scheduledBoostId,
+    );
   }
 
   @Post('meta/boost/:boostRequestId/confirm')

@@ -70,6 +70,10 @@ describe('MetaAdsBoostAdapter', () => {
         'PAUSED',
       );
     }
+    // Ad-set budget: v24+ requires the sharing flag to be stated on the campaign.
+    expect(
+      graph.createOnEdge.mock.calls[0][0].params.is_adset_budget_sharing_enabled,
+    ).toBe('false');
     expect(graph.mutateNode).toHaveBeenCalledTimes(3);
     expect(graph.mutateNode.mock.calls.map((call) => call[0].path)).toEqual([
       '4',

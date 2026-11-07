@@ -5,3 +5,4 @@ export * from './social-campaign-alert.entity';
 export * from './social-campaign-recommendation.entity';
 export * from './social-ad-action-policy.entity';
 export * from './social-ad-governed-action.entity';
+export * from './social-scheduled-boost.entity';

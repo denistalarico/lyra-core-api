@@ -15,7 +15,8 @@ import {
   AgencyMeetingParticipant,
 } from '../entities';
 import { AgencyMeetingAiSettings } from '../entities/agency-meeting-ai-settings.entity';
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+// Agency connection: the agency `workspace_users` mapping (the core entity has no metadata there).
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { FinanceAccount } from '../../finance/entities/finance-account.entity';
 import { FinanceCostCenter } from '../../finance/entities/finance-cost-center.entity';
 import { FinanceAccountStatus, FinanceAccountType } from '../../finance/enums';

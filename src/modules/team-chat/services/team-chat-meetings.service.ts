@@ -12,7 +12,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Interval } from '@nestjs/schedule';
 import { EntityManager, Repository } from 'typeorm';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+// Agency connection: the agency `workspace_users` mapping (the core entity has no metadata there).
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 
 import {
   AgencyMeetingAiSummary,

@@ -7,7 +7,7 @@ import {
 } from '../entities';
 import { TeamChatNotificationPublisher } from './team-chat-notification.publisher';
 import { TeamChatChannelsService } from './team-chat-channels.service';
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 
 describe('TeamChatChannelsService collection scoping', () => {
   it('lists only channels where a member user has active membership', async () => {

@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+// Agency connection: the agency `workspace_users` mapping (the core entity has no metadata there).
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { PlatformPermissionService } from '../../permissions/services/platform-permission.service';
 import { NotificationInterestReason } from '../../notifications/enums';
 import { TeamMember } from '../../team/entities';

@@ -20,6 +20,16 @@ type Input = SocialCampaignsScope & {
 
 type Level = 'campaign' | 'adset' | 'creative' | 'ad';
 
+type BoostExecutionResult = {
+  providerAccepted: boolean;
+  stage: Level;
+  created: Partial<Record<Level, string>>;
+  errorCode?: string;
+  providerErrorCode?: number | null;
+  providerErrorSubcode?: number | null;
+  providerHttpStatus?: number | null;
+};
+
 /** The only C7 port allowed to create and activate a confirmed Meta Boost. */
 @Injectable()
 export class MetaAdsBoostAdapter {
@@ -28,7 +38,7 @@ export class MetaAdsBoostAdapter {
     private readonly graph: MetaAdsGraphService,
   ) {}
 
-  async execute(input: Input) {
+  async execute(input: Input): Promise<BoostExecutionResult> {
     const credential = await this.credentials.resolve({
       tenantId: input.tenantId,
       workspaceId: input.workspaceId,
@@ -51,6 +61,10 @@ export class MetaAdsBoostAdapter {
           special_ad_categories: JSON.stringify(
             input.template.specialAdCategories,
           ),
+          // The budget lives on the ad set. Since Marketing API v24 Meta
+          // rejects a campaign without campaign budget unless this flag is
+          // stated explicitly (production runs v26).
+          is_adset_budget_sharing_enabled: 'false',
         },
       );
       const startsAt = new Date(Date.now() + 5 * 60_000);
@@ -114,6 +128,15 @@ export class MetaAdsBoostAdapter {
         stage,
         created,
         errorCode: this.errorCode(error),
+        // Numeric Meta codes only (no message, no token): enough to tell a
+        // missing parameter from a billing problem when reviewing a failure.
+        ...(error instanceof MetaGraphError
+          ? {
+              providerErrorCode: error.metaCode,
+              providerErrorSubcode: error.metaSubcode,
+              providerHttpStatus: error.httpStatus,
+            }
+          : {}),
       };
     }
   }

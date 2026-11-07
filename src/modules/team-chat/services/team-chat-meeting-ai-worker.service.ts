@@ -13,7 +13,8 @@ import {
   AgencyMeetingRoom,
   AgencyMeetingParticipant,
 } from '../entities';
-import { WorkspaceUserEntity } from '../../settings/entities/workspace-user.entity';
+// Agency connection: the agency `workspace_users` mapping (the core entity has no metadata there).
+import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { FilesService } from '../../../common/files/files.service';
 import { TeamChatAiSummaryStatus, TeamChatMeetingStatus } from '../enums';
 import type { MeetingAiCall } from '../meeting-ai.types';
