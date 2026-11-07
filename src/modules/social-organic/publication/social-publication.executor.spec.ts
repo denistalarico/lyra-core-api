@@ -378,6 +378,44 @@ describe('SocialPublicationExecutorService', () => {
   });
 
   describe('provider validation ordering', () => {
+    it('executes an existing Story snapshot as media-only content', async () => {
+      const adapter = buildAdapter();
+      registry.resolve.mockReturnValue(adapter);
+
+      await executor.publish(
+        buildPublication({
+          payloadSnapshot: {
+            placement: 'story',
+            caption: 'Editorial caption kept on the content item',
+            cta: 'Saiba mais',
+            hashtags: ['#lyra'],
+            firstComment: 'Editorial first comment',
+          },
+        }),
+      );
+
+      expect(adapter.validate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          placement: 'story',
+          caption: null,
+          cta: null,
+          hashtags: [],
+          firstComment: null,
+        }),
+      );
+      expect(adapter.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            placement: 'story',
+            caption: null,
+            cta: null,
+            hashtags: [],
+            firstComment: null,
+          }),
+        }),
+      );
+    });
+
     it('calls adapter.validate before any media resolution or publish', async () => {
       const adapter = buildAdapter({
         validate: jest.fn(

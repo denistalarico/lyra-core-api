@@ -289,6 +289,9 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
     assetType: string,
   ): PublicationPayload {
     const snapshot = publication.payloadSnapshot as PayloadSnapshotShape;
+    const placement =
+      typeof snapshot.placement === 'string' ? snapshot.placement : '';
+    const mediaOnly = placement === 'story';
 
     const snapshotMediaIds = Array.isArray(snapshot.mediaAssetIds)
       ? snapshot.mediaAssetIds.filter(
@@ -302,19 +305,22 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
         : [];
     return {
       assetType,
-      placement:
-        typeof snapshot.placement === 'string' ? snapshot.placement : '',
-      caption: typeof snapshot.caption === 'string' ? snapshot.caption : null,
+      placement,
+      caption:
+        !mediaOnly && typeof snapshot.caption === 'string'
+          ? snapshot.caption
+          : null,
       firstComment:
-        typeof snapshot.firstComment === 'string'
+        !mediaOnly && typeof snapshot.firstComment === 'string'
           ? snapshot.firstComment
           : null,
-      hashtags: Array.isArray(snapshot.hashtags)
+      hashtags: !mediaOnly && Array.isArray(snapshot.hashtags)
         ? snapshot.hashtags.filter(
             (entry): entry is string => typeof entry === 'string',
           )
         : [],
-      cta: typeof snapshot.cta === 'string' ? snapshot.cta : null,
+      cta:
+        !mediaOnly && typeof snapshot.cta === 'string' ? snapshot.cta : null,
       mediaAssetId: publication.mediaAssetId,
       mediaAssetIds,
       scheduledAt: publication.scheduledAt,
