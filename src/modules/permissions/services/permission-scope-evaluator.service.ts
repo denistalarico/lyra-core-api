@@ -1180,7 +1180,11 @@ export class PermissionScopeEvaluatorService {
       if (!opportunity) return false;
 
       if (scopeKey === 'assigned') {
-        return opportunity.assignedUserId === context.userId;
+        // Settings > Users: the assignee or the author works on the record.
+        return (
+          opportunity.assignedUserId === context.userId ||
+          opportunity.createdByUserId === context.userId
+        );
       }
 
       if (scopeKey === 'client') {
@@ -1242,6 +1246,11 @@ export class PermissionScopeEvaluatorService {
     if (resource.kind === 'sales_quote') {
       const quote = resource.record as QuoteEntity | undefined;
       return quote?.createdByUserId === context.userId;
+    }
+
+    if (resource.kind === 'crm_opportunity') {
+      const opportunity = resource.record as CrmOpportunityEntity | undefined;
+      return opportunity?.createdByUserId === context.userId;
     }
 
     if (resource.kind === 'sales_activity') {

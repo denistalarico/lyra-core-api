@@ -23,7 +23,11 @@ const writes = ['POST', 'PATCH', 'PUT', 'DELETE'];
 function projectLeadFlowPermissions(
   module: ClientAreaModuleKey,
   level: ClientAreaAccessLevel,
+  accountRole?: ClientAreaAccountRole,
 ): readonly ClientAreaAgencyGrant[] {
+  // Settings > Users: module settings (quick replies, follow-up templates,
+  // pipelines, stages) are the company Owner's; a Manager runs the module.
+  const owner = accountRole === 'client_owner';
   const own = level === 'operator' ? 'created_by_me' : 'client';
   if (module === 'leadflow_inbox') {
     const reads = [
@@ -47,7 +51,7 @@ function projectLeadFlowPermissions(
       // through only for the company's Owner (`client_owner`), at any level.
       grant('leadflow.inbox.comment.reply.client', ['POST']),
       grant('leadflow.inbox.comment.delete.admin', ['DELETE']),
-      ...(level === 'manager'
+      ...(level === 'manager' && owner
         ? [
             // PATCH: quick replies (`/inbox/settings`); POST/DELETE as well
             // for the company's follow-up templates (IX2). The bridge route
@@ -73,7 +77,7 @@ function projectLeadFlowPermissions(
       grant('shared.contacts.create', ['POST']),
       grant('leadflow.crm.records.update.client', ['PATCH', 'POST'], own),
       grant('shared.contacts.update.client', ['PATCH'], own),
-      ...(level === 'manager'
+      ...(level === 'manager' && owner
         ? [
             grant('leadflow.crm.pipeline.manage.admin', ['POST', 'PATCH']),
             grant('leadflow.crm.stage.manage.manager_or_admin', [
@@ -245,7 +249,7 @@ export function projectAgencyPermissions(
   if (module === 'analytics')
     return level === 'viewer' ? [] : projectAnalyticsPermissions(accountRole);
   if (module.startsWith('leadflow_'))
-    return projectLeadFlowPermissions(module, level);
+    return projectLeadFlowPermissions(module, level, accountRole);
   if (module !== 'agency_projects')
     return projectSocialPermissions(module, level);
   const reads = [

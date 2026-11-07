@@ -495,6 +495,12 @@ describe('CA11 actual product controllers through the real HTTP bridge', () => {
       201,
     );
     await call(remove).expect(200);
+    // Settings > Users: module settings are the Owner's, not a Manager's.
+    accountRole = 'client_member';
+    calls.length = 0;
+    await call(create).expect(403);
+    expect(calls).toHaveLength(0);
+    accountRole = 'client_owner';
     level = 'operator';
     calls.length = 0;
     await call(create).expect(403);

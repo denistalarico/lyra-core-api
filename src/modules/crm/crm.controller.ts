@@ -672,7 +672,10 @@ export class CrmController {
   }
 
   @Delete('opportunities/:id')
-  @RequirePermission('leadflow.crm.records.delete.owner_or_admin_explicit')
+  @RequireAnyPermission(
+    'leadflow.crm.records.delete.owner_or_admin_explicit',
+    'leadflow.crm.records.delete.own',
+  )
   @DangerousAction()
   deleteOpportunity(
     @RequestContextData() ctx: RequestContext,

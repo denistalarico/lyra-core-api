@@ -316,7 +316,12 @@ describe('CA14 real JWT/guards/DTO HTTP (offline identity and domain fixtures)',
     ).toBe(201);
     expect(requestPublisher).toHaveBeenCalledWith(
       expect.objectContaining({ companyContextId: company }),
-      { ...body, kind: 'invitation_request' },
+      // Settings > Users: a suggested `viewer` is folded into Member.
+      {
+        ...body,
+        moduleLevels: { social_planner: 'operator' },
+        kind: 'invitation_request',
+      },
     );
     inbox = false;
     expect(

@@ -300,13 +300,16 @@ const RAW_PERMISSIONS: RawPermission[] = [
 
   // 10.5 LeadFlow - CRM
   ['leadflow.crm.records.view.assigned', ALL_ROLES],
-  ['leadflow.crm.records.view.client', MANAGER_UP],
+  // Settings > Users: everyone with LeadFlow reads the CRM of the contexts
+  // they reach; a Member edits/deletes only their own records.
+  ['leadflow.crm.records.view.client', ALL_ROLES],
   ['leadflow.crm.records.create.client', ALL_ROLES],
   ['leadflow.crm.records.update.assigned', ALL_ROLES],
   ['leadflow.crm.records.update.client', MANAGER_UP],
   ['leadflow.crm.pipeline.manage.admin', ADMIN_UP],
   ['leadflow.crm.stage.manage.manager_or_admin', ADMIN_UP],
   ['leadflow.crm.records.delete.owner_or_admin_explicit', MANAGER_UP, true],
+  ['leadflow.crm.records.delete.own', ALL_ROLES],
 
   // 10.5 LeadFlow - Agents
   ['leadflow.agents.agent.view.client', MANAGER_UP],

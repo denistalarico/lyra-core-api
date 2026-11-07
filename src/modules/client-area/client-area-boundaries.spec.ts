@@ -44,7 +44,7 @@ describe('CA7 production route boundaries and Agency preservation', () => {
     );
     expect(digest(source.slice(source.indexOf('  async assertScope(')))).toBe(
       // Re-baselined 2026-11 (Settings > Users: module levels / Manager scope).
-      'b18e5d24f7ededbbbcf0b37767edb52af08477f4277efcf540ebb41a25948135',
+      'e41cb31749418835a680059dc58967ac09dbc2335fc953fe6106851653762950',
     );
   });
   it('projects only real, non-dangerous keys and no workspace configuration or automations', () => {

@@ -6,6 +6,15 @@ import {
   type ClientAreaModuleSettings,
   type ClientAreaRole,
 } from './client-area.types';
+/**
+ * Settings > Users (Etapa 3): the levels offered are Member (`operator`) and
+ * Manager. The legacy read-only `viewer` is folded into Member on write (the
+ * runtime still understands it, but nothing can assign it any more).
+ */
+function foldViewer<T>(level: T): T | 'operator' {
+  return level === 'viewer' ? 'operator' : level;
+}
+
 export function validateModuleLevels(value: unknown): ClientAreaModuleLevels {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new BadRequestException('moduleLevels must be an object.');
@@ -17,7 +26,12 @@ export function validateModuleLevels(value: unknown): ClientAreaModuleLevels {
       throw new BadRequestException(
         'Invalid module or access level. Omit a module to remove access.',
       );
-  return value as ClientAreaModuleLevels;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, string>).map(([key, level]) => [
+      key,
+      foldViewer(level),
+    ]),
+  ) as ClientAreaModuleLevels;
 }
 export function validateModuleSettings(
   value: unknown,
