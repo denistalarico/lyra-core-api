@@ -21,4 +21,6 @@ export interface RequestContext {
   sessionId?: string;
   role?: string;
   managedContext?: ManagedContext;
+  /** Product/module levels resolved by the PermissionsGuard (Settings > Users). */
+  moduleAccess?: Record<string, 'manager' | 'member' | null>;
 }

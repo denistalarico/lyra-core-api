@@ -46,6 +46,10 @@ export class AgencyTaskChecklistItem {
   @Column({ name: 'assignee_id', type: 'uuid', nullable: true, default: null })
   assigneeId!: string | null;
 
+  // Author of the subtask: a Member may delete only what they created.
+  @Column({ name: 'created_by_id', type: 'uuid', nullable: true, default: null })
+  createdById!: string | null;
+
   // Personal-board stage chosen by the assignee in /projects/my-tasks. Only that
   // board reads it — other boards use the parent task's stage fields, so moving a
   // subtask here never affects its position/stage elsewhere.

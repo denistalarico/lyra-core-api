@@ -1,5 +1,6 @@
 import {
   clientProjectWhere,
+  isNarrowedProjectsMember,
   type ProjectRequestContext,
 } from '../client-area/projects-client-area.context';
 import {
@@ -174,6 +175,8 @@ export class TaskWorkspaceService {
     payload: ChecklistPayload,
   ) {
     await this.tasksCrudService.findOne(context, taskId);
+    // A Member's subtask is always theirs (Settings > Users).
+    const narrowed = isNarrowedProjectsMember(context);
     const currentCount = await this.checklistRepository.count({
       where: {
         tenantId: context.tenantId,
@@ -192,7 +195,8 @@ export class TaskWorkspaceService {
       status: payload.status ?? getChecklistStatusFromDone(payload.isDone ?? false),
       position: payload.position ?? currentCount,
       taskTypeId: payload.taskTypeId ?? null,
-      assigneeId: payload.assigneeId ?? null,
+      assigneeId: narrowed ? context.userId : (payload.assigneeId ?? null),
+      createdById: context.userId,
       dueDate: payload.dueDate ? new Date(payload.dueDate) : null,
     });
 
@@ -232,7 +236,17 @@ export class TaskWorkspaceService {
     }
     if (payload.position !== undefined) item.position = payload.position;
     if (payload.taskTypeId !== undefined) item.taskTypeId = payload.taskTypeId;
-    if (payload.assigneeId !== undefined) item.assigneeId = payload.assigneeId;
+    if (payload.assigneeId !== undefined) {
+      if (
+        isNarrowedProjectsMember(context) &&
+        payload.assigneeId !== item.assigneeId
+      ) {
+        throw new ForbiddenException(
+          'Somente um Manager pode trocar o responsável da subtarefa.',
+        );
+      }
+      item.assigneeId = payload.assigneeId;
+    }
     if (payload.personalStageId !== undefined) item.personalStageId = payload.personalStageId;
     if (payload.dueDate !== undefined) {
       item.dueDate = payload.dueDate ? new Date(payload.dueDate) : null;
@@ -248,6 +262,15 @@ export class TaskWorkspaceService {
 
   async deleteChecklistItem(context: RequestContext, taskId: string, itemId: string) {
     const item = await this.updateChecklistItem(context, taskId, itemId, {});
+
+    if (
+      isNarrowedProjectsMember(context) &&
+      item.createdById !== context.userId
+    ) {
+      throw new ForbiddenException(
+        'Você só pode excluir subtarefas criadas por você.',
+      );
+    }
 
     await this.checklistRepository.delete(item.id);
 

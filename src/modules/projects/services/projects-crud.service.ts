@@ -1,3 +1,4 @@
+import { hasModuleWideAccess } from '../../../common/context/module-access';
 import {
   CLIENT_AREA_CLIENT_SQL,
   clientProjectWhere,
@@ -122,7 +123,7 @@ export class ProjectsCrudService {
       });
       return;
     }
-    if (isElevatedRole(context.role)) {
+    if (hasModuleWideAccess(context, 'projects')) {
       return;
     }
 

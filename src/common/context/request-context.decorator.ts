@@ -15,6 +15,7 @@ export const RequestContextData = createParamDecorator(
       sessionId: user.sessionId,
       role: user.role,
       managedContext: request.managedContext,
+      moduleAccess: request.moduleAccess,
     };
   },
 );

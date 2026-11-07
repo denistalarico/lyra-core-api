@@ -29,6 +29,7 @@ function createGuard(metadata: Map<string, unknown>) {
   } as unknown as Pick<Reflector, 'getAllAndOverride'> as Reflector;
 
   const permissionService = {
+    getModuleAccess: jest.fn().mockResolvedValue(MODULE_ACCESS),
     assertCan: jest.fn(),
     assertAny: jest.fn(),
     canAccessProduct: jest.fn(),
@@ -56,6 +57,8 @@ function createGuard(metadata: Map<string, unknown>) {
     operationalContextResolver,
   };
 }
+
+const MODULE_ACCESS = { projects: 'manager' as const };
 
 describe('PermissionsGuard', () => {
   it('allows routes without permission metadata even when request has no user', async () => {

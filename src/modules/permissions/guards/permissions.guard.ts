@@ -120,6 +120,9 @@ export class PermissionsGuard implements CanActivate {
       userId: user.sub,
       role: user.role,
     };
+    // Product/module levels for the services (RequestContext.moduleAccess);
+    // the permission service resolves them for its own checks (cached).
+    request.moduleAccess = await this.permissionService.getModuleAccess(context);
 
     request.managedContext ??= await this.operationalContextResolver.resolve({
       request,

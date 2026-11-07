@@ -64,6 +64,8 @@ function createService() {
     workspaceUsersRepository as never,
     moduleAccessRepository as never,
   );
+  // Module levels are cached across calls; every test starts clean.
+  service.invalidateModuleAccess();
 
   return {
     service,
@@ -340,12 +342,12 @@ describe('PlatformPermissionService', () => {
     ).resolves.toBeUndefined();
 
     expect(scopeEvaluator.assertScope).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
         userId: 'owner-1',
         role: PlatformRoleKey.Owner,
-      },
+      }),
       'agency.clients.profile.view.basic.assigned',
       {
         routePath: '/agency/clients/:clientId',
@@ -379,12 +381,12 @@ describe('PlatformPermissionService', () => {
     ).resolves.toBeUndefined();
 
     expect(scopeEvaluator.assertScope).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         tenantId: 'tenant-1',
         workspaceId: 'workspace-1',
         userId: 'manager-1',
         role: PlatformRoleKey.Manager,
-      },
+      }),
       'agency.calendar.events.view.department',
       {
         routePath: '/calendar/events/:eventId',

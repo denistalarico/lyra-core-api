@@ -1246,6 +1246,8 @@ export class AgencySettingsService {
       );
     }
 
+    this.platformPermissionService.invalidateModuleAccess();
+
     if (dto.clientProducts && user.userId) {
       const levels = resolveModuleAccess(
         dto.role as PlatformRoleKey,

@@ -1,5 +1,7 @@
+import { hasModuleWideAccess } from '../../common/context/module-access';
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -23,6 +25,7 @@ type CalendarContext = {
   workspaceId?: string | null;
   userId?: string | null;
   role?: string | null;
+  moduleAccess?: Record<string, 'manager' | 'member' | null>;
 };
 
 const AGENCY_CONNECTION = 'agency';
@@ -103,7 +106,7 @@ export class CalendarService implements OnModuleInit {
     qb: ReturnType<Repository<CalendarEvent>['createQueryBuilder']>,
     context: CalendarContext,
   ) {
-    if (isElevatedRole(context.role)) {
+    if (hasModuleWideAccess(context, 'calendar')) {
       return;
     }
 
@@ -142,6 +145,8 @@ export class CalendarService implements OnModuleInit {
     if (endsAt <= startsAt) {
       throw new BadRequestException('endsAt must be after startsAt');
     }
+
+    this.assertParticipantsAllowed(context, {}, dto.metadata ?? {});
 
     const event = this.eventsRepository.create({
       tenantId: context.tenantId,
@@ -210,6 +215,9 @@ export class CalendarService implements OnModuleInit {
     event.taskId = dto.taskId ?? event.taskId;
     event.salesOpportunityId =
       dto.salesOpportunityId ?? event.salesOpportunityId;
+    if (dto.metadata) {
+      this.assertParticipantsAllowed(context, event.metadata ?? {}, dto.metadata);
+    }
     event.metadata = dto.metadata ?? event.metadata;
 
     const saved = await this.eventsRepository.save(event);
@@ -938,6 +946,26 @@ export class CalendarService implements OnModuleInit {
   private metadataString(metadata: Record<string, unknown>, key: string) {
     const value = metadata[key];
     return typeof value === 'string' ? value.trim() : '';
+  }
+
+  /**
+   * Settings > Users: a Member-level user may be invited to an event but may
+   * not invite anyone, so the participant list of what they save must stay as
+   * it was.
+   */
+  private assertParticipantsAllowed(
+    context: CalendarContext,
+    previous: Record<string, unknown>,
+    next: Record<string, unknown>,
+  ) {
+    if (hasModuleWideAccess(context, 'calendar')) return;
+    const before = this.metadataStringList(previous, 'participantEmails');
+    const after = this.metadataStringList(next, 'participantEmails');
+    if (before.join(',') !== after.join(',')) {
+      throw new ForbiddenException(
+        'Somente um Manager pode adicionar participantes à agenda.',
+      );
+    }
   }
 
   private metadataStringList(metadata: Record<string, unknown>, key: string) {

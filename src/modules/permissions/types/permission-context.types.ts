@@ -16,6 +16,11 @@ export interface PermissionContext {
   workspaceId?: string;
   userId: string;
   role: string;
+  /**
+   * Resolved product/module levels (Settings > Users). Filled by the
+   * PermissionsGuard once per request; absent means "resolve on demand".
+   */
+  moduleAccess?: Record<string, 'manager' | 'member' | null>;
 }
 
 export interface PermissionScopeRequest {

@@ -121,6 +121,8 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['shared.contacts.export.admin', ADMIN_UP, true],
   ['shared.contacts.merge.admin', ADMIN_UP, true],
   ['shared.contacts.delete.owner_only', MANAGER_UP, true],
+  // Contacts settings (identification types, sources, banks, tags, segments).
+  ['shared.contacts.settings.manage.admin', ADMIN_UP],
 
   // 9.1 Dashboards
   ['agency.dashboards.view.self', ALL_ROLES],
@@ -211,6 +213,10 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.sales.pipeline.manage.admin', ADMIN_UP],
   ['agency.sales.stages.manage.manager_or_admin', ADMIN_UP],
   ['agency.sales.quotes.create', ALL_ROLES],
+  // Settings > Users: a Member edits/deletes only what they own — the
+  // opportunities they own and the quotes they created.
+  ['agency.sales.crm.manage.own', ALL_ROLES],
+  ['agency.sales.quotes.manage.own', ALL_ROLES],
   ['agency.sales.quotes.approve.department', MANAGER_UP],
   ['agency.sales.products.manage.admin', ADMIN_UP],
   ['agency.sales.plans.manage.admin', ADMIN_UP],

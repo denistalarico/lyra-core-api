@@ -21,6 +21,8 @@ export interface AuthorizedRequestContext {
   userId: string;
   role: string;
   sessionId: string;
+  /** Product/module levels resolved by the PermissionsGuard (Settings > Users). */
+  moduleAccess?: Record<string, 'manager' | 'member' | null>;
 }
 
 /**
@@ -42,6 +44,7 @@ export function getAuthorizedContext(
     userId: user.sub,
     role: user.role,
     sessionId: user.sessionId,
+    moduleAccess: (request as Partial<AuthenticatedRequest>).moduleAccess,
   };
 }
 

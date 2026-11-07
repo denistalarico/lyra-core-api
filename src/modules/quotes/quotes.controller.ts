@@ -156,7 +156,10 @@ export class QuotesController {
   }
 
   @Patch(':id')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.quotes.manage.own',
+  )
   updateQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('id') id: string,
@@ -166,7 +169,10 @@ export class QuotesController {
   }
 
   @Delete(':id')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.quotes.manage.own',
+  )
   @DangerousAction()
   deleteQuote(
     @AuthenticatedUser() user: AuthTokenPayload,
@@ -176,7 +182,10 @@ export class QuotesController {
   }
 
   @Post(':id/items')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.quotes.manage.own',
+  )
   addItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('id') id: string,
@@ -186,7 +195,10 @@ export class QuotesController {
   }
 
   @Patch(':id/items/:itemId')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.quotes.manage.own',
+  )
   updateItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('id') id: string,
@@ -202,7 +214,10 @@ export class QuotesController {
   }
 
   @Delete(':id/items/:itemId')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.quotes.manage.own',
+  )
   @DangerousAction()
   deleteItem(
     @AuthenticatedUser() user: AuthTokenPayload,

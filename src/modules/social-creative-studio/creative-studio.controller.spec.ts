@@ -203,6 +203,7 @@ describe('Creative Studio controller permission contract', () => {
     async (handlerName, permission) => {
       const permissionService = {
         canAccessProduct: jest.fn().mockResolvedValue(true),
+        getModuleAccess: jest.fn().mockResolvedValue({}),
         assertCan: jest.fn().mockResolvedValue(undefined),
         assertAny: jest.fn(),
         canAccessClient: jest.fn(),
@@ -236,6 +237,7 @@ describe('Creative Studio controller permission contract', () => {
   it('returns the guard denial when the authenticated user lacks the route permission', async () => {
     const permissionService = {
       canAccessProduct: jest.fn().mockResolvedValue(true),
+      getModuleAccess: jest.fn().mockResolvedValue({}),
       assertCan: jest
         .fn()
         .mockRejectedValue(new ForbiddenException('Missing permission.')),
@@ -270,6 +272,7 @@ describe('Creative Studio controller permission contract', () => {
   it('returns the guard denial when the Social product entitlement is unavailable', async () => {
     const permissionService = {
       canAccessProduct: jest.fn().mockResolvedValue(false),
+      getModuleAccess: jest.fn().mockResolvedValue({}),
       assertCan: jest.fn(),
       assertAny: jest.fn(),
       canAccessClient: jest.fn(),

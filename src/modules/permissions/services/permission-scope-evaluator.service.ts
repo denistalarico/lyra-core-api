@@ -1,3 +1,4 @@
+import { resolveAccessKey } from '../catalog/module-access.catalog';
 import { ClientAreaBridgeRegistry } from '../../../common/client-area-bridge/client-area-bridge.registry';
 import { NotFoundException, Optional } from '@nestjs/common';
 import type {
@@ -35,6 +36,7 @@ import { ContractTargetType } from '../../contracts/enums';
 import {
   AgencyProject,
   AgencyTask,
+  AgencyTaskChecklistItem,
   AgencyTaskTimeEntry,
 } from '../../projects/entities';
 import { CalendarEvent } from '../../calendar/entities/calendar-event.entity';
@@ -110,6 +112,48 @@ const STANDARD_SCOPES = new Set([
   'owner_only',
 ]);
 
+/**
+ * Settings > Users: a Manager-level user acts on the whole module, so these
+ * ownership scopes are not narrowed for them (nor for Owner/Admin). Only
+ * shared business records are listed: chat, personal notes, timers,
+ * preferences and routines stay with their owner whatever the level.
+ */
+const MODULE_WIDE_SCOPES = new Set([
+  'assigned',
+  'own',
+  'created_by_me',
+  'department',
+  'client',
+]);
+const MODULE_WIDE_KINDS = new Set([
+  'project',
+  'task',
+  'task_collection',
+  'task_create',
+  'calendar_event',
+  'calendar_event_create',
+  'client',
+  'contact',
+  'contract',
+  'crm_opportunity',
+  'sales',
+  'sales_collection',
+  'sales_activity',
+  'sales_opportunity',
+  'sales_opportunity_create',
+  'sales_quote',
+  'knowledge_article',
+  'knowledge_article_collection',
+  'knowledge_article_create',
+  'team_member',
+  'leadflow_appointment',
+  'leadflow_appointment_collection',
+  'leadflow_appointment_create',
+  'leadflow_conversation',
+  'leadflow_conversation_collection',
+  'leadflow_conversation_create',
+]);
+
 type ResourceSummary = {
   exists: boolean;
   kind: string | null;
@@ -117,6 +161,8 @@ type ResourceSummary = {
   record?: unknown;
   collectionSafe?: boolean;
   query?: Record<string, unknown>;
+  /** Route details, for kinds whose rule depends on the action (tasks). */
+  request?: PermissionScopeRequest;
 };
 
 function normalizeRole(role: string): PlatformRoleKey {
@@ -131,6 +177,16 @@ function isElevatedRole(role: string): boolean {
   return [PlatformRoleKey.Owner, PlatformRoleKey.Admin].includes(
     normalizeRole(role),
   );
+}
+
+/** Owner/Admin, or a user whose level in this key's module is `manager`. */
+export function isModuleManager(
+  context: PermissionContext,
+  definition: Pick<PermissionDefinition, 'productKey' | 'moduleKey'>,
+): boolean {
+  if (isElevatedRole(context.role)) return true;
+  const accessKey = resolveAccessKey(definition);
+  return accessKey !== null && context.moduleAccess?.[accessKey] === 'manager';
 }
 
 function firstParam(value: unknown): string | undefined {
@@ -302,6 +358,15 @@ export class PermissionScopeEvaluatorService {
     const scopeKey = definition.scopeKey;
 
     if (!scopeKey || !STANDARD_SCOPES.has(scopeKey)) {
+      return;
+    }
+
+    if (
+      MODULE_WIDE_SCOPES.has(scopeKey) &&
+      resource.kind !== null &&
+      MODULE_WIDE_KINDS.has(resource.kind) &&
+      isModuleManager(context, definition)
+    ) {
       return;
     }
 
@@ -552,6 +617,11 @@ export class PermissionScopeEvaluatorService {
         return true;
       }
 
+      // Settings > Users: a Member sees the projects they follow.
+      if (await this.isProjectFollower(context, project.id)) {
+        return true;
+      }
+
       if (project.clientId && context.workspaceId) {
         const client = await this.clientsRepository.findOne({
           where: {
@@ -626,9 +696,36 @@ export class PermissionScopeEvaluatorService {
       scopeKey === 'created_by_me' ||
       scopeKey === 'own'
     ) {
-      return (
+      const ownsTask =
         task.assigneeId === context.userId ||
-        task.createdById === context.userId
+        task.createdById === context.userId;
+      const method = (resource.request?.method ?? 'GET').toUpperCase();
+      const path = resource.request?.routePath ?? '';
+      const itemId = firstParam(resource.request?.params?.itemId);
+
+      // The subtask's own assignee may work on it (not delete: the service
+      // keeps deletion to its author).
+      if (itemId && method !== 'DELETE' && !ownsTask) {
+        const item = await this.tasksRepository.manager.findOne(
+          AgencyTaskChecklistItem,
+          { where: { id: itemId, taskId: task.id, tenantId: context.tenantId } },
+        );
+        return item?.assigneeId === context.userId;
+      }
+
+      if (ownsTask) return true;
+
+      // Settings > Users: a follower of the project reads its tasks and may
+      // add subtasks/comments to them; editing stays with assignee/author.
+      const readsOrContributes =
+        method === 'GET' ||
+        (method === 'POST' &&
+          (path.endsWith('/checklist') || path.endsWith('/comments'))) ||
+        (method === 'DELETE' && path.includes('/comments/'));
+      return Boolean(
+        readsOrContributes &&
+        task.projectId &&
+        (await this.isProjectOwnerOrFollower(context, task.projectId)),
       );
     }
 
@@ -988,6 +1085,10 @@ export class PermissionScopeEvaluatorService {
     scopeKey: string,
     resource: ResourceSummary,
   ): Promise<boolean> {
+    if (scopeKey === 'own') {
+      return this.evaluateSalesOwnScope(context, resource);
+    }
+
     if (resource.kind === 'sales_collection') {
       return scopeKey === 'department' || scopeKey === 'client';
     }
@@ -1117,6 +1218,48 @@ export class PermissionScopeEvaluatorService {
       return opportunity.ownerUserId
         ? this.canAccessUserDepartment(context, opportunity.ownerUserId)
         : false;
+    }
+
+    return false;
+  }
+
+  /** `*.own` sales keys: only what the caller owns or created. */
+  private async evaluateSalesOwnScope(
+    context: PermissionContext,
+    resource: ResourceSummary,
+  ): Promise<boolean> {
+    if (resource.kind === 'sales_opportunity_create') {
+      const body = (resource.record ?? {}) as Record<string, unknown>;
+      const owner =
+        typeof body.assignedUserId === 'string'
+          ? body.assignedUserId
+          : typeof body.ownerUserId === 'string'
+            ? body.ownerUserId
+            : null;
+      return !owner || owner === context.userId;
+    }
+
+    if (resource.kind === 'sales_quote') {
+      const quote = resource.record as QuoteEntity | undefined;
+      return quote?.createdByUserId === context.userId;
+    }
+
+    if (resource.kind === 'sales_activity') {
+      const activity = resource.record as AgencySalesActivityEntity | undefined;
+      if (!activity) return false;
+      if (activity.assignedUserId === context.userId) return true;
+      return this.evaluateSalesOpportunityIdScope(
+        context,
+        'assigned',
+        activity.opportunityId,
+      );
+    }
+
+    if (resource.kind === 'sales_opportunity' || resource.kind === 'sales') {
+      const opportunity = resource.record as
+        | AgencySalesOpportunityEntity
+        | undefined;
+      return opportunity?.ownerUserId === context.userId;
     }
 
     return false;
@@ -1685,6 +1828,7 @@ export class PermissionScopeEvaluatorService {
       kind: 'task',
       id: taskId,
       record: task ?? null,
+      request,
     };
   }
 
@@ -2662,6 +2806,32 @@ export class PermissionScopeEvaluatorService {
       targetMember.departmentId &&
       actorMember.departmentId === targetMember.departmentId,
     );
+  }
+
+  private async isProjectFollower(
+    context: PermissionContext,
+    projectId: string,
+  ): Promise<boolean> {
+    if (!context.workspaceId) return false;
+    const rows: unknown[] = await this.projectsRepository.manager.query(
+      `SELECT 1 FROM agency_project_followers
+        WHERE project_id = $1 AND tenant_id = $2 AND workspace_id = $3
+          AND user_id = $4
+        LIMIT 1`,
+      [projectId, context.tenantId, context.workspaceId, context.userId],
+    );
+    return rows.length > 0;
+  }
+
+  private async isProjectOwnerOrFollower(
+    context: PermissionContext,
+    projectId: string,
+  ): Promise<boolean> {
+    const project = await this.projectsRepository.findOne({
+      where: { id: projectId, tenantId: context.tenantId },
+    });
+    if (project?.ownerId === context.userId) return true;
+    return this.isProjectFollower(context, projectId);
   }
 
   private async canAccessUserDepartment(

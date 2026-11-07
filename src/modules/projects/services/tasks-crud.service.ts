@@ -1,9 +1,15 @@
+import { hasModuleWideAccess } from '../../../common/context/module-access';
 import {
   CLIENT_AREA_CLIENT_SQL,
   clientProjectWhere,
+  isNarrowedProjectsMember,
   type ProjectRequestContext,
 } from '../client-area/projects-client-area.context';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, IsNull, Repository } from 'typeorm';
 import {
@@ -343,7 +349,12 @@ export class TasksCrudService {
 
   async createWorkspaceTask(context: RequestContext, dto: CreateTaskDto) {
     const projectId = dto.projectId ?? null;
-    const assigneeId = dto.assigneeId ?? null;
+    const narrowed = isNarrowedProjectsMember(context);
+    if (narrowed && projectId) {
+      await this.assertCanSeeProject(context, projectId);
+    }
+    // A Member's task is always theirs (Settings > Users).
+    const assigneeId = narrowed ? context.userId : (dto.assigneeId ?? null);
     const legacyProjectStageId =
       await this.getProjectStageIdFromLegacyStagePayload(
         context,
@@ -455,6 +466,16 @@ export class TasksCrudService {
     const previousAssigneeId = task.assigneeId;
     const previousStatus = task.status;
     const previousBlocked = this.isTaskBlocked(task);
+
+    if (
+      isNarrowedProjectsMember(context) &&
+      dto.assigneeId !== undefined &&
+      dto.assigneeId !== previousAssigneeId
+    ) {
+      throw new ForbiddenException(
+        'Somente um Manager pode trocar o responsável da tarefa.',
+      );
+    }
 
     if (dto.title !== undefined) task.title = dto.title;
     if (dto.description !== undefined) task.description = dto.description;
@@ -583,6 +604,7 @@ export class TasksCrudService {
 
   async archive(context: RequestContext, id: string) {
     const task = await this.findOne(context, id);
+    this.assertCanDeleteTask(context, task);
 
     task.status = TaskStatus.Archived;
     task.archivedAt = new Date();
@@ -598,6 +620,45 @@ export class TasksCrudService {
     }
 
     return saved;
+  }
+
+  /** A Member deletes only the tasks they created, even when assigned. */
+  assertCanDeleteTask(context: RequestContext, task: AgencyTask) {
+    if (
+      isNarrowedProjectsMember(context) &&
+      task.createdById !== context.userId
+    ) {
+      throw new ForbiddenException(
+        'Você só pode excluir tarefas criadas por você.',
+      );
+    }
+  }
+
+  /** A Member works only inside projects they own or follow. */
+  async assertCanSeeProject(context: RequestContext, projectId: string) {
+    const rows: Array<{ id: string }> = await this.tasksRepository.manager.query(
+      `SELECT project.id
+         FROM agency_projects project
+        WHERE project.id = $1
+          AND project.tenant_id = $2
+          AND project.workspace_id = $3
+          AND (
+            project.owner_id = $4
+            OR EXISTS (
+              SELECT 1 FROM agency_project_followers follower
+               WHERE follower.project_id = project.id
+                 AND follower.tenant_id = project.tenant_id
+                 AND follower.workspace_id = project.workspace_id
+                 AND follower.user_id = $4
+            )
+          )`,
+      [projectId, context.tenantId, context.workspaceId, context.userId],
+    );
+    if (rows.length === 0) {
+      throw new ForbiddenException(
+        'Você só pode criar tarefas em projetos que segue.',
+      );
+    }
   }
 
   async remove(context: RequestContext, id: string) {
@@ -700,7 +761,7 @@ export class TasksCrudService {
       );
       return;
     }
-    if (isElevatedRole(context.role)) {
+    if (hasModuleWideAccess(context, 'projects')) {
       return;
     }
 

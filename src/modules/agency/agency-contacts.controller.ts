@@ -294,7 +294,7 @@ export class AgencyContactsController {
   }
 
   @Post('identification-types')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   createIdentificationType(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateAgencyContactIdentificationTypeDto,
@@ -303,7 +303,7 @@ export class AgencyContactsController {
   }
 
   @Patch('identification-types/:id')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   updateIdentificationType(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -313,7 +313,7 @@ export class AgencyContactsController {
   }
 
   @Delete('identification-types/:id')
-  @RequirePermission('shared.contacts.delete.owner_only')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   @DangerousAction()
   deleteIdentificationType(
     @RequestContextData() ctx: RequestContext,
@@ -329,7 +329,7 @@ export class AgencyContactsController {
   }
 
   @Post('sources')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   createContactSource(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateAgencyContactSourceDto,
@@ -338,7 +338,7 @@ export class AgencyContactsController {
   }
 
   @Patch('sources/:id')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   updateContactSource(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -348,7 +348,7 @@ export class AgencyContactsController {
   }
 
   @Delete('sources/:id')
-  @RequirePermission('shared.contacts.delete.owner_only')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   @DangerousAction()
   deleteContactSource(
     @RequestContextData() ctx: RequestContext,
@@ -364,7 +364,7 @@ export class AgencyContactsController {
   }
 
   @Post('banks')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   createBank(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateAgencyBankDto,
@@ -373,7 +373,7 @@ export class AgencyContactsController {
   }
 
   @Patch('banks/:id')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   updateBank(
     @RequestContextData() ctx: RequestContext,
     @Param('id') id: string,
@@ -383,7 +383,7 @@ export class AgencyContactsController {
   }
 
   @Delete('banks/:id')
-  @RequirePermission('shared.contacts.delete.owner_only')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   @DangerousAction()
   deleteBank(
     @RequestContextData() ctx: RequestContext,
@@ -421,7 +421,7 @@ export class AgencyContactsController {
   }
 
   @Delete('bank-accounts/:id')
-  @RequirePermission('shared.contacts.delete.owner_only')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   @DangerousAction()
   deleteBankAccount(
     @RequestContextData() ctx: RequestContext,
@@ -437,7 +437,7 @@ export class AgencyContactsController {
   }
 
   @Post('tags')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   createTag(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactTagDto,
@@ -446,7 +446,7 @@ export class AgencyContactsController {
   }
 
   @Patch('tags/:tagId')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   patchTag(
     @RequestContextData() ctx: RequestContext,
     @Param('tagId') tagId: string,
@@ -456,7 +456,7 @@ export class AgencyContactsController {
   }
 
   @Delete('tags/:tagId')
-  @RequirePermission('shared.contacts.delete.owner_only')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   @DangerousAction()
   deleteTag(
     @RequestContextData() ctx: RequestContext,
@@ -472,7 +472,7 @@ export class AgencyContactsController {
   }
 
   @Post('segments')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   createSegment(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateContactSegmentDto,
@@ -481,7 +481,7 @@ export class AgencyContactsController {
   }
 
   @Patch('segments/:segmentId')
-  @RequirePermission('shared.contacts.update.client')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   patchSegment(
     @RequestContextData() ctx: RequestContext,
     @Param('segmentId') segmentId: string,
@@ -491,7 +491,7 @@ export class AgencyContactsController {
   }
 
   @Delete('segments/:segmentId')
-  @RequirePermission('shared.contacts.delete.owner_only')
+  @RequirePermission('shared.contacts.settings.manage.admin')
   @DangerousAction()
   deleteSegment(
     @RequestContextData() ctx: RequestContext,

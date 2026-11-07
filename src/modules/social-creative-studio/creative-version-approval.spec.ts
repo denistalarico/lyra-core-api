@@ -321,6 +321,7 @@ describe('CS2B.2 CreativeVersionApprovalController — boundary', () => {
   it('returns the guard denial when the user lacks submit_review', async () => {
     const permissionService = {
       canAccessProduct: jest.fn().mockResolvedValue(true),
+      getModuleAccess: jest.fn().mockResolvedValue({}),
       assertCan: jest.fn().mockRejectedValue(new Error('Missing permission.')),
     };
     const guard = new PermissionsGuard(

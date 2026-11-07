@@ -8,6 +8,7 @@ function createGuard(options: {
   clientProductAllowed: boolean;
 }) {
   const permissionService = {
+    getModuleAccess: jest.fn().mockResolvedValue(MODULE_ACCESS),
     canAccessProduct: jest.fn().mockResolvedValue(options.agencyEntitled),
     canAccessClientProduct: jest
       .fn()
@@ -66,6 +67,8 @@ const clientSocialContext: ManagedContext = {
   managedTenantId: 'managed-tenant-1',
   clientName: 'Cliente 1',
 };
+
+const MODULE_ACCESS = { projects: 'manager' as const };
 
 describe('PermissionsGuard product context separation', () => {
   it('requires the agency entitlement in agency mode', async () => {

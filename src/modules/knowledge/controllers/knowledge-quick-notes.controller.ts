@@ -12,6 +12,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   DangerousAction,
   PermissionsGuard,
+  RequireAnyPermission,
   RequirePermission,
 } from '../../permissions';
 import { CreateKnowledgeQuickNoteDto } from '../dto';
@@ -27,7 +28,11 @@ export class KnowledgeQuickNotesController {
   constructor(private readonly notesService: KnowledgeQuickNotesService) {}
 
   @Get()
-  @RequirePermission('agency.knowledge.wall.post')
+  // Everyone in Knowledge reads the wall; posting stays `wall.post` (Manager+).
+  @RequireAnyPermission(
+    'agency.knowledge.wall.post',
+    'agency.knowledge.articles.view.published',
+  )
   list(@AuthorizedContext() context: AuthorizedRequestContext) {
     return this.notesService.list(context);
   }

@@ -49,6 +49,16 @@ import {
 
 const AGENCY_CONNECTION = 'agency';
 
+/**
+ * Module levels are read on every check of a request; a short cache keeps that
+ * to one lookup. `invalidateModuleAccess` drops it when an Admin saves access.
+ */
+const MODULE_ACCESS_CACHE_MS = 3_000;
+const moduleAccessCache = new Map<
+  string,
+  { levels: Record<string, ModuleAccessLevel | null>; expiresAt: number }
+>();
+
 function normalizeRole(role: string): PlatformRoleKey {
   if (role === 'owner') return PlatformRoleKey.Owner;
   if (role === 'admin' || role === 'administrator')
@@ -136,11 +146,22 @@ export class PlatformPermissionService {
   async getModuleAccess(
     context: PermissionContext,
   ): Promise<Record<string, ModuleAccessLevel | null>> {
+    if (context.moduleAccess) return context.moduleAccess;
+
     const roleKey = normalizeRole(context.role);
 
     if (!isModuleScopedRole(roleKey) || !context.workspaceId) {
       return resolveModuleAccess(roleKey, []);
     }
+
+    const cacheKey = [
+      context.tenantId,
+      context.workspaceId,
+      context.userId,
+      roleKey,
+    ].join('|');
+    const cached = moduleAccessCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.levels;
 
     const workspaceUser = await this.workspaceUsersRepository.findOne({
       where: {
@@ -155,7 +176,24 @@ export class PlatformPermissionService {
         })
       : [];
 
-    return resolveModuleAccess(roleKey, rows);
+    const levels = resolveModuleAccess(roleKey, rows);
+    moduleAccessCache.set(cacheKey, {
+      levels,
+      expiresAt: Date.now() + MODULE_ACCESS_CACHE_MS,
+    });
+    return levels;
+  }
+
+  /** Drops cached levels after an access change (Settings > Users). */
+  invalidateModuleAccess(): void {
+    moduleAccessCache.clear();
+  }
+
+  /** The context the scope evaluator sees: with the caller's module levels. */
+  private async withModuleAccess(
+    context: PermissionContext,
+  ): Promise<PermissionContext> {
+    return { ...context, moduleAccess: await this.getModuleAccess(context) };
   }
 
   async can(
@@ -195,7 +233,11 @@ export class PlatformPermissionService {
       );
     }
 
-    await this.scopeEvaluator.assertScope(context, permissionKey, scopeRequest);
+    await this.scopeEvaluator.assertScope(
+      await this.withModuleAccess(context),
+      permissionKey,
+      scopeRequest,
+    );
   }
 
   async assertAny(
@@ -203,6 +245,8 @@ export class PlatformPermissionService {
     permissionKeys: string[],
     scopeRequest?: PermissionScopeRequest,
   ): Promise<void> {
+    const scopedContext = await this.withModuleAccess(context);
+
     for (const permissionKey of permissionKeys) {
       const allowed = await this.can(context, permissionKey);
 
@@ -212,7 +256,7 @@ export class PlatformPermissionService {
 
       try {
         await this.scopeEvaluator.assertScope(
-          context,
+          scopedContext,
           permissionKey,
           scopeRequest,
         );

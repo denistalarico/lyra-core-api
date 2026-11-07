@@ -1,3 +1,4 @@
+import { hasModuleWideAccess } from '../../common/context/module-access';
 import {
   BadRequestException,
   ConflictException,
@@ -224,7 +225,7 @@ export class ContactsService {
     query: ReturnType<Repository<ContactEntity>['createQueryBuilder']>,
     ctx: RequestContext,
   ) {
-    if (isElevatedRole(ctx.role)) {
+    if (hasModuleWideAccess(ctx, 'contacts')) {
       return;
     }
 

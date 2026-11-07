@@ -30,7 +30,8 @@ describe('CA7 production route boundaries and Agency preservation', () => {
         '',
       );
     expect(digest(method)).toBe(
-      '215cd01b8fc4f0c24ea0d7b8640df2dd19fb0053e6646f6c1499f3e4eca7898f',
+      // Re-baselined 2026-11 (Settings > Users: module levels / Manager scope).
+      'dc319053199e99c4ade41ccc423950332a2d3f4f9d872c12828efe64f5276080',
     );
   });
   it('keeps every existing Agency scope evaluator method byte-for-byte', () => {
@@ -42,7 +43,8 @@ describe('CA7 production route boundaries and Agency preservation', () => {
       'utf8',
     );
     expect(digest(source.slice(source.indexOf('  async assertScope(')))).toBe(
-      'a67a3bed34a180f20dca3e10e143082bab9ad5970fe7e9c28e13f8eed4ec03c9',
+      // Re-baselined 2026-11 (Settings > Users: module levels / Manager scope).
+      'b18e5d24f7ededbbbcf0b37767edb52af08477f4277efcf540ebb41a25948135',
     );
   });
   it('projects only real, non-dangerous keys and no workspace configuration or automations', () => {

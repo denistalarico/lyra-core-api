@@ -188,7 +188,10 @@ export class AgencySalesController {
   }
 
   @Post('opportunities/quick')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   createQuickOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Body() dto: CreateAgencySalesQuickOpportunityDto,
@@ -197,7 +200,10 @@ export class AgencySalesController {
   }
 
   @Post('opportunities')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   createOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Body() dto: CreateAgencySalesOpportunityDto,
@@ -227,7 +233,10 @@ export class AgencySalesController {
   }
 
   @Post('opportunities/:id/activities')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   createOpportunityActivity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('id') id: string,
@@ -279,7 +288,10 @@ export class AgencySalesController {
   }
 
   @Delete('opportunities/:id/activities/:activityId')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   @DangerousAction()
   deleteOpportunityActivity(
     @AuthenticatedUser() user: AuthTokenPayload,
@@ -306,7 +318,10 @@ export class AgencySalesController {
   }
 
   @Patch('opportunities/:id/move')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   moveOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('id') id: string,
@@ -328,7 +343,10 @@ export class AgencySalesController {
   }
 
   @Post('opportunities/:id/items')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   createOpportunityItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('id') id: string,
@@ -342,7 +360,10 @@ export class AgencySalesController {
   }
 
   @Patch('opportunities/:id/items/:itemId')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   updateOpportunityItem(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('id') id: string,
@@ -358,7 +379,10 @@ export class AgencySalesController {
   }
 
   @Delete('opportunities/:id/items/:itemId')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   @DangerousAction()
   deleteOpportunityItem(
     @AuthenticatedUser() user: AuthTokenPayload,
@@ -373,7 +397,10 @@ export class AgencySalesController {
   }
 
   @Patch('opportunities/:id')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   updateOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,
     @Param('id') id: string,
@@ -383,7 +410,10 @@ export class AgencySalesController {
   }
 
   @Delete('opportunities/:id')
-  @RequirePermission('agency.sales.crm.manage.department')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
   @DangerousAction()
   deleteOpportunity(
     @AuthenticatedUser() user: AuthTokenPayload,

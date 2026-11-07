@@ -206,7 +206,10 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
           provide: ClientAreaSelfAccessService,
           useValue: { resolveSelfContext },
         },
-        { provide: PlatformPermissionService, useValue: { assertCan } },
+        {
+          provide: PlatformPermissionService,
+          useValue: { assertCan, getModuleAccess: async () => ({}) },
+        },
         {
           provide: OperationalContextResolver,
           useValue: { resolve: jest.fn().mockResolvedValue(null) },

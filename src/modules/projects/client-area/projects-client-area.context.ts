@@ -1,6 +1,7 @@
 import { createParamDecorator, type ExecutionContext } from '@nestjs/common';
 import { IsNull } from 'typeorm';
 import { getAuthorizedContext } from '../../../common/context/authorized-context.decorator';
+import { hasModuleWideAccess } from '../../../common/context/module-access';
 import type { ClientAreaRequest } from '../../client-area/client-area.types';
 
 /**
@@ -17,7 +18,15 @@ export type ProjectRequestContext = Pick<
   AuthorizedRequestContext,
   'tenantId' | 'workspaceId' | 'userId'
 > &
-  Partial<Pick<AuthorizedRequestContext, 'role' | 'clientArea'>>;
+  Partial<Pick<AuthorizedRequestContext, 'role' | 'clientArea' | 'moduleAccess'>>;
+
+/**
+ * Settings > Users: a Member-level user in Projects (outside the Client Area,
+ * which has its own rules) creates only for themselves, never re-assigns and
+ * deletes only what they created.
+ */
+export const isNarrowedProjectsMember = (context: ProjectRequestContext) =>
+  !context.clientArea && !hasModuleWideAccess(context, 'projects');
 
 /** Only this product carries the verified membership into its existing services. */
 export const AuthorizedContext = createParamDecorator(

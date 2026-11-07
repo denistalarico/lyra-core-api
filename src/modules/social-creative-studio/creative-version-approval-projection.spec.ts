@@ -183,6 +183,7 @@ describe('CS2B.3 read endpoint contract', () => {
     const permissionService = {
       canAccessProduct: jest.fn().mockResolvedValue(true),
       canAccessClientProduct: jest.fn().mockResolvedValue(true),
+      getModuleAccess: jest.fn().mockResolvedValue({}),
       assertCan: jest
         .fn()
         .mockRejectedValue(new Error('Missing approval read permission.')),

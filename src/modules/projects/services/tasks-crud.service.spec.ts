@@ -20,7 +20,10 @@ describe('TasksCrudService notification triggers', () => {
   it('scopes workspace task lists to assigned, created, or permitted project tasks for members', async () => {
     const { service, queryBuilder } = makeService();
 
-    await service.listWorkspaceTasks({ ...makeContext(), role: 'member' }, {});
+    await service.listWorkspaceTasks(
+      { ...makeContext(), role: 'member', moduleAccess: undefined },
+      {},
+    );
 
     expect(queryBuilder.scopeClauses.join('\n')).toContain(
       'task.assignee_id = :scopeUserId',
@@ -30,6 +33,40 @@ describe('TasksCrudService notification triggers', () => {
     );
     expect(queryBuilder.scopeClauses.join('\n')).toContain(
       'agency_project_followers',
+    );
+  });
+
+  it('assigns a Member-level task to its creator whatever the payload says', async () => {
+    const { service } = makeService();
+
+    const task = await service.createWorkspaceTask(
+      { ...makeContext(), role: 'member', moduleAccess: { projects: 'member' } },
+      {
+        title: 'Revisar briefing',
+        priority: TaskPriority.Medium,
+        assigneeId: 'user-assignee',
+      },
+    );
+
+    expect(task.assigneeId).toBe('user-actor');
+  });
+
+  it('refuses re-assignment and foreign deletion for a Member-level user', async () => {
+    const { service, tasksRepository } = makeService();
+    const member = {
+      ...makeContext(),
+      role: 'member',
+      moduleAccess: { projects: 'member' as const },
+    };
+    tasksRepository.findOne.mockResolvedValue(
+      makeTask({ assigneeId: 'user-actor', createdById: 'someone-else' }),
+    );
+
+    await expect(
+      service.update(member, 'task-1', { assigneeId: 'user-other' }),
+    ).rejects.toThrow('Somente um Manager pode trocar o responsável');
+    await expect(service.archive(member, 'task-1')).rejects.toThrow(
+      'Você só pode excluir tarefas criadas por você',
     );
   });
 
@@ -483,6 +520,8 @@ function makeContext() {
     tenantId: 'tenant-1',
     workspaceId: 'workspace-1',
     userId: 'user-actor',
+    // Manager-level in Projects: may assign and re-assign (Settings > Users).
+    moduleAccess: { projects: 'manager' as const },
   };
 }
 
