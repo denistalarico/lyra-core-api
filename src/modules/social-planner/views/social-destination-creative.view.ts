@@ -35,6 +35,11 @@ export type SocialDestinationCreativeView = {
   source: string;
   /** CS5-B: the Creative Version this creative was handed off from; null when manual. */
   creativeVersionId: string | null;
+  /**
+   * Who made the file: `ai` when it came from a Creative Studio generation,
+   * `design` otherwise. Only resolved by the per-content listing.
+   */
+  origin?: 'ai' | 'design';
   media: MediaAssetView | null;
   createdAt: string;
   updatedAt: string;
@@ -43,8 +48,10 @@ export type SocialDestinationCreativeView = {
 export function toSocialDestinationCreativeView(
   creative: SocialDestinationCreativeEntity,
   mediaAsset: MediaAssetEntity | null,
+  origin?: 'ai' | 'design',
 ): SocialDestinationCreativeView {
   return {
+    ...(origin ? { origin } : {}),
     id: creative.id,
     destinationId: creative.destinationId,
     contentItemId: creative.contentItemId,

@@ -48,9 +48,39 @@ function harness(
 
 describe('SocialPublicationRunService', () => {
   it('reads [rows, rowCount] correctly when releasing schedules', async () => {
-    const { service } = harness({ queryResults: [[[{}], 1]] });
+    const { service, dataSource } = harness({
+      queryResults: [
+        [[], 0],
+        [[{}], 1],
+      ],
+    });
 
     await expect(service.releaseScheduled({ now: NOW })).resolves.toBe(1);
+    // Due schedules of Planner items marked `cancelled` are cancelled first.
+    expect(dataSource.query.mock.calls[0][0]).toContain(
+      "item.planning_status = 'cancelled'",
+    );
+  });
+
+  it('marks the Planner item posted in the same statement that publishes', async () => {
+    const { service, dataSource } = harness({
+      queryResults: [[{ id: 'publication-a' }]],
+    });
+
+    await expect(
+      service.markPublished({
+        publicationId: 'publication-a',
+        lockedBy: 'worker-a',
+        identity: {
+          publishedAt: NOW,
+          externalPublicationId: 'external-a',
+          externalPermalink: null,
+        },
+      }),
+    ).resolves.toBe(true);
+    expect(dataSource.query.mock.calls[0][0]).toContain(
+      "SET planning_status = 'posted'",
+    );
   });
 
   it('treats an empty UPDATE RETURNING pair as a rejected old-worker write', async () => {

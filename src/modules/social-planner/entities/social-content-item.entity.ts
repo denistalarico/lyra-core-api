@@ -15,7 +15,9 @@ export type SocialContentPlanningStatus =
   | 'copy_ready'
   | 'creative_in_progress'
   | 'creative_ready'
-  | 'ready';
+  | 'ready'
+  | 'cancelled'
+  | 'posted';
 
 @Entity('social_content_items')
 @Index('IDX_social_content_items_scope', [
@@ -26,7 +28,7 @@ export type SocialContentPlanningStatus =
 @Index('IDX_social_content_items_plan', ['planId', 'sortOrder'])
 @Check(
   'CK_social_content_items_status',
-  `"planning_status" IN ('idea', 'planned', 'copy_in_progress', 'copy_ready', 'creative_in_progress', 'creative_ready', 'ready')`,
+  `"planning_status" IN ('idea', 'planned', 'copy_in_progress', 'copy_ready', 'creative_in_progress', 'creative_ready', 'ready', 'cancelled', 'posted')`,
 )
 @Check('CK_social_content_items_sort_order', '"sort_order" >= 0')
 @Check(

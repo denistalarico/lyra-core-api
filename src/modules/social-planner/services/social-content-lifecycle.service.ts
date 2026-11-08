@@ -185,7 +185,12 @@ export class SocialContentLifecycleService {
             objective: source.objective,
             creativeFormat: source.creativeFormat,
 
-            planningStatus: source.planningStatus,
+            // A copy of a posted or cancelled item is new work again.
+            planningStatus:
+              source.planningStatus === 'posted' ||
+              source.planningStatus === 'cancelled'
+                ? 'planned'
+                : source.planningStatus,
             plannedDate: source.plannedDate,
             sortOrder: source.sortOrder,
 
@@ -685,13 +690,22 @@ export class SocialContentLifecycleService {
 
     const blocker: SocialContentPublicationBlocker | undefined =
       check.blockers.get(item.id);
+    /**
+     * A `published` publication does not block this soft delete: the post is
+     * already live on the network and nothing here can take it back, so the
+     * Planner only stops listing the item (the UI warns that the post stays
+     * up). The publication row is untouched evidence either way. Hard
+     * `discard` keeps the full guard.
+     */
+    const activeStatuses =
+      blocker?.statuses.filter((status) => status !== 'published') ?? [];
 
-    if (blocker) {
+    if (activeStatuses.length > 0) {
       return {
         contentId,
         status: 'failed',
         reason: 'has_publications',
-        blockingStatuses: blocker.statuses,
+        blockingStatuses: activeStatuses,
       };
     }
 

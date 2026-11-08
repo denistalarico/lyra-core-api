@@ -323,7 +323,26 @@ export class SocialPlannerService {
       item.creativeFormat = this.normalizeNullable(dto.creativeFormat);
     }
 
-    if (dto.planningStatus !== undefined) {
+    if (
+      dto.planningStatus !== undefined &&
+      dto.planningStatus !== item.planningStatus
+    ) {
+      /**
+       * `posted` belongs to the publication runner: it is entered only when a
+       * publication goes live, and once there the item is final.
+       */
+      if (item.planningStatus === 'posted') {
+        throw new BadRequestException({
+          code: 'content_posted_locked',
+          message: 'Posted content cannot change its planning status.',
+        });
+      }
+      if (dto.planningStatus === 'posted') {
+        throw new BadRequestException({
+          code: 'planning_status_posted_is_automatic',
+          message: 'The posted status is set automatically on publication.',
+        });
+      }
       item.planningStatus = dto.planningStatus;
     }
 

@@ -536,8 +536,18 @@ describe('SocialContentLifecycleService', () => {
       expect(contentRepository.update).not.toHaveBeenCalled();
     });
 
-    it('refuses when the content was already published', async () => {
+    it('soft-deletes content that was already published, leaving the post live', async () => {
       registerBlockingSource(['published']);
+      contentRepository.findOne.mockResolvedValue(buildContentItem());
+
+      await service.remove(clientScope, CONTENT_ID, 'actor-1');
+
+      expect(contentRepository.update).toHaveBeenCalledTimes(1);
+      expect(contentRepository.delete).not.toHaveBeenCalled();
+    });
+
+    it('still refuses when a published item also has a scheduled publication', async () => {
+      registerBlockingSource(['published', 'scheduled']);
       contentRepository.findOne.mockResolvedValue(buildContentItem());
 
       await expect(

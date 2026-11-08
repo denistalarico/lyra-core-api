@@ -60,6 +60,8 @@ export class UpdateSocialContentItemDto {
     'creative_in_progress',
     'creative_ready',
     'ready',
+    'cancelled',
+    'posted',
   ] satisfies SocialContentPlanningStatus[])
   planningStatus?: SocialContentPlanningStatus;
 

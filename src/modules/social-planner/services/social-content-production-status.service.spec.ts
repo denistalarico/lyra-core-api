@@ -113,6 +113,8 @@ const EXPECTED: Record<
     creative_in_progress: 'creative_in_progress',
     creative_ready: 'creative_ready',
     ready: 'ready',
+    cancelled: 'cancelled',
+    posted: 'posted',
   },
   creative_ready: {
     idea: 'idea',
@@ -122,6 +124,8 @@ const EXPECTED: Record<
     creative_in_progress: 'creative_ready',
     creative_ready: 'creative_ready',
     ready: 'ready',
+    cancelled: 'cancelled',
+    posted: 'posted',
   },
 };
 
@@ -276,6 +280,8 @@ describe('CS2B.4 SocialContentProductionStatusService', () => {
       creative_ready: 'creative_in_progress',
       // The operator's sign-off on the whole item is never withdrawn here.
       ready: 'ready',
+      cancelled: 'cancelled',
+      posted: 'posted',
     };
     const revise = (
       h: ReturnType<typeof harness>,
@@ -388,6 +394,8 @@ describe('CS2B.4 SocialContentProductionStatusService', () => {
         creative_in_progress: 'creative_in_progress',
         creative_ready: 'creative_in_progress',
         ready: 'creative_in_progress',
+        cancelled: 'cancelled',
+        posted: 'posted',
       },
       in_approval: {
         idea: 'idea',
@@ -397,6 +405,8 @@ describe('CS2B.4 SocialContentProductionStatusService', () => {
         creative_in_progress: 'creative_ready',
         creative_ready: 'creative_ready',
         ready: 'creative_ready',
+        cancelled: 'cancelled',
+        posted: 'posted',
       },
       final: {
         idea: 'idea',
@@ -406,6 +416,8 @@ describe('CS2B.4 SocialContentProductionStatusService', () => {
         creative_in_progress: 'ready',
         creative_ready: 'ready',
         ready: 'ready',
+        cancelled: 'cancelled',
+        posted: 'posted',
       },
     };
     const cases = (

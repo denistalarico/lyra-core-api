@@ -19,6 +19,7 @@ import { SeatClientConversationDefaultMembers1802000000000 } from './migrations/
 import { AddTaskChecklistItemAuthor1802100000000 } from './migrations/1802100000000-add-task-checklist-item-author';
 import { FoldClientAreaViewerIntoMember1802200000000 } from './migrations/1802200000000-fold-client-area-viewer-into-member';
 import { CreateSocialScheduledBoosts1802300000000 } from './migrations/1802300000000-create-social-scheduled-boosts';
+import { ExtendSocialContentPlanningStatus1802400000000 } from './migrations/1802400000000-extend-social-content-planning-status';
 import { AddSurfaceToTrustedDevices1800200000000 } from './migrations/1800200000000-add-surface-to-trusted-devices';
 import { CreateClientAreaAnalyticsDashboards1800100000000 } from './migrations/1800100000000-create-client-area-analytics-dashboards';
 import { CreateFinanceReceivableWriteOffs1799900000000 } from './migrations/1799900000000-create-finance-receivable-write-offs';
@@ -598,5 +599,6 @@ export const AgencyDataSource = new DataSource({
     AddTaskChecklistItemAuthor1802100000000,
     FoldClientAreaViewerIntoMember1802200000000,
     CreateSocialScheduledBoosts1802300000000,
+    ExtendSocialContentPlanningStatus1802400000000,
   ],
 });

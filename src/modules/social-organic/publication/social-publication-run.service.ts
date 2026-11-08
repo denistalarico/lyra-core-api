@@ -48,6 +48,19 @@ export type SocialPublicationRecoverySummary = {
  *
  * SELECT returns `rows`; UPDATE ... RETURNING returns `[rows, rowCount]`.
  */
+/**
+ * CTE fragment run in the same statement that marks a publication live: the
+ * Planner item becomes `posted` (terminal; see the Planner status rules).
+ * Expects a preceding `published` CTE returning `content_item_id`.
+ */
+const MARK_CONTENT_POSTED = `posted AS (
+         UPDATE social_content_items
+            SET planning_status = 'posted',
+                updated_at = now()
+          WHERE id IN (SELECT content_item_id FROM published)
+            AND planning_status <> 'posted'
+       )`;
+
 function returnedRows<T>(result: unknown): T[] {
   if (!Array.isArray(result)) return [];
 
@@ -77,6 +90,22 @@ export class SocialPublicationRunService {
   ): Promise<number> {
     const now = input.now ?? new Date();
     const limit = Math.max(1, Math.trunc(input.limit ?? 100));
+    /**
+     * An item the operator marked `cancelled` in the Planner must not go out:
+     * its due schedules are cancelled instead of released.
+     */
+    await this.dataSource.query(
+      `UPDATE social_publications AS publication
+          SET status = 'cancelled',
+              cancelled_at = now(),
+              updated_at = now()
+         FROM social_content_items AS item
+        WHERE publication.content_item_id = item.id
+          AND item.planning_status = 'cancelled'
+          AND publication.status = 'scheduled'
+          AND publication.scheduled_at <= $1`,
+      [now],
+    );
     const result: unknown = await this.dataSource.query(
       `WITH due AS (
          SELECT id
@@ -167,21 +196,24 @@ export class SocialPublicationRunService {
     identity: SocialPublicationExternalIdentity;
   }): Promise<boolean> {
     const result: unknown = await this.dataSource.query(
-      `UPDATE social_publications
-          SET status = 'published',
-              published_at = $3,
-              external_publication_id = $4,
-              external_permalink = $5,
-              provider_metadata = $6::jsonb,
-              last_error_code = NULL,
-              failure_reason = NULL,
-              locked_at = NULL,
-              locked_by = NULL,
-              updated_at = now()
-        WHERE id = $1
-          AND status = 'processing'
-          AND locked_by = $2
-        RETURNING id`,
+      `WITH published AS (
+         UPDATE social_publications
+            SET status = 'published',
+                published_at = $3,
+                external_publication_id = $4,
+                external_permalink = $5,
+                provider_metadata = $6::jsonb,
+                last_error_code = NULL,
+                failure_reason = NULL,
+                locked_at = NULL,
+                locked_by = NULL,
+                updated_at = now()
+          WHERE id = $1
+            AND status = 'processing'
+            AND locked_by = $2
+          RETURNING id, content_item_id
+       ), ${MARK_CONTENT_POSTED}
+       SELECT id FROM published`,
       [
         input.publicationId,
         input.lockedBy,
@@ -399,22 +431,25 @@ export class SocialPublicationRunService {
     lockedBy: string,
   ): Promise<boolean> {
     const result: unknown = await this.dataSource.query(
-      `UPDATE social_publications
-          SET status = 'published',
-              published_at = $4,
-              external_publication_id = $5,
-              external_permalink = $6,
-              provider_metadata = $7::jsonb,
-              last_error_code = NULL,
-              failure_reason = NULL,
-              locked_at = NULL,
-              locked_by = NULL,
-              updated_at = now()
-        WHERE id = $1
-          AND status = 'processing'
-          AND locked_by = $2
-          AND locked_at = $3
-        RETURNING id`,
+      `WITH published AS (
+         UPDATE social_publications
+            SET status = 'published',
+                published_at = $4,
+                external_publication_id = $5,
+                external_permalink = $6,
+                provider_metadata = $7::jsonb,
+                last_error_code = NULL,
+                failure_reason = NULL,
+                locked_at = NULL,
+                locked_by = NULL,
+                updated_at = now()
+          WHERE id = $1
+            AND status = 'processing'
+            AND locked_by = $2
+            AND locked_at = $3
+          RETURNING id, content_item_id
+       ), ${MARK_CONTENT_POSTED}
+       SELECT id FROM published`,
       [
         publication.id,
         lockedBy,

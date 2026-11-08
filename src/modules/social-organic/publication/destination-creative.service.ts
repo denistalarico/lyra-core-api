@@ -120,16 +120,54 @@ export class DestinationCreativeService {
       scope,
       creatives.map((creative) => creative.mediaAssetId),
     );
+    const generatedVersions = await this.generatedVersionIds(
+      creatives.flatMap((creative) =>
+        creative.creativeVersionId ? [creative.creativeVersionId] : [],
+      ),
+    );
 
     return {
-      items: creatives.map((creative) =>
-        toSocialDestinationCreativeView(
+      items: creatives.map((creative) => {
+        const media = mediaById.get(creative.mediaAssetId) ?? null;
+        const generated =
+          (creative.creativeVersionId !== null &&
+            creative.creativeVersionId !== undefined &&
+            generatedVersions.has(creative.creativeVersionId)) ||
+          (media?.source ?? '').includes('generation');
+        return toSocialDestinationCreativeView(
           creative,
-          mediaById.get(creative.mediaAssetId) ?? null,
-        ),
-      ),
+          media,
+          generated ? 'ai' : 'design',
+        );
+      }),
       total: creatives.length,
     };
+  }
+
+  /**
+   * Creative Versions whose asset came from an AI generation
+   * (`social_creative_assets.source_type = 'generated'`). Read with SQL so
+   * this module keeps no dependency on the Creative Studio entities; the ids
+   * were already scoped through the creatives that reference them.
+   */
+  private async generatedVersionIds(
+    versionIds: string[],
+  ): Promise<Set<string>> {
+    if (versionIds.length === 0) return new Set();
+    const rows: unknown = await this.creativesRepository.manager.query(
+      `SELECT version.id
+         FROM social_creative_asset_versions AS version
+         JOIN social_creative_assets AS asset
+           ON asset.id = version.creative_asset_id
+        WHERE version.id = ANY($1::uuid[])
+          AND asset.source_type = 'generated'`,
+      [[...new Set(versionIds)]],
+    );
+    return new Set(
+      (Array.isArray(rows) ? (rows as Array<{ id: string }>) : []).map(
+        (row) => row.id,
+      ),
+    );
   }
 
   /**
