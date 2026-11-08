@@ -19,6 +19,7 @@ import { CreativeProductionService } from './creative-production.service';
 import { CreativeStudioBrandContextService } from './creative-brand-context.service';
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeGenerationCleanupWorker } from './creative-generation-cleanup.worker';
+import { CreativeTrashPurgeWorker } from './creative-trash-purge.worker';
 import { CreativeGenerationConfigService } from './creative-generation-config';
 import { CreativeGenerationContextService } from './creative-generation-context';
 import { CreativeGenerationReferenceSelector } from './creative-generation-references';
@@ -144,6 +145,7 @@ import {
     CreativeImageGenerationWorker,
     // CS3.6.1: expires temporary outputs; off unless explicitly enabled.
     CreativeGenerationCleanupWorker,
+    CreativeTrashPurgeWorker,
     CreativeGenerationConfigService,
     CreativeGenerationContextService,
     CreativeGenerationReferenceSelector,

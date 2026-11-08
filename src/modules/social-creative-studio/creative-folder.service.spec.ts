@@ -91,17 +91,29 @@ describe('CreativeFolderService tree operations', () => {
     expect(h.manager.remove).not.toHaveBeenCalled();
   });
 
-  it('soft-deletes the files, detaching them before removing children first', async () => {
+  it('sends the files to the Lixeira, removing children first', async () => {
     const h = harness();
     await h.service.removeTree(scope, 'a');
     const update = h.manager.update.mock.calls[0] as unknown as [
       unknown,
       unknown,
-      { folderId: null; deletedAt: Date },
+      { folderId: null; trashedAt: Date; deletedAt?: Date },
     ];
     expect(update[2].folderId).toBeNull();
-    expect(update[2].deletedAt).toBeInstanceOf(Date);
+    expect(update[2].trashedAt).toBeInstanceOf(Date);
+    expect(update[2].deletedAt).toBeUndefined();
     expect(h.removed).toEqual(['c', 'b', 'a']);
+  });
+
+  it('deletes the files right away when permanent', async () => {
+    const h = harness();
+    await h.service.removeTree(scope, 'a', true);
+    const update = h.manager.update.mock.calls[0] as unknown as [
+      unknown,
+      unknown,
+      { deletedAt?: Date },
+    ];
+    expect(update[2].deletedAt).toBeInstanceOf(Date);
   });
 
   it('rebuilds the hierarchy when copying, naming only the root as a copy', async () => {

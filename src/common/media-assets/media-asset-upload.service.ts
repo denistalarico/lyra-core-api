@@ -310,6 +310,30 @@ export class MediaAssetUploadService {
   }
 
   /**
+   * Removes the binary of a durable asset whose owner retired it, keeping the
+   * row as a tombstone because history still references it by foreign key.
+   *
+   * ORDER: object → tombstone. A storage failure leaves the row live, so the
+   * owner's next sweep finds it again; a tombstone failure converges on retry
+   * because deleting a missing key succeeds.
+   */
+  async purgeRetiredObject(mediaAssetId: string): Promise<void> {
+    const asset = await this.mediaAssets.findOne({
+      where: { id: mediaAssetId },
+    });
+    if (!asset) return;
+    try {
+      await this.filesService.deleteObject({
+        bucket: 'private',
+        path: asset.storagePath,
+      });
+    } catch (error) {
+      if (!isMissingObject(error)) throw error;
+    }
+    await this.mediaAssets.softDelete({ id: mediaAssetId });
+  }
+
+  /**
    * Rollback cleanup only. A failure here is swallowed on purpose: the caller
    * is already throwing the error that matters, and replacing it with a
    * storage error would hide why the upload actually failed.

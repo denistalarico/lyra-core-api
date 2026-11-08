@@ -21,6 +21,7 @@ export class ListCreativeAssetsQueryDto {
   @IsOptional() @IsISO8601() createdTo?: string;
   @IsOptional() @Type(() => Number) @Min(1) @Max(100) limit?: number;
   @IsOptional() @IsString() cursor?: string;
+  @IsOptional() @IsIn(['true']) trashed?: 'true';
 }
 export class CreateCreativeAssetDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;

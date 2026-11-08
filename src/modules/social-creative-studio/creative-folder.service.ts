@@ -213,8 +213,11 @@ export class CreativeFolderService {
       throw error;
     }
   }
-  /** Deletes the tree and its files, under the same rule as a single file. */
-  async removeTree(scope: CreativeStudioScope, id: string) {
+  /**
+   * Removes the tree under the same rule as a single file: its files go to the
+   * Lixeira, flat, or are deleted now when `permanent`.
+   */
+  async removeTree(scope: CreativeStudioScope, id: string, permanent = false) {
     const tree = await this.subtree(scope, id);
     const ids = tree.map((folder) => folder.id);
     const linked = await this.assets.count({
@@ -236,7 +239,13 @@ export class CreativeFolderService {
       await manager.update(
         CreativeAssetEntity,
         { ...this.where(scope), folderId: In(ids), deletedAt: IsNull() },
-        { status: 'archived', archivedAt: now, deletedAt: now, folderId: null },
+        {
+          status: 'archived',
+          archivedAt: now,
+          trashedAt: now,
+          folderId: null,
+          ...(permanent ? { deletedAt: now } : {}),
+        },
       );
       // Children first: the parent reference is restricted.
       for (const folder of [...tree].reverse()) await manager.remove(folder);

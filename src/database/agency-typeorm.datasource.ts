@@ -288,6 +288,7 @@ import { ScopeSocialEditorialByCompany1794500000000 } from './migrations/1794500
 import { ScopeBrandKitByCompany1794510000000 } from './migrations/1794510000000-scope-brand-kit-by-company';
 import { ScopeCreativeStudioByCompany1794520000000 } from './migrations/1794520000000-scope-creative-studio-by-company';
 import { AddSocialCreativeAssetDeletedAt1802500000000 } from './migrations/1802500000000-add-social-creative-asset-deleted-at';
+import { AddSocialCreativeAssetTrash1802600000000 } from './migrations/1802600000000-add-social-creative-asset-trash';
 import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
 import { ScopeSocialOrganicAssetsByCompany1794700000000 } from './migrations/1794700000000-scope-social-organic-assets-by-company';
 import { ScopeSocialAdConnectionsByCompany1794710000000 } from './migrations/1794710000000-scope-social-ad-connections-by-company';
@@ -602,5 +603,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialScheduledBoosts1802300000000,
     ExtendSocialContentPlanningStatus1802400000000,
     AddSocialCreativeAssetDeletedAt1802500000000,
+    AddSocialCreativeAssetTrash1802600000000,
   ],
 });

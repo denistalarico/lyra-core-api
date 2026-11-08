@@ -60,10 +60,8 @@ const UUID_PATTERN =
  * Generation references (no FK by design, CS3.4.2) only hold media while
  * their generation is pending; after that the row keeps id + checksum.
  */
-const NO_OTHER_OWNER = `
-       NOT EXISTS (SELECT 1 FROM social_creative_asset_versions v WHERE v.media_asset_id = m.id)
-   AND NOT EXISTS (SELECT 1 FROM social_creative_asset_versions v WHERE v.thumbnail_media_asset_id = m.id)
-   AND NOT EXISTS (SELECT 1 FROM social_publications p WHERE p.media_asset_id = m.id)
+export const NO_OWNER_BEYOND_VERSIONS = `
+       NOT EXISTS (SELECT 1 FROM social_publications p WHERE p.media_asset_id = m.id)
    AND NOT EXISTS (SELECT 1 FROM social_publication_media pm WHERE pm.media_asset_id = m.id)
    AND NOT EXISTS (SELECT 1 FROM social_destination_creatives d WHERE d.media_asset_id = m.id)
    AND NOT EXISTS (SELECT 1 FROM social_content_references r WHERE r.media_asset_id = m.id)
@@ -73,6 +71,11 @@ const NO_OTHER_OWNER = `
            JOIN social_creative_generations pending ON pending.id = gr.generation_id
           WHERE gr.media_asset_id = m.id
             AND pending.status IN ('queued', 'processing'))`;
+
+const NO_OTHER_OWNER = `
+       NOT EXISTS (SELECT 1 FROM social_creative_asset_versions v WHERE v.media_asset_id = m.id)
+   AND NOT EXISTS (SELECT 1 FROM social_creative_asset_versions v WHERE v.thumbnail_media_asset_id = m.id)
+   AND ${NO_OWNER_BEYOND_VERSIONS}`;
 
 /**
  * The whole eligibility rule of IMAGE outputs. `$1` source, `$2` cutoff.

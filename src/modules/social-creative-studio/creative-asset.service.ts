@@ -5,7 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, type EntityManager, IsNull, Repository } from 'typeorm';
+import {
+  DataSource,
+  type EntityManager,
+  IsNull,
+  Not,
+  Repository,
+} from 'typeorm';
 import {
   detectMediaAssetMimeType,
   MediaAssetEntity,
@@ -31,6 +37,9 @@ export const CREATIVE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const VIDEO_MAX = 300 * 1024 * 1024;
 const PAGE_SIZE = 50;
 const CREATIVE_STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024;
+const MEDIA_VERSION_REF = `SELECT 1 FROM social_creative_asset_versions v
+  JOIN social_creative_assets a ON a.id = v.creative_asset_id
+  WHERE (v.media_asset_id = media.id OR v.thumbnail_media_asset_id = media.id)`;
 type UploadFile = {
   buffer: Buffer;
   originalname: string;
@@ -301,7 +310,7 @@ export class CreativeAssetService {
     revision?: { revisesVersionId: string },
     onVersionCreated?: CreativeVersionCreatedHook,
   ) {
-    const asset = await this.find(scope, assetId);
+    const asset = await this.findWritable(scope, assetId);
     if (revision) this.assertRevisable(asset, revision.revisesVersionId);
     const assetType = this.kind(file);
     if (asset.assetType !== assetType)
@@ -423,6 +432,7 @@ export class CreativeAssetService {
       sourceType?: string;
       createdFrom?: string;
       createdTo?: string;
+      trashed?: string;
       limit?: number;
       cursor?: string;
     },
@@ -469,9 +479,13 @@ export class CreativeAssetService {
       });
     if (query.folderId)
       qb.andWhere('asset.folderId = :folderId', { folderId: query.folderId });
-    qb.andWhere('asset.status = :status', {
-      status: query.status ?? 'ready',
-    });
+    // The Lixeira is its own view: its files are out of every status list.
+    if (query.trashed === 'true') qb.andWhere('asset.trashedAt IS NOT NULL');
+    else
+      qb.andWhere('asset.trashedAt IS NULL').andWhere(
+        'asset.status = :status',
+        { status: query.status ?? 'ready' },
+      );
     if (query.contentItemId)
       qb.andWhere('asset.contentItemId = :contentItemId', {
         contentItemId: query.contentItemId,
@@ -542,7 +556,7 @@ export class CreativeAssetService {
     id: string,
     input: { name?: string; folderId?: string | null },
   ) {
-    const asset = await this.find(scope, id);
+    const asset = await this.findWritable(scope, id);
     if (input.folderId !== undefined && input.folderId !== null)
       await this.assertFolder(scope, input.folderId);
     if (input.name !== undefined) asset.name = input.name.trim();
@@ -556,7 +570,7 @@ export class CreativeAssetService {
    * clears the selection first; nothing cascades.
    */
   async archive(scope: CreativeStudioScope, id: string) {
-    const asset = await this.find(scope, id);
+    const asset = await this.findWritable(scope, id);
     asset.status = 'archived';
     asset.archivedAt = new Date();
     try {
@@ -575,11 +589,12 @@ export class CreativeAssetService {
     }
   }
   /**
-   * Hides the asset from the library for good. Content linked to the Planner
-   * stays recoverable through archive, and the private media is kept because
-   * copies, approvals and published posts may still reference it.
+   * Sends the asset to the Lixeira or, when `permanent`, deletes it now. Files
+   * linked to the Planner stay recoverable through archive. The row survives
+   * permanent deletion for Approvals and Production; the binary goes with
+   * `CreativeTrashPurgeWorker` once no other owner holds it.
    */
-  async remove(scope: CreativeStudioScope, id: string) {
+  async remove(scope: CreativeStudioScope, id: string, permanent = false) {
     const asset = await this.find(scope, id);
     if (asset.contentItemId)
       throw new ConflictException({
@@ -590,9 +605,21 @@ export class CreativeAssetService {
     const now = new Date();
     asset.status = 'archived';
     asset.archivedAt = asset.archivedAt ?? now;
-    asset.deletedAt = now;
+    asset.trashedAt = asset.trashedAt ?? now;
     asset.folderId = null;
+    if (permanent) asset.deletedAt = now;
     await this.assets.save(asset);
+  }
+  async emptyTrash(scope: CreativeStudioScope) {
+    const result = await this.assets.update(
+      {
+        ...this.scopeWhere(scope),
+        trashedAt: Not(IsNull()),
+        deletedAt: IsNull(),
+      },
+      { deletedAt: new Date() },
+    );
+    return { deleted: result.affected ?? 0 };
   }
   async copy(
     scope: CreativeStudioScope,
@@ -600,7 +627,7 @@ export class CreativeAssetService {
     id: string,
     folderId?: string,
   ) {
-    const source = await this.find(scope, id);
+    const source = await this.findWritable(scope, id);
     await this.assertFolder(scope, folderId);
     const sourceVersion = await this.versions.findOne({
       where: { id: source.currentVersionId ?? '', creativeAssetId: source.id },
@@ -633,11 +660,27 @@ export class CreativeAssetService {
           : { agencyClientId: scope.agencyClientId },
       )
       // Generation candidates expire on their own and never count.
-      .andWhere("media.source NOT LIKE 'temporary:%'");
-    const result = await qb.getRawOne<{ usedBytes: string }>();
+      .andWhere("media.source NOT LIKE 'temporary:%'")
+      // Freed the moment it is deleted, ahead of the sweep that removes the
+      // binary. A copy still in use keeps the shared media counted.
+      .andWhere(
+        `(NOT EXISTS (${MEDIA_VERSION_REF} AND a.deleted_at IS NOT NULL)
+          OR EXISTS (${MEDIA_VERSION_REF} AND a.deleted_at IS NULL))`,
+      );
+    const [result, trashCount] = await Promise.all([
+      qb.getRawOne<{ usedBytes: string }>(),
+      this.assets.count({
+        where: {
+          ...this.scopeWhere(scope),
+          trashedAt: Not(IsNull()),
+          deletedAt: IsNull(),
+        },
+      }),
+    ]);
     return {
       usedBytes: Number(result?.usedBytes ?? 0),
       quotaBytes: CREATIVE_STORAGE_QUOTA_BYTES,
+      trashCount,
     };
   }
   async content(
@@ -680,6 +723,13 @@ export class CreativeAssetService {
         order: { versionNumber: 'DESC' },
       })
     ).map((v) => this.versionView(v));
+  }
+  /** Files in the Lixeira can be viewed and deleted, never changed. */
+  private async findWritable(scope: CreativeStudioScope, id: string) {
+    const asset = await this.find(scope, id);
+    if (asset.trashedAt)
+      throw new NotFoundException('Criativo não encontrado.');
+    return asset;
   }
   private async find(scope: CreativeStudioScope, id: string) {
     const asset = await this.assets.findOne({

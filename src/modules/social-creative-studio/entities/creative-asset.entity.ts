@@ -62,6 +62,9 @@ export class CreativeAssetEntity {
   updatedAt!: Date;
   @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
   archivedAt!: Date | null;
+  /** In the Lixeira since this moment; purged after the retention period. */
+  @Column({ name: 'trashed_at', type: 'timestamptz', nullable: true })
+  trashedAt!: Date | null;
   /**
    * Library deletion. A plain column, not `@DeleteDateColumn`: Approvals and
    * Production keep resolving the rows they already reference.

@@ -87,6 +87,7 @@ function makeAsset(
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
+    trashedAt: null,
     deletedAt: null,
     ...overrides,
   } as CreativeAssetEntity;
@@ -127,6 +128,7 @@ function makeHarness() {
       id: nextId(),
       createdAt: now(),
       updatedAt: now(),
+      trashedAt: null,
       deletedAt: null,
       ...input,
     })),
@@ -450,16 +452,50 @@ describe('Creative Studio asset service', () => {
     await expect(h.assetService.storage(clientA)).resolves.toEqual({
       usedBytes: 4 * 1024 * 1024 * 1024,
       quotaBytes: 5 * 1024 * 1024 * 1024,
+      trashCount: 0,
     });
     expect(h.dataSource.getRepository).toHaveBeenCalledWith(MediaAssetEntity);
   });
 
-  it('hides a deleted asset but keeps its row for existing references', async () => {
+  it('sends a file to the Lixeira, where it can no longer be changed', async () => {
+    const h = makeHarness();
+    const asset = makeAsset(clientA, { id: id(44), folderId: id(41) });
+    h.state.assets.push(asset);
+
+    await h.assetService.remove(clientA, asset.id);
+
+    expect(asset.trashedAt).toBeInstanceOf(Date);
+    expect(asset.deletedAt).toBeNull();
+    expect(asset.folderId).toBeNull();
+    await expect(
+      h.assetService.update(clientA, asset.id, { name: 'Novo' }),
+    ).rejects.toThrow('Criativo não encontrado.');
+    await expect(h.assetService.storage(clientA)).resolves.toMatchObject({
+      trashCount: 1,
+    });
+  });
+
+  it('empties only the Lixeira of the active scope', async () => {
+    const h = makeHarness();
+    const trashed = makeAsset(clientA, { id: id(45), trashedAt: new Date() });
+    const active = makeAsset(clientA, { id: id(46) });
+    const other = makeAsset(clientB, { id: id(47), trashedAt: new Date() });
+    h.state.assets.push(trashed, active, other);
+
+    await expect(h.assetService.emptyTrash(clientA)).resolves.toEqual({
+      deleted: 1,
+    });
+    expect(trashed.deletedAt).toBeInstanceOf(Date);
+    expect(active.deletedAt).toBeNull();
+    expect(other.deletedAt).toBeNull();
+  });
+
+  it('deletes permanently, keeping the row for existing references', async () => {
     const h = makeHarness();
     const asset = makeAsset(clientA, { id: id(40), folderId: id(41) });
     h.state.assets.push(asset);
 
-    await h.assetService.remove(clientA, asset.id);
+    await h.assetService.remove(clientA, asset.id, true);
 
     expect(h.state.assets).toHaveLength(1);
     expect(asset.folderId).toBeNull();

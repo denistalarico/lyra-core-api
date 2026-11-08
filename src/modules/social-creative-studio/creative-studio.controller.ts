@@ -168,8 +168,18 @@ export class CreativeStudioController {
   async removeAsset(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
+    @Query('permanent') permanent?: string,
   ) {
-    await this.assets.remove(creativeStudioScope(ctx), id);
+    await this.assets.remove(
+      creativeStudioScope(ctx),
+      id,
+      permanent === 'true',
+    );
+  }
+  @Post('trash/empty')
+  @RequirePermission(DELETE)
+  emptyTrash(@RequestContextData() ctx: RequestContext) {
+    return this.assets.emptyTrash(creativeStudioScope(ctx));
   }
   @ClientAreaExposed('social_creative_studio')
   @Post('assets/:id/copy')
@@ -241,9 +251,14 @@ export class CreativeStudioController {
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
     @Query('recursive') recursive?: string,
+    @Query('permanent') permanent?: string,
   ) {
     if (recursive === 'true')
-      await this.folders.removeTree(creativeStudioScope(ctx), id);
+      await this.folders.removeTree(
+        creativeStudioScope(ctx),
+        id,
+        permanent === 'true',
+      );
     else await this.folders.remove(creativeStudioScope(ctx), id);
   }
   @Post('folders/:id/move')
