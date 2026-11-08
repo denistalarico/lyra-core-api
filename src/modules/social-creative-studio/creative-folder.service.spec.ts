@@ -53,6 +53,29 @@ function harness(
 }
 
 describe('CreativeFolderService tree operations', () => {
+  it('keeps the name of a Planner folder in step with the Planner', async () => {
+    const linked = [
+      { ...folder('p', null), socialPlanId: 'plan' },
+      { ...folder('i', 'p'), contentItemId: 'item' },
+      folder('x', null),
+    ] as CreativeFolderEntity[];
+    const h = harness(linked);
+    (h.manager.find as jest.Mock)
+      .mockResolvedValueOnce([{ id: 'plan', title: 'Novembro' }])
+      .mockResolvedValueOnce([
+        { id: 'item', title: 'Lançamento', plannedDate: '2026-11-15' },
+      ]);
+    const names = (await h.service.list(scope)).map((item) => item.name);
+    expect(names).toEqual(['Novembro', '2026-11-15 · Lançamento', 'X']);
+    await expect(h.service.update(scope, 'p', 'Outro')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    await expect(h.service.update(scope, 'i', 'Outro')).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(h.folders.save).not.toHaveBeenCalled();
+  });
+
   it('refuses to move a folder inside itself or a descendant', async () => {
     const h = harness();
     await expect(h.service.move(scope, 'a', 'c')).rejects.toBeInstanceOf(

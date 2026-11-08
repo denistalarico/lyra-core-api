@@ -64,6 +64,16 @@ export type CreativeVersionCreatedHook = (
   created: { creativeAssetId: string; versionId: string },
 ) => Promise<void>;
 
+/** ISO date first, so the subfolders of a plan sort chronologically by name. */
+export function contentFolderName(item: {
+  title: string;
+  plannedDate: string | null;
+}) {
+  return (
+    item.plannedDate ? `${item.plannedDate} · ${item.title}` : item.title
+  ).slice(0, 160);
+}
+
 /** The constraint (or guard trigger) named by a PostgreSQL error, if any. */
 export function databaseConstraint(error: unknown): string | undefined {
   const candidate = error as {
@@ -127,7 +137,7 @@ export class CreativeAssetService {
     scope: CreativeStudioScope,
     contentItemId: string | undefined,
   ) {
-    if (!contentItemId) return;
+    if (!contentItemId) return null;
     // Soft-deleted items and plans are invisible to every Planner read (E6);
     // linking one here would attach a creative to content nobody can open.
     const item = await this.contentItems.findOne({
@@ -139,10 +149,10 @@ export class CreativeAssetService {
           scope.agencyClientId === null ? IsNull() : scope.agencyClientId,
         deletedAt: IsNull(),
       },
-      select: { id: true, planId: true },
+      select: { id: true, planId: true, title: true, plannedDate: true },
     });
     if (!item) throw new BadRequestException('Conteúdo não encontrado.');
-    const planExists = await this.plans.exists({
+    const plan = await this.plans.findOne({
       where: {
         id: item.planId,
         tenantId: scope.tenantId,
@@ -153,8 +163,82 @@ export class CreativeAssetService {
           scope.companyContextId === null ? IsNull() : scope.companyContextId,
         deletedAt: IsNull(),
       },
+      select: { id: true, title: true },
     });
-    if (!planExists) throw new BadRequestException('Conteúdo não encontrado.');
+    if (!plan) throw new BadRequestException('Conteúdo não encontrado.');
+    return { item, plan };
+  }
+  private async linkedFolder(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    link: { socialPlanId: string } | { contentItemId: string },
+    name: string,
+    parentId: string | null,
+  ) {
+    const where = { ...this.scopeWhere(scope), ...link };
+    const existing = await this.folders.findOne({ where });
+    if (existing) return existing;
+    try {
+      return await this.folders.save(
+        this.folders.create({
+          ...this.scopeValues(scope),
+          ...link,
+          name: name.slice(0, 160),
+          parentId,
+          createdById: actor,
+        }),
+      );
+    } catch (error) {
+      // A concurrent upload for the same item created it first.
+      const created = await this.folders.findOne({ where });
+      if (created) return created;
+      throw error;
+    }
+  }
+  /** The item's subfolder inside its plan's folder, created on first use. */
+  private async plannerFolder(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    link: NonNullable<
+      Awaited<ReturnType<CreativeAssetService['assertContentItem']>>
+    >,
+  ) {
+    const parent = await this.linkedFolder(
+      scope,
+      actor,
+      { socialPlanId: link.plan.id },
+      link.plan.title,
+      null,
+    );
+    const folder = await this.linkedFolder(
+      scope,
+      actor,
+      { contentItemId: link.item.id },
+      contentFolderName(link.item),
+      parent.id,
+    );
+    return folder.id;
+  }
+  private async plannerLink(
+    scope: CreativeStudioScope,
+    contentItemId: string | null,
+  ) {
+    if (!contentItemId) return null;
+    try {
+      const link = await this.assertContentItem(scope, contentItemId);
+      return (
+        link && {
+          planId: link.plan.id,
+          planTitle: link.plan.title,
+          contentItemId: link.item.id,
+          contentTitle: link.item.title,
+          plannedDate: link.item.plannedDate,
+        }
+      );
+    } catch (error) {
+      if (error instanceof BadRequestException) return null;
+      throw error;
+    }
   }
   /**
    * CS2B.4: a version now exists for the linked Planner item. The Planner
@@ -228,7 +312,10 @@ export class CreativeAssetService {
     const assetType = this.kind(input.file);
     this.assertDomainLimit(input.file, assetType);
     await this.assertFolder(scope, input.folderId);
-    await this.assertContentItem(scope, input.contentItemId);
+    const link = await this.assertContentItem(scope, input.contentItemId);
+    const folderId =
+      input.folderId ??
+      (link ? await this.plannerFolder(scope, actor, link) : null);
     const original = await this.mediaUpload.upload(scope, actor, {
       file: input.file,
       source: 'creative_studio',
@@ -255,7 +342,7 @@ export class CreativeAssetService {
             assetType,
             sourceType: input.sourceType ?? 'upload',
             status: 'ready',
-            folderId: input.folderId ?? null,
+            folderId,
             contentItemId: input.contentItemId ?? null,
             currentVersionId: null,
             metadata: {},
@@ -549,6 +636,7 @@ export class CreativeAssetService {
     return {
       ...this.toView(asset, current),
       versions: versions.map((v) => this.versionView(v)),
+      planner: await this.plannerLink(scope, asset.contentItemId),
     };
   }
   async update(

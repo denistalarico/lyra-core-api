@@ -389,7 +389,7 @@ function makeHarness() {
     ),
   };
   const contentItems = { findOne: jest.fn().mockResolvedValue(null) };
-  const plans = { exists: jest.fn().mockResolvedValue(false) };
+  const plans = { findOne: jest.fn().mockResolvedValue(null) };
   const plannerStatus = {
     reflectCreativeStatus: jest.fn().mockResolvedValue(true),
     reflectCreativeRevisionStarted: jest.fn().mockResolvedValue(true),
@@ -806,8 +806,13 @@ describe('Creative Studio asset service', () => {
     const h = makeHarness();
     const contentItemId = id(70);
     const planId = id(71);
-    h.contentItems.findOne.mockResolvedValue({ id: contentItemId, planId });
-    h.plans.exists.mockResolvedValue(false);
+    h.contentItems.findOne.mockResolvedValue({
+      id: contentItemId,
+      planId,
+      title: 'Post',
+      plannedDate: null,
+    });
+    h.plans.findOne.mockResolvedValue(null);
 
     await expect(
       h.assetService.upload(clientA, 'user-a', {
@@ -816,13 +821,15 @@ describe('Creative Studio asset service', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(h.plans.exists).toHaveBeenCalledWith({
+    expect(h.plans.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
       where: expect.objectContaining({
         id: planId,
         agencyClientId: clientA.agencyClientId,
         companyContextId: clientA.companyContextId,
       }),
-    });
+      }),
+    );
     expect(h.mediaUpload.upload).not.toHaveBeenCalled();
   });
 
@@ -832,8 +839,10 @@ describe('Creative Studio asset service', () => {
     h.contentItems.findOne.mockResolvedValue({
       id: contentItemId,
       planId: id(73),
+      title: 'Post',
+      plannedDate: null,
     });
-    h.plans.exists.mockResolvedValue(true);
+    h.plans.findOne.mockResolvedValue({ id: id(99), title: 'Plano' });
 
     await h.assetService.upload(clientA, 'user-a', {
       file: file(PNG),
@@ -848,8 +857,109 @@ describe('Creative Studio asset service', () => {
         }),
       }),
     );
-    expect(h.plans.exists).toHaveBeenCalledWith({
+    expect(h.plans.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
       where: expect.objectContaining({ id: id(73), deletedAt: IsNull() }),
+      }),
+    );
+  });
+
+  describe('Planner folders', () => {
+    const contentItemId = id(90);
+    const linked = () => {
+      const h = makeHarness();
+      h.contentItems.findOne.mockResolvedValue({
+        id: contentItemId,
+        planId: id(91),
+        title: 'Lançamento',
+        plannedDate: '2026-11-15',
+      });
+      h.plans.findOne.mockResolvedValue({
+        id: id(91),
+        title: 'Novembro',
+      });
+      return h;
+    };
+
+    it('files a linked upload in the subfolder of its item, inside the folder of its plan', async () => {
+      const h = linked();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        contentItemId,
+      });
+      const plan = h.state.folders.find(
+        (folder) => folder.socialPlanId === id(91),
+      );
+      const item = h.state.folders.find(
+        (folder) => folder.contentItemId === contentItemId,
+      );
+      expect(plan).toMatchObject({ name: 'Novembro', parentId: null });
+      expect(item).toMatchObject({
+        name: '2026-11-15 · Lançamento',
+        parentId: plan?.id,
+      });
+      expect(asset.folderId).toBe(item?.id);
+    });
+
+    it('reuses the folders for the next file of the same item', async () => {
+      const h = linked();
+      const upload = () =>
+        h.assetService.upload(clientA, 'user-a', {
+          file: file(PNG),
+          contentItemId,
+        });
+      await upload();
+      const second = await upload();
+      expect(h.state.folders).toHaveLength(2);
+      expect(second.folderId).toBe(
+        h.state.folders.find((folder) => folder.contentItemId === contentItemId)
+          ?.id,
+      );
+    });
+
+    it('keeps a folder chosen explicitly', async () => {
+      const h = linked();
+      const chosen = await h.folderService.create(clientA, 'user-a', {
+        name: 'Escolhida',
+      });
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        contentItemId,
+        folderId: chosen.id,
+      });
+      expect(asset.folderId).toBe(chosen.id);
+      expect(h.state.folders).toHaveLength(1);
+    });
+
+    it('names the plan and the item in the detail of a linked file', async () => {
+      const h = linked();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        contentItemId,
+      });
+      await expect(
+        h.assetService.detail(clientA, asset.id),
+      ).resolves.toMatchObject({
+        planner: {
+          planId: id(91),
+          planTitle: 'Novembro',
+          contentItemId,
+          contentTitle: 'Lançamento',
+          plannedDate: '2026-11-15',
+        },
+      });
+    });
+
+    it('reports no link once the content left the Planner', async () => {
+      const h = linked();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        contentItemId,
+      });
+      h.contentItems.findOne.mockResolvedValue(null);
+      await expect(
+        h.assetService.detail(clientA, asset.id),
+      ).resolves.toMatchObject({ planner: null, contentItemId });
     });
   });
 
@@ -860,8 +970,10 @@ describe('Creative Studio asset service', () => {
       h.contentItems.findOne.mockResolvedValue({
         id: contentItemId,
         planId: id(81),
+        title: 'Post',
+        plannedDate: null,
       });
-      h.plans.exists.mockResolvedValue(true);
+      h.plans.findOne.mockResolvedValue({ id: id(99), title: 'Plano' });
       return h;
     };
 
@@ -951,8 +1063,10 @@ describe('Creative Studio asset service', () => {
       h.contentItems.findOne.mockResolvedValue({
         id: contentItemId,
         planId: id(81),
+        title: 'Post',
+        plannedDate: null,
       });
-      h.plans.exists.mockResolvedValue(false);
+      h.plans.findOne.mockResolvedValue(null);
 
       await expect(
         h.assetService.upload(clientB, 'user-b', {

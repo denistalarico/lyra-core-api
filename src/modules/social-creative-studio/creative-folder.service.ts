@@ -12,8 +12,15 @@ import {
   CreativeFolderEntity,
 } from './entities';
 import { copyCreativeAssetRecords } from './creative-asset-copy';
-import { databaseConstraint } from './creative-asset.service';
+import {
+  contentFolderName,
+  databaseConstraint,
+} from './creative-asset.service';
 import type { CreativeStudioScope } from './creative-studio.scope';
+import {
+  SocialContentItemEntity,
+  SocialPlanEntity,
+} from '../social-planner/entities';
 
 @Injectable()
 export class CreativeFolderService {
@@ -59,8 +66,10 @@ export class CreativeFolderService {
           asset.folderId === folderId &&
           (asset.status === 'archived') === archived,
       ).length;
+    const names = await this.plannerNames(folders);
     return folders.map((folder) => ({
       ...folder,
+      name: names.get(folder.id) ?? folder.name,
       assetCount: count(folder.id, false),
       archivedCount: count(folder.id, true),
     }));
@@ -80,8 +89,46 @@ export class CreativeFolderService {
       }),
     );
   }
+  /** Read live, so renaming a plan or item needs no write here. */
+  private async plannerNames(folders: CreativeFolderEntity[]) {
+    const planIds = folders.flatMap((f) =>
+      f.socialPlanId ? [f.socialPlanId] : [],
+    );
+    const itemIds = folders.flatMap((f) =>
+      f.contentItemId ? [f.contentItemId] : [],
+    );
+    const names = new Map<string, string>();
+    if (!planIds.length && !itemIds.length) return names;
+    const manager = this.folders.manager;
+    const [plans, items] = await Promise.all([
+      planIds.length
+        ? manager.find(SocialPlanEntity, {
+            where: { id: In(planIds), deletedAt: IsNull() },
+            select: { id: true, title: true },
+          })
+        : ([] as SocialPlanEntity[]),
+      itemIds.length
+        ? manager.find(SocialContentItemEntity, {
+            where: { id: In(itemIds), deletedAt: IsNull() },
+            select: { id: true, title: true, plannedDate: true },
+          })
+        : ([] as SocialContentItemEntity[]),
+    ]);
+    for (const folder of folders) {
+      const plan = plans.find((row) => row.id === folder.socialPlanId);
+      const item = items.find((row) => row.id === folder.contentItemId);
+      if (plan) names.set(folder.id, plan.title.slice(0, 160));
+      else if (item) names.set(folder.id, contentFolderName(item));
+    }
+    return names;
+  }
   async update(scope: CreativeStudioScope, id: string, name: string) {
     const folder = await this.find(scope, id);
+    if (folder.socialPlanId || folder.contentItemId)
+      throw new ConflictException({
+        code: 'creative_folder_follows_planner',
+        message: 'O nome desta pasta acompanha o Planner.',
+      });
     folder.name = name.trim();
     return this.folders.save(folder);
   }

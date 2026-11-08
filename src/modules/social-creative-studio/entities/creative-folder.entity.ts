@@ -27,6 +27,12 @@ export class CreativeFolderEntity {
   @Column({ name: 'parent_id', type: 'uuid', nullable: true }) parentId!:
     | string
     | null;
+  /** Set on a plan's folder; its name follows the plan. */
+  @Column({ name: 'social_plan_id', type: 'uuid', nullable: true })
+  socialPlanId!: string | null;
+  /** Set on a content item's subfolder; its name follows the item. */
+  @Column({ name: 'content_item_id', type: 'uuid', nullable: true })
+  contentItemId!: string | null;
   @Column({ name: 'created_by_id', type: 'uuid', nullable: true })
   createdById!: string | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
