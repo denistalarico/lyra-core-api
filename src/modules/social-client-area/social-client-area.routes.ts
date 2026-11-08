@@ -334,10 +334,12 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
 
   // ------------------------------------------------------ Creative Studio
   [`GET ${C}/brand-context`]: studio(),
+  [`GET ${C}/storage`]: studio(),
   [`GET ${C}/assets`]: studio({
     query: { folderId: 'folder', contentItemId: 'content' },
   }),
   [`POST ${C}/assets`]: studio(),
+  [`POST ${C}/assets/:id/copy`]: studio({ subject: asset }),
   [`GET ${C}/assets/:id`]: studio({ subject: asset }),
   [`PATCH ${C}/assets/:id`]: studio({
     subject: asset,

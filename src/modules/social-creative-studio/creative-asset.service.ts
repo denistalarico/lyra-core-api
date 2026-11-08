@@ -8,6 +8,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, type EntityManager, IsNull, Repository } from 'typeorm';
 import {
   detectMediaAssetMimeType,
+  MediaAssetEntity,
   MediaAssetResolverService,
   MediaAssetUploadService,
 } from '../../common/media-assets';
@@ -22,12 +23,14 @@ import {
   SocialContentItemEntity,
   SocialPlanEntity,
 } from '../social-planner/entities';
+import { copyCreativeAssetRecords } from './creative-asset-copy';
 import { SocialContentProductionStatusService } from '../social-planner/services/social-content-production-status.service';
 
 /** Studio-level image ceiling; generated outputs are held to it too (CS3.1). */
 export const CREATIVE_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const VIDEO_MAX = 300 * 1024 * 1024;
 const PAGE_SIZE = 50;
+const CREATIVE_STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024;
 type UploadFile = {
   buffer: Buffer;
   originalname: string;
@@ -80,6 +83,9 @@ export class CreativeAssetService {
     private readonly thumbnails: CreativeThumbnailService,
     private readonly plannerStatus: SocialContentProductionStatusService,
   ) {}
+  private get mediaAssets() {
+    return this.dataSource.getRepository(MediaAssetEntity);
+  }
   private scopeWhere(scope: CreativeStudioScope) {
     return {
       tenantId: scope.tenantId,
@@ -430,10 +436,17 @@ export class CreativeAssetService {
         'version',
         'version.id = asset.currentVersionId',
       )
+      .leftJoinAndMapOne(
+        'asset.currentMedia',
+        MediaAssetEntity,
+        'media',
+        'media.id = version.mediaAssetId',
+      )
       .where(
         'asset.tenantId = :tenantId AND asset.workspaceId = :workspaceId',
         scope,
       )
+      .andWhere('asset.deletedAt IS NULL')
       .andWhere(
         scope.agencyClientId === null
           ? 'asset.agencyClientId IS NULL'
@@ -499,8 +512,14 @@ export class CreativeAssetService {
           (
             asset as CreativeAssetEntity & {
               currentVersion?: CreativeAssetVersionEntity;
+              currentMedia?: MediaAssetEntity;
             }
           ).currentVersion,
+          (
+            asset as CreativeAssetEntity & {
+              currentMedia?: MediaAssetEntity;
+            }
+          ).currentMedia,
         ),
       ),
       nextCursor: next,
@@ -512,11 +531,9 @@ export class CreativeAssetService {
       where: { creativeAssetId: id },
       order: { versionNumber: 'DESC' },
     });
+    const current = versions.find((v) => v.id === asset.currentVersionId);
     return {
-      ...this.toView(
-        asset,
-        versions.find((v) => v.id === asset.currentVersionId),
-      ),
+      ...this.toView(asset, current),
       versions: versions.map((v) => this.versionView(v)),
     };
   }
@@ -556,6 +573,72 @@ export class CreativeAssetService {
         });
       throw error;
     }
+  }
+  /**
+   * Hides the asset from the library for good. Content linked to the Planner
+   * stays recoverable through archive, and the private media is kept because
+   * copies, approvals and published posts may still reference it.
+   */
+  async remove(scope: CreativeStudioScope, id: string) {
+    const asset = await this.find(scope, id);
+    if (asset.contentItemId)
+      throw new ConflictException({
+        code: 'creative_linked_to_content',
+        message:
+          'Este criativo está vinculado a um conteúdo do Planner. Arquive-o em vez de excluir.',
+      });
+    const now = new Date();
+    asset.status = 'archived';
+    asset.archivedAt = asset.archivedAt ?? now;
+    asset.deletedAt = now;
+    asset.folderId = null;
+    await this.assets.save(asset);
+  }
+  async copy(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    id: string,
+    folderId?: string,
+  ) {
+    const source = await this.find(scope, id);
+    await this.assertFolder(scope, folderId);
+    const sourceVersion = await this.versions.findOne({
+      where: { id: source.currentVersionId ?? '', creativeAssetId: source.id },
+    });
+    if (!sourceVersion)
+      throw new NotFoundException('Versão atual não encontrada.');
+    const created = await this.dataSource.transaction((manager) =>
+      copyCreativeAssetRecords(manager, source, sourceVersion, actor, {
+        folderId: folderId ?? null,
+        name: `${source.name} - cópia`.slice(0, 255),
+      }),
+    );
+    return this.toView(created.asset, created.version);
+  }
+  /** The quota belongs to the client, across all of its companies. */
+  async storage(scope: CreativeStudioScope) {
+    const qb = this.mediaAssets
+      .createQueryBuilder('media')
+      .select('COALESCE(SUM(media.byteSize), 0)', 'usedBytes')
+      .where(
+        'media.tenantId = :tenantId AND media.workspaceId = :workspaceId',
+        scope,
+      )
+      .andWhere(
+        scope.agencyClientId === null
+          ? 'media.agencyClientId IS NULL'
+          : 'media.agencyClientId = :agencyClientId',
+        scope.agencyClientId === null
+          ? {}
+          : { agencyClientId: scope.agencyClientId },
+      )
+      // Generation candidates expire on their own and never count.
+      .andWhere("media.source NOT LIKE 'temporary:%'");
+    const result = await qb.getRawOne<{ usedBytes: string }>();
+    return {
+      usedBytes: Number(result?.usedBytes ?? 0),
+      quotaBytes: CREATIVE_STORAGE_QUOTA_BYTES,
+    };
   }
   async content(
     scope: CreativeStudioScope,
@@ -600,7 +683,7 @@ export class CreativeAssetService {
   }
   private async find(scope: CreativeStudioScope, id: string) {
     const asset = await this.assets.findOne({
-      where: { ...this.scopeWhere(scope), id },
+      where: { ...this.scopeWhere(scope), id, deletedAt: IsNull() },
     });
     if (!asset) throw new NotFoundException('Criativo não encontrado.');
     return asset;
@@ -621,6 +704,7 @@ export class CreativeAssetService {
   private toView(
     asset: CreativeAssetEntity,
     version?: CreativeAssetVersionEntity,
+    media?: MediaAssetEntity,
   ) {
     return {
       id: asset.id,
@@ -632,6 +716,7 @@ export class CreativeAssetService {
       contentItemId: asset.contentItemId,
       currentVersionId: asset.currentVersionId,
       version: version ? this.versionView(version) : null,
+      byteSize: media ? Number(media.byteSize) : 0,
       // CA10 — the author, so the Client Area offers Operator edits only on own assets (§3.3).
       createdById: asset.createdById,
       createdAt: asset.createdAt.toISOString(),

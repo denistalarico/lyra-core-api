@@ -34,6 +34,8 @@ import { CreativeFolderService } from './creative-folder.service';
 import { CreativeVersionApprovalService } from './creative-version-approval.service';
 import {
   CreateCreativeAssetDto,
+  CopyCreativeAssetDto,
+  CreativeFolderDestinationDto,
   CreateCreativeFolderDto,
   CreateCreativeVersionDto,
   ListCreativeAssetsQueryDto,
@@ -68,6 +70,12 @@ export class CreativeStudioController {
   @RequirePermission(VIEW)
   brandContextForStudio(@RequestContextData() ctx: RequestContext) {
     return this.brandContext.load(creativeStudioScope(ctx));
+  }
+  @ClientAreaExposed('social_creative_studio')
+  @Get('storage')
+  @RequirePermission(VIEW)
+  storage(@RequestContextData() ctx: RequestContext) {
+    return this.assets.storage(creativeStudioScope(ctx));
   }
   @ClientAreaExposed('social_creative_studio')
   @Get('assets')
@@ -154,6 +162,30 @@ export class CreativeStudioController {
   ) {
     return this.assets.archive(creativeStudioScope(ctx), id);
   }
+  @Delete('assets/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(DELETE)
+  async removeAsset(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.assets.remove(creativeStudioScope(ctx), id);
+  }
+  @ClientAreaExposed('social_creative_studio')
+  @Post('assets/:id/copy')
+  @RequirePermission(CREATE)
+  copy(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CopyCreativeAssetDto,
+  ) {
+    return this.assets.copy(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      id,
+      dto.folderId,
+    );
+  }
   @ClientAreaExposed('social_creative_studio')
   @Get('assets/:id')
   @RequirePermission(VIEW)
@@ -208,8 +240,42 @@ export class CreativeStudioController {
   async deleteFolder(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
+    @Query('recursive') recursive?: string,
   ) {
-    await this.folders.remove(creativeStudioScope(ctx), id);
+    if (recursive === 'true')
+      await this.folders.removeTree(creativeStudioScope(ctx), id);
+    else await this.folders.remove(creativeStudioScope(ctx), id);
+  }
+  @Post('folders/:id/move')
+  @RequirePermission(UPDATE)
+  moveFolder(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreativeFolderDestinationDto,
+  ) {
+    return this.folders.move(creativeStudioScope(ctx), id, dto.parentId);
+  }
+  @Post('folders/:id/copy')
+  @RequirePermission(CREATE)
+  copyFolder(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreativeFolderDestinationDto,
+  ) {
+    return this.folders.copy(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      id,
+      dto.parentId,
+    );
+  }
+  @Post('folders/:id/archive')
+  @RequirePermission(DELETE)
+  archiveFolder(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.folders.archive(creativeStudioScope(ctx), id);
   }
   private async stream(
     ctx: RequestContext,

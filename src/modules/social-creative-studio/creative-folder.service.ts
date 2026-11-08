@@ -1,11 +1,18 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
-import { CreativeAssetEntity, CreativeFolderEntity } from './entities';
+import { In, IsNull, Not, Repository } from 'typeorm';
+import {
+  CreativeAssetEntity,
+  CreativeAssetVersionEntity,
+  CreativeFolderEntity,
+} from './entities';
+import { copyCreativeAssetRecords } from './creative-asset-copy';
+import { databaseConstraint } from './creative-asset.service';
 import type { CreativeStudioScope } from './creative-studio.scope';
 
 @Injectable()
@@ -35,10 +42,28 @@ export class CreativeFolderService {
     };
   }
   async list(scope: CreativeStudioScope) {
-    return this.folders.find({
-      where: this.where(scope),
-      order: { name: 'ASC' },
-    });
+    const [folders, assets] = await Promise.all([
+      this.folders.find({ where: this.where(scope), order: { name: 'ASC' } }),
+      this.assets.find({
+        where: {
+          ...this.where(scope),
+          folderId: Not(IsNull()),
+          deletedAt: IsNull(),
+        },
+        select: { folderId: true, status: true },
+      }),
+    ]);
+    const count = (folderId: string, archived: boolean) =>
+      assets.filter(
+        (asset) =>
+          asset.folderId === folderId &&
+          (asset.status === 'archived') === archived,
+      ).length;
+    return folders.map((folder) => ({
+      ...folder,
+      assetCount: count(folder.id, false),
+      archivedCount: count(folder.id, true),
+    }));
   }
   async create(
     scope: CreativeStudioScope,
@@ -71,6 +96,151 @@ export class CreativeFolderService {
         'A pasta não pode ser removida enquanto contiver pastas ou criativos.',
       );
     await this.folders.remove(folder);
+  }
+  /** The folder followed by its descendants, parents always before children. */
+  private async subtree(scope: CreativeStudioScope, id: string) {
+    const root = await this.find(scope, id);
+    const all = await this.folders.find({ where: this.where(scope) });
+    const tree = [root];
+    for (const folder of tree)
+      tree.push(...all.filter((child) => child.parentId === folder.id));
+    return tree;
+  }
+  private async assertDestination(
+    scope: CreativeStudioScope,
+    tree: CreativeFolderEntity[],
+    parentId: string | null | undefined,
+  ) {
+    if (!parentId) return;
+    await this.find(scope, parentId);
+    if (tree.some((folder) => folder.id === parentId))
+      throw new BadRequestException(
+        'Escolha uma pasta fora da pasta selecionada.',
+      );
+  }
+  async move(
+    scope: CreativeStudioScope,
+    id: string,
+    parentId: string | null | undefined,
+  ) {
+    const tree = await this.subtree(scope, id);
+    await this.assertDestination(scope, tree, parentId);
+    tree[0].parentId = parentId ?? null;
+    return this.folders.save(tree[0]);
+  }
+  /** Copies the active files of the tree; archived ones stay behind. */
+  async copy(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    id: string,
+    parentId: string | null | undefined,
+  ) {
+    const tree = await this.subtree(scope, id);
+    await this.assertDestination(scope, tree, parentId);
+    const sources = await this.assets.find({
+      where: {
+        ...this.where(scope),
+        folderId: In(tree.map((folder) => folder.id)),
+        status: 'ready',
+        deletedAt: IsNull(),
+      },
+    });
+    const versionIds = sources.flatMap((asset) =>
+      asset.currentVersionId ? [asset.currentVersionId] : [],
+    );
+    return this.folders.manager.transaction(async (manager) => {
+      const versions = versionIds.length
+        ? await manager.find(CreativeAssetVersionEntity, {
+            where: { id: In(versionIds) },
+          })
+        : [];
+      const copies = new Map<string, CreativeFolderEntity>();
+      for (const folder of tree) {
+        const isRoot = folder.id === id;
+        copies.set(
+          folder.id,
+          await manager.save(
+            manager.create(CreativeFolderEntity, {
+              ...this.values(scope),
+              name: isRoot
+                ? `${folder.name} - cópia`.slice(0, 160)
+                : folder.name,
+              parentId: isRoot
+                ? (parentId ?? null)
+                : copies.get(folder.parentId as string)!.id,
+              createdById: actor,
+            }),
+          ),
+        );
+      }
+      for (const source of sources) {
+        const version = versions.find(
+          (item) => item.id === source.currentVersionId,
+        );
+        if (!version) continue;
+        await copyCreativeAssetRecords(manager, source, version, actor, {
+          folderId: copies.get(source.folderId as string)!.id,
+          name: source.name,
+        });
+      }
+      return copies.get(id)!;
+    });
+  }
+  /** Archives the active files of the tree; the folders themselves remain. */
+  async archive(scope: CreativeStudioScope, id: string) {
+    const tree = await this.subtree(scope, id);
+    try {
+      const result = await this.assets.update(
+        {
+          ...this.where(scope),
+          folderId: In(tree.map((folder) => folder.id)),
+          status: 'ready',
+          deletedAt: IsNull(),
+        },
+        { status: 'archived', archivedAt: new Date() },
+      );
+      return { archived: result.affected ?? 0 };
+    } catch (error) {
+      if (
+        databaseConstraint(error) ===
+        'TR_social_creative_assets_selection_guard'
+      )
+        throw new ConflictException({
+          code: 'creative_selected_for_content',
+          message:
+            'Um criativo desta pasta é a versão selecionada de um conteúdo. Troque ou remova a seleção antes de arquivar.',
+        });
+      throw error;
+    }
+  }
+  /** Deletes the tree and its files, under the same rule as a single file. */
+  async removeTree(scope: CreativeStudioScope, id: string) {
+    const tree = await this.subtree(scope, id);
+    const ids = tree.map((folder) => folder.id);
+    const linked = await this.assets.count({
+      where: {
+        ...this.where(scope),
+        folderId: In(ids),
+        contentItemId: Not(IsNull()),
+        deletedAt: IsNull(),
+      },
+    });
+    if (linked)
+      throw new ConflictException({
+        code: 'creative_linked_to_content',
+        message:
+          'A pasta contém criativos vinculados ao Planner. Mova ou arquive esses arquivos antes de excluir.',
+      });
+    await this.folders.manager.transaction(async (manager) => {
+      const now = new Date();
+      await manager.update(
+        CreativeAssetEntity,
+        { ...this.where(scope), folderId: In(ids), deletedAt: IsNull() },
+        { status: 'archived', archivedAt: now, deletedAt: now, folderId: null },
+      );
+      // Children first: the parent reference is restricted.
+      for (const folder of [...tree].reverse()) await manager.remove(folder);
+    });
   }
   async find(scope: CreativeStudioScope, id: string) {
     const folder = await this.folders.findOne({

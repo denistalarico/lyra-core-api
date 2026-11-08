@@ -38,6 +38,12 @@ export class UpdateCreativeAssetDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;
   @IsOptional() @IsUUID() folderId?: string | null;
 }
+export class CopyCreativeAssetDto {
+  @IsOptional() @IsUUID() folderId?: string;
+}
+export class CreativeFolderDestinationDto {
+  @IsOptional() @IsUUID() parentId?: string | null;
+}
 export class CreateCreativeFolderDto {
   @IsString() @MaxLength(160) name!: string;
   @IsOptional() @IsUUID() parentId?: string;

@@ -15,6 +15,7 @@ import {
 import { CreativeAssetService } from './creative-asset.service';
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeThumbnailService } from './creative-thumbnail.service';
+import { MediaAssetEntity } from '../../common/media-assets';
 
 const agency: CreativeStudioScope = {
   tenantId: '10000000-0000-4000-8000-000000000001',
@@ -57,6 +58,7 @@ const id = (n: number) =>
 function rowMatches(row: Row, where: Row = {}) {
   return Object.entries(where).every(([key, expected]) => {
     if (expected instanceof FindOperator) {
+      if (expected.type === 'not') return row[key] !== null;
       return expected.type === 'isNull'
         ? row[key] === null
         : row[key] === expected.value;
@@ -85,6 +87,7 @@ function makeAsset(
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
+    deletedAt: null,
     ...overrides,
   } as CreativeAssetEntity;
 }
@@ -124,6 +127,7 @@ function makeHarness() {
       id: nextId(),
       createdAt: now(),
       updatedAt: now(),
+      deletedAt: null,
       ...input,
     })),
     save: jest.fn(async (input: CreativeAssetEntity) => {
@@ -133,6 +137,11 @@ function makeHarness() {
       else state.assets[existing] = input;
       return input;
     }),
+    find: jest.fn(async ({ where }: { where: Row }) =>
+      state.assets.filter((asset) =>
+        rowMatches(asset as unknown as Row, where),
+      ),
+    ),
     findOne: jest.fn(
       async ({ where }: { where: Row }) =>
         state.assets.find((asset) =>
@@ -344,7 +353,18 @@ function makeHarness() {
   const thumbnails = {
     create: jest.fn(async () => ({ id: `thumbnail-${nextId()}` })),
   };
+  const mediaQuery: Row = {};
+  mediaQuery.select = jest.fn(() => mediaQuery);
+  mediaQuery.where = jest.fn(() => mediaQuery);
+  mediaQuery.andWhere = jest.fn(() => mediaQuery);
+  mediaQuery.getRawOne = jest.fn(async () => ({ usedBytes: '4294967296' }));
+  const mediaAssets = {
+    createQueryBuilder: jest.fn(() => mediaQuery),
+  };
   const dataSource = {
+    getRepository: jest.fn((entity: unknown) =>
+      entity === MediaAssetEntity ? mediaAssets : undefined,
+    ),
     transaction: jest.fn(
       async (
         callback: (manager: {
@@ -382,6 +402,7 @@ function makeHarness() {
     mediaResolver,
     thumbnails,
     dataSource,
+    mediaAssets,
     contentItems,
     plans,
     plannerStatus,
@@ -422,6 +443,69 @@ describe('Creative Studio asset service', () => {
         { index: 5, param: getDataSourceToken('agency') },
       ]),
     );
+  });
+
+  it('reports scoped storage usage against the temporary 5 GB quota', async () => {
+    const h = makeHarness();
+    await expect(h.assetService.storage(clientA)).resolves.toEqual({
+      usedBytes: 4 * 1024 * 1024 * 1024,
+      quotaBytes: 5 * 1024 * 1024 * 1024,
+    });
+    expect(h.dataSource.getRepository).toHaveBeenCalledWith(MediaAssetEntity);
+  });
+
+  it('hides a deleted asset but keeps its row for existing references', async () => {
+    const h = makeHarness();
+    const asset = makeAsset(clientA, { id: id(40), folderId: id(41) });
+    h.state.assets.push(asset);
+
+    await h.assetService.remove(clientA, asset.id);
+
+    expect(h.state.assets).toHaveLength(1);
+    expect(asset.folderId).toBeNull();
+    expect(asset.status).toBe('archived');
+    await expect(h.assetService.detail(clientA, asset.id)).rejects.toThrow(
+      'Criativo não encontrado.',
+    );
+  });
+
+  it('refuses to delete an asset linked to the Planner', async () => {
+    const h = makeHarness();
+    const asset = makeAsset(clientA, { id: id(42), contentItemId: id(43) });
+    h.state.assets.push(asset);
+
+    await expect(h.assetService.remove(clientA, asset.id)).rejects.toThrow(
+      'vinculado a um conteúdo do Planner',
+    );
+    expect(asset.deletedAt).toBeNull();
+  });
+
+  it('copies an asset without duplicating its private media and clears Planner linkage', async () => {
+    const h = makeHarness();
+    const source = makeAsset(clientA, {
+      id: id(30),
+      name: 'Campanha',
+      contentItemId: id(31),
+      currentVersionId: id(32),
+    });
+    const sourceVersion = makeVersion(source.id, 1, {
+      id: id(32),
+      mediaAssetId: 'shared-media',
+      thumbnailMediaAssetId: 'shared-thumbnail',
+    });
+    h.state.assets.push(source);
+    h.state.versions.push(sourceVersion);
+
+    const copied = await h.assetService.copy(clientA, 'user-b', source.id);
+
+    expect(copied.id).not.toBe(source.id);
+    expect(copied.name).toBe('Campanha - cópia');
+    expect(copied.contentItemId).toBeNull();
+    const copiedVersion = h.state.versions.find(
+      (version) => version.creativeAssetId === copied.id,
+    );
+    expect(copiedVersion?.mediaAssetId).toBe('shared-media');
+    expect(copiedVersion?.thumbnailMediaAssetId).toBe('shared-thumbnail');
   });
 
   it.each([
