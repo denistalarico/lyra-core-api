@@ -145,6 +145,8 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
   private async onTransition(
     request: SocialApprovalRequestEntity,
   ): Promise<void> {
+    if (request.subjectType === 'planner_content_revision')
+      return this.onCopyTransition(request);
     if (
       request.subjectType !== 'approval_snapshot' ||
       request.displayType !== 'media_set' ||
@@ -170,6 +172,28 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
     await this.plannerStatus.reflectCreativeProduction(request, {
       contentItemId: piece.sourceId,
       phase,
+      actorUserId: null,
+    });
+  }
+
+  /**
+   * D-22: an approved copy opens the creative segment of the item. Re-reads
+   * the Planner, so approving a revision that is no longer the current text
+   * moves nothing.
+   */
+  private async onCopyTransition(
+    request: SocialApprovalRequestEntity,
+  ): Promise<void> {
+    if (request.status !== 'approved') return;
+    const item = await this.dataSource.manager
+      .getRepository(SocialContentItemEntity)
+      .findOne({
+        where: { id: request.subjectId },
+        select: { id: true, currentRevisionId: true },
+      });
+    if (item?.currentRevisionId !== request.subjectRevisionId) return;
+    await this.plannerStatus.reflectCopyHandoff(request, {
+      contentItemId: request.subjectId,
       actorUserId: null,
     });
   }

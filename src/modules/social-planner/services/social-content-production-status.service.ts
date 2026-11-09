@@ -121,9 +121,10 @@ const PRODUCTION_REFLECTION: Record<
 };
 
 /**
- * D-22 — "Tudo junto" sends the copy with the creative, so CS2B.4's prerequisite
- * for entering the creative segment is met at the send. The later states are
- * absent: this only ever walks an item forward to `copy_ready`.
+ * D-22 — CS2B.4's prerequisite for entering the creative segment is met when
+ * "Tudo junto" sends the copy with the creative, and in a separate send when
+ * the copy is approved. The later states are absent: this only ever walks an
+ * item forward to `copy_ready`.
  */
 const COPY_HANDOFF_FROM: readonly SocialContentPlanningStatus[] = [
   'idea',

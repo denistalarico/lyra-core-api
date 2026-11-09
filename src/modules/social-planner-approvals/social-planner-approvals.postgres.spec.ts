@@ -26,6 +26,7 @@ import {
   type ApprovalTableSnapshotPayload,
 } from '../social-approvals/entities';
 import { SocialApprovalAuthorityService } from '../social-approvals/social-approval-authority.service';
+import { SocialApprovalTransitionRegistry } from '../social-approvals/approval-transition.port';
 import { SocialApprovalPieceActionsService } from '../social-approvals/social-approval-piece-actions.service';
 import { SocialApprovalPieceSyncService } from '../social-approvals/social-approval-piece-sync.service';
 import { SocialApprovalPiecesService } from '../social-approvals/social-approval-pieces.service';
@@ -181,6 +182,7 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
     const authority = new SocialApprovalAuthorityService();
     settings = new SocialApprovalSettingsService(db, authority);
     pieces = new SocialApprovalPiecesService(db);
+    const transitions = new SocialApprovalTransitionRegistry();
     approvals = new SocialApprovalsService(
       db.getRepository(SocialApprovalRequestEntity),
       db.getRepository(SocialApprovalCommentEntity),
@@ -190,6 +192,8 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
       pieces,
       authority,
       settings,
+      undefined,
+      transitions,
     );
     sync = new SocialApprovalPieceSyncService(db, pieces);
     actions = new SocialApprovalPieceActionsService(
@@ -247,9 +251,10 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
       ),
       { sendSelectedForApproval: studioSend } as never,
       readiness as never,
-      { register: jest.fn() } as never,
+      transitions,
       { assertCan: jest.fn() } as never,
     );
+    service.onModuleInit();
     textEdit = new ClientApprovalTextEditService(
       db,
       approvals,
@@ -412,6 +417,9 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
         order: { createdAt: 'ASC' },
       })
     ).map((event) => event.type);
+  const planningStatus = async (id: string) =>
+    (await db.getRepository(SocialContentItemEntity).findOneByOrFail({ id }))
+      .planningStatus;
   const code = (expected: string) =>
     expect.objectContaining({
       response: expect.objectContaining({ code: expected }),
@@ -599,6 +607,7 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
 
       await internalApprove(sent.copy!.approvalId!);
       await clientApprove(sent.copy!.approvalId!);
+      expect(await planningStatus(itemId)).toBe('copy_ready');
       const piece = await pieceOf('content_item', itemId);
       const steps = await stepsOf(piece.id);
       const creativeStep = steps.find((step) => step.kind === 'creative')!;
@@ -608,9 +617,19 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
 
       const creative = await service.sendContent(ctx(), itemId, 'creative');
       expect(creative.creative?.status).toBe('awaiting_internal_review');
+      expect(await planningStatus(itemId)).toBe('creative_ready');
       const row = await request(creative.creative!.approvalId!);
       expect(row.subjectType).toBe('approval_snapshot');
       expect(row.displayType).toBe('media_set');
+    });
+
+    it('approving a copy that is no longer the current text moves nothing (D-22)', async () => {
+      const { itemId, approvalId } = await copyAwaitingClient();
+      await planner.createRevision(scopeA, itemId, ownerUser, {
+        copy: 'texto mais novo',
+      });
+      await clientApprove(approvalId);
+      expect(await planningStatus(itemId)).toBe('planned');
     });
 
     it('together: refuses what is not ready before writing anything', async () => {
