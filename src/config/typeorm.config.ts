@@ -35,9 +35,18 @@ import {
 import { AnalyticsOverviewHeaderEntity } from '../modules/analytics-overview/analytics-overview-header.entity';
 import {
   SocialApprovalCommentEntity,
+  SocialApprovalEventEntity,
+  SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
+  SocialApprovalSettingsEntity,
+  SocialApprovalSnapshotEntity,
   SocialApprovalStageDecisionEntity,
+  SocialApprovalStepEntity,
 } from '../modules/social-approvals/entities';
+import {
+  SocialContentWorkLinkEntity,
+  SocialPlanWorkLinkEntity,
+} from '../modules/social-project-work/entities';
 
 import { UserPreferencesEntity } from '../modules/settings/entities/user-preferences.entity';
 import { WorkspaceSettingsAiEntity } from '../modules/settings/entities/workspace-settings-ai.entity';
@@ -490,6 +499,13 @@ export const agencyEntities = [
   SocialApprovalRequestEntity,
   SocialApprovalCommentEntity,
   SocialApprovalStageDecisionEntity,
+  SocialApprovalPieceEntity,
+  SocialApprovalStepEntity,
+  SocialApprovalSnapshotEntity,
+  SocialApprovalEventEntity,
+  SocialApprovalSettingsEntity,
+  SocialPlanWorkLinkEntity,
+  SocialContentWorkLinkEntity,
   BrandKitEntity,
   BrandKitAssetEntity,
   SocialAdAccountConnectionEntity,

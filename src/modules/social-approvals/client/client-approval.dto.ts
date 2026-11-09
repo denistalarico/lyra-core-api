@@ -3,6 +3,7 @@ import {
   IsArray,
   IsBoolean,
   IsOptional,
+  IsUUID,
   IsString,
   MaxLength,
   MinLength,
@@ -39,4 +40,10 @@ export class ClientApprovalEditTextDto {
   @IsOptional() @IsString() @MaxLength(5000) firstComment?: string | null;
   /** "Salvar e aprovar": the decision commits with the edit, or neither does. */
   @IsOptional() @IsBoolean() approve?: boolean;
+}
+
+/** AR4 / D-06: the read-only section of a task or subtask. */
+export class ClientApprovalWorkItemsQueryDto {
+  @IsUUID() taskId!: string;
+  @IsOptional() @IsUUID() subtaskId?: string;
 }

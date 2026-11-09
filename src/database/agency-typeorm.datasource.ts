@@ -293,6 +293,7 @@ import { AddSocialCreativeFolderPlannerLinks1802700000000 } from './migrations/1
 import { AddSocialCreativeRestoreAndRetention1802800000000 } from './migrations/1802800000000-add-social-creative-restore-and-retention';
 import { CreateSocialApprovalPieces1802900000000 } from './migrations/1802900000000-create-social-approval-pieces';
 import { BackfillSocialApprovalPieces1802900100000 } from './migrations/1802900100000-backfill-social-approval-pieces';
+import { CreateSocialWorkLinks1803100000000 } from './migrations/1803100000000-create-social-work-links';
 import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
 import { ScopeSocialOrganicAssetsByCompany1794700000000 } from './migrations/1794700000000-scope-social-organic-assets-by-company';
 import { ScopeSocialAdConnectionsByCompany1794710000000 } from './migrations/1794710000000-scope-social-ad-connections-by-company';
@@ -612,5 +613,6 @@ export const AgencyDataSource = new DataSource({
     AddSocialCreativeRestoreAndRetention1802800000000,
     CreateSocialApprovalPieces1802900000000,
     BackfillSocialApprovalPieces1802900100000,
+    CreateSocialWorkLinks1803100000000,
   ],
 });

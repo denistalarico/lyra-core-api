@@ -32,6 +32,7 @@ import {
   ClientApprovalCommentDto,
   ClientApprovalEditTextDto,
   ClientApprovalRequestChangesDto,
+  ClientApprovalWorkItemsQueryDto,
 } from './client-approval.dto';
 import { ClientApprovalTextEditService } from './client-approval-text-edit.service';
 import { ClientApprovalsService } from './client-approvals.service';
@@ -108,6 +109,16 @@ export class ClientAreaApprovalsController {
     @Query() query: ClientApprovalBoardQueryDto,
   ) {
     return this.board.board(toCompanyAwareScope(context), query);
+  }
+
+  /** AR4 / D-06: read-only, same card as the board. */
+  @Get('work-items')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  workItems(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Query() query: ClientApprovalWorkItemsQueryDto,
+  ) {
+    return this.board.workItems(toCompanyAwareScope(context), query);
   }
 
   @Get('pieces/:pieceId')

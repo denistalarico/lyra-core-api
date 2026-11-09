@@ -312,6 +312,12 @@ export class SocialApprovalPiecesService {
       title: string;
       stepKind: SocialApprovalStepKind;
       origin: SocialApprovalPieceOrigin;
+      /** AR4: the subtask that sent it (R-18). */
+      work?: {
+        projectId: string | null;
+        taskId: string;
+        subtaskId: string;
+      };
     },
   ) {
     const pieces = manager.getRepository(SocialApprovalPieceEntity);
@@ -338,6 +344,9 @@ export class SocialApprovalPiecesService {
         kind: input.stepKind,
         position: 0,
         title: input.title,
+        workProjectId: input.work?.projectId ?? null,
+        workTaskId: input.work?.taskId ?? null,
+        workSubtaskId: input.work?.subtaskId ?? null,
       }),
     );
     return { piece, step };

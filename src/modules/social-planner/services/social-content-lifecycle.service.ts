@@ -27,6 +27,7 @@ import {
 } from './content-publication-guard.port';
 import { toCsvDocument, type CsvValue } from './social-content-csv';
 import { cloneContentReferences } from './social-content-reference.service';
+import { SocialPlanContentChangeRegistry } from './social-plan-content-change.port';
 import type { SocialPlannerScope } from './social-planner.service';
 
 /**
@@ -118,7 +119,24 @@ export class SocialContentLifecycleService {
      */
     @Optional()
     private readonly publicationGuard?: SocialContentPublicationGuard,
+
+    /** D-25: removing or restoring an item moves its generated task. */
+    @Optional()
+    private readonly contentChanges?: SocialPlanContentChangeRegistry,
   ) {}
+
+  private changed(
+    scope: SocialPlannerScope,
+    contentItemIds: readonly string[],
+  ): Promise<void> {
+    return (
+      this.contentChanges?.notify({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        contentItemIds,
+      }) ?? Promise.resolve()
+    );
+  }
 
   // ------------------------------------------------------------- duplicate
 
@@ -230,6 +248,8 @@ export class SocialContentLifecycleService {
       },
       order: { channel: 'ASC', placement: 'ASC' },
     });
+
+    await this.changed(scope, [created.id]);
 
     return toSocialContentItemView(created, destinations);
   }
@@ -455,6 +475,7 @@ export class SocialContentLifecycleService {
       ...this.contentScopeWhere(scope),
       deletedAt: IsNull(),
     });
+    await this.changed(scope, [contentId]);
   }
 
   /**
@@ -591,6 +612,7 @@ export class SocialContentLifecycleService {
         },
       );
     });
+    await this.changed(scope, contentIds);
   }
 
   // -------------------------------------------------------- single actions
@@ -628,6 +650,7 @@ export class SocialContentLifecycleService {
         updatedById: actorUserId,
       },
     );
+    await this.changed(scope, [item.id]);
 
     return { contentId, status: 'ok' };
   }
@@ -660,6 +683,7 @@ export class SocialContentLifecycleService {
         updatedById: actorUserId,
       },
     );
+    await this.changed(scope, [item.id]);
 
     return { contentId, status: 'ok' };
   }
@@ -729,6 +753,7 @@ export class SocialContentLifecycleService {
         updatedById: actorUserId,
       },
     );
+    await this.changed(scope, [item.id]);
 
     return { contentId, status: 'ok' };
   }

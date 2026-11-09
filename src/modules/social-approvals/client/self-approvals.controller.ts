@@ -27,6 +27,7 @@ import {
   ClientApprovalCommentDto,
   ClientApprovalEditTextDto,
   ClientApprovalRequestChangesDto,
+  ClientApprovalWorkItemsQueryDto,
 } from './client-approval.dto';
 import {
   selfApprovalScope,
@@ -83,6 +84,15 @@ export class SelfApprovalsController {
     @Query() query: ClientApprovalBoardQueryDto,
   ) {
     return this.approvals.boardList(selfApprovalScope(context), query);
+  }
+
+  @Get('work-items')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  workItems(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Query() query: ClientApprovalWorkItemsQueryDto,
+  ) {
+    return this.approvals.workItems(selfApprovalScope(context), query);
   }
 
   @Get('pieces/:pieceId')

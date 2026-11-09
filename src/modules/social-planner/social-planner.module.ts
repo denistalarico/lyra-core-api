@@ -24,6 +24,7 @@ import { SocialContentPublicationGuard } from './services/content-publication-gu
 import { SocialCampaignService } from './services/social-campaign.service';
 import { SocialContentLifecycleService } from './services/social-content-lifecycle.service';
 import { SocialContentProductionStatusService } from './services/social-content-production-status.service';
+import { SocialPlanContentChangeRegistry } from './services/social-plan-content-change.port';
 import { SocialCopyGenerationConfigService } from './services/social-copy-generation-config.service';
 import { SocialCopyGenerationProvider } from './services/social-copy-generation-provider';
 import { SocialCopyGenerationStateMachine } from './services/social-copy-generation-state-machine';
@@ -94,6 +95,8 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
   ],
   controllers: [SocialPlannerController, SocialContentReferenceController],
   providers: [
+    // AR4 — filled by the Social/Projects join module on init (D-30).
+    SocialPlanContentChangeRegistry,
     SocialPlannerService,
     SocialContentReferenceService,
     SocialContentLifecycleService,
@@ -133,6 +136,7 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
     SocialContentProductionStatusService,
   ],
   exports: [
+    SocialPlanContentChangeRegistry,
     SocialPlannerService,
     SocialContentLifecycleService,
     SocialPlannerSettingsService,

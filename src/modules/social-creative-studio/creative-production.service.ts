@@ -685,6 +685,49 @@ export class CreativeProductionService {
     return { changed, production: await this.view(ctx, scope, item.id) };
   }
 
+  /**
+   * AR4 — keeps the production row coherent with the work D-25 generated. A
+   * link the agency made by hand is never replaced, and a replay is a no-op.
+   */
+  async attachMaterializedTask(
+    scope: CreativeStudioScope,
+    contentItemId: string,
+    actor: string,
+    work: { taskId: string; subtaskId: string | null; projectId: string },
+  ): Promise<boolean> {
+    const changed = await this.dataSource.transaction(async (manager) => {
+      const production = await this.lockProduction(
+        manager,
+        scope,
+        contentItemId,
+      );
+      if (production.taskId) return false;
+      await manager.getRepository(CreativeProductionEntity).update(
+        { id: production.id },
+        {
+          taskId: work.taskId,
+          subtaskId: work.subtaskId,
+          projectId: work.projectId,
+          taskLinkKind: 'created',
+          taskLinkedById: actor,
+          taskLinkedAt: new Date(),
+        },
+      );
+      await this.readiness.recordEvent(
+        manager,
+        scope,
+        contentItemId,
+        'social.creative.task.created',
+        production.selectedVersionId,
+        actor,
+        { taskId: work.taskId, projectId: work.projectId, via: 'plan_work' },
+      );
+      return true;
+    });
+    if (changed) await this.costs?.refreshContentItem(scope, contentItemId);
+    return changed;
+  }
+
   /** Removes the link only; the task itself is the Agency's and is untouched. */
   async unlinkTask(
     ctx: RequestContext,
@@ -859,6 +902,17 @@ export class CreativeProductionService {
     query: ProductionWorkCandidatesQueryDto,
   ): Promise<{ items: ProductionProjectCandidate[] }> {
     await this.readiness.requireContentItem(scope, contentItemId);
+    return this.projectCandidatesForScope(scope, query);
+  }
+
+  /**
+   * AR4 — the same candidates for the plan modal, where no item exists yet.
+   * One predicate on purpose: a picker can never offer what the link refuses.
+   */
+  async projectCandidatesForScope(
+    scope: CreativeStudioScope,
+    query: ProductionWorkCandidatesQueryDto,
+  ): Promise<{ items: ProductionProjectCandidate[] }> {
     const qb = this.eligibleProjects(scope).select([
       'project.id',
       'project.name',
@@ -1304,7 +1358,7 @@ export class CreativeProductionService {
     return task;
   }
 
-  private async requireProjectInScope(
+  async requireProjectInScope(
     scope: CreativeStudioScope,
     projectId: string,
   ): Promise<void> {

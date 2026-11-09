@@ -27,6 +27,9 @@ import {
 } from './client-approvals.service';
 
 const DEFAULT_LIMIT = 30;
+const WORK_ITEMS_LIMIT = 50;
+
+export type ClientWorkItemsQuery = { taskId: string; subtaskId?: string };
 const SENT_TO_CLIENT = `EXISTS (
   SELECT 1 FROM "social_approval_requests" sent
     JOIN "social_approval_steps" sent_step ON sent_step.id = sent.step_id
@@ -120,6 +123,10 @@ export class ClientApprovalBoardService {
     return this.boardFor(this.companySource(scope), query);
   }
 
+  workItems(scope: CompanyAwareScope, query: ClientWorkItemsQuery) {
+    return this.workItemsFor(this.companySource(scope), query);
+  }
+
   piece(
     scope: CompanyAwareScope,
     pieceId: string,
@@ -178,6 +185,56 @@ export class ClientApprovalBoardService {
       }),
     );
     return { columns: result };
+  }
+
+  /**
+   * AR4 / D-06 — the read-only section of a task or subtask. The company rule
+   * and the phase rule are the same as the board: an id from another company
+   * or a piece never sent to the client simply matches nothing.
+   */
+  async workItemsFor(source: ClientBoardSource, query: ClientWorkItemsQuery) {
+    const subtask = query.subtaskId
+      ? 'AND work_step.work_subtask_id = :workSubtaskId'
+      : '';
+    const linkSubtask = query.subtaskId
+      ? 'AND work_link.subtask_id = :workSubtaskId'
+      : '';
+    const pieces = await this.visible(source)
+      .andWhere(
+        `(EXISTS (
+            SELECT 1 FROM "social_approval_steps" work_step
+             WHERE work_step.piece_id = piece.id
+               AND work_step.work_task_id = :workTaskId ${subtask}
+          ) OR (piece.kind = 'content_item' AND piece.source_id IN (
+            SELECT work_link.content_item_id FROM "social_content_work_links" work_link
+             WHERE work_link.task_id = :workTaskId
+               AND work_link.cancelled_at IS NULL ${linkSubtask}
+          )))`,
+        {
+          workTaskId: query.taskId,
+          ...(query.subtaskId ? { workSubtaskId: query.subtaskId } : {}),
+        },
+      )
+      .orderBy('piece.updatedAt', 'DESC')
+      .addOrderBy('piece.id', 'DESC')
+      .take(WORK_ITEMS_LIMIT)
+      .getMany();
+    if (pieces.length === 0) return { items: [] };
+    const steps = await this.steps.find({
+      where: { pieceId: In(pieces.map((piece) => piece.id)) },
+      order: { position: 'ASC' },
+    });
+    const latest = await source.latestVisible(steps);
+    const present = source.presentPiece ?? ((piece) => piece);
+    return {
+      items: pieces.map((piece) =>
+        buildClientBoardCard(
+          present(piece),
+          steps.filter((step) => step.pieceId === piece.id),
+          latest,
+        ),
+      ),
+    };
   }
 
   async pieceFor(

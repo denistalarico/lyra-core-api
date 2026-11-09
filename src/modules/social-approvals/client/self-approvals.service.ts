@@ -34,6 +34,7 @@ import {
 import {
   ClientApprovalBoardService,
   type ClientBoardSource,
+  type ClientWorkItemsQuery,
 } from './client-approval-board.service';
 import type { ClientBoardColumn } from './client-approval-board.view';
 import { ClientApprovalMediaService } from './client-approval-media.service';
@@ -234,6 +235,10 @@ export class SelfApprovalsService {
 
   boardList(scope: CompanyAwareScope, query: ClientApprovalBoardQueryDto) {
     return this.board.boardFor(this.source(scope), query);
+  }
+
+  workItems(scope: CompanyAwareScope, query: ClientWorkItemsQuery) {
+    return this.board.workItemsFor(this.source(scope), query);
   }
 
   piece(scope: CompanyAwareScope, pieceId: string, reader: SelfApprovalReader) {

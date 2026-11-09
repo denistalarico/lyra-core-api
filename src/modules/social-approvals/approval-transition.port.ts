@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import type { SocialApprovalRequestEntity } from './entities';
+import type {
+  SocialApprovalPieceEntity,
+  SocialApprovalRequestEntity,
+} from './entities';
 
 /**
  * CS5-B — "an approval request changed status", for owner domains that keep a
@@ -21,9 +24,28 @@ export type SocialApprovalTransitionObserver = (
   approval: SocialApprovalRequestEntity,
 ) => Promise<void>;
 
+/**
+ * AR4 — "this piece was finished". A separate signal because finishing a piece
+ * with nothing pending, or never sent (R-04), transitions no request at all.
+ * Same contract: after commit, best-effort, idempotent.
+ */
+export type SocialApprovalPieceFinishedObserver = (
+  piece: SocialApprovalPieceEntity,
+) => Promise<void>;
+
 @Injectable()
 export class SocialApprovalTransitionRegistry {
   private readonly observers: SocialApprovalTransitionObserver[] = [];
+  private readonly finishedObservers: SocialApprovalPieceFinishedObserver[] =
+    [];
+
+  registerPieceFinished(observer: SocialApprovalPieceFinishedObserver): void {
+    this.finishedObservers.push(observer);
+  }
+
+  listPieceFinished(): readonly SocialApprovalPieceFinishedObserver[] {
+    return this.finishedObservers;
+  }
 
   register(observer: SocialApprovalTransitionObserver): void {
     this.observers.push(observer);

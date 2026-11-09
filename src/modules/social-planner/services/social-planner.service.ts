@@ -34,6 +34,7 @@ import {
 } from '../views/social-planner.view';
 import { SocialApprovalPiecesService } from '../../social-approvals/social-approval-pieces.service';
 import { SocialCampaignService } from './social-campaign.service';
+import { SocialPlanContentChangeRegistry } from './social-plan-content-change.port';
 
 export interface SocialPlannerScope {
   tenantId: string;
@@ -66,6 +67,10 @@ export class SocialPlannerService {
 
     /** D-20: a new revision reopens an approved copy in the same transaction. */
     @Optional() private readonly approvalPieces?: SocialApprovalPiecesService,
+
+    /** D-25: generated tasks follow the items, after the write commits. */
+    @Optional()
+    private readonly contentChanges?: SocialPlanContentChangeRegistry,
   ) {}
 
   async listPlans(scope: SocialPlannerScope) {
@@ -270,6 +275,11 @@ export class SocialPlannerService {
     });
 
     const saved = await this.contentRepository.save(item);
+    await this.contentChanges?.notify({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      contentItemIds: [saved.id],
+    });
     return toSocialContentItemView(saved);
   }
 
@@ -382,6 +392,13 @@ export class SocialPlannerService {
     item.updatedById = actorUserId;
 
     const saved = await this.contentRepository.save(item);
+
+    if (dto.plannedDate !== undefined || dto.planningStatus !== undefined)
+      await this.contentChanges?.notify({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        contentItemIds: [saved.id],
+      });
 
     const destinations = await this.destinationsRepository.find({
       where: {

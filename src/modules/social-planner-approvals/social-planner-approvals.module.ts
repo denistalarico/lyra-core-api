@@ -19,5 +19,6 @@ import { SocialPlannerApprovalsService } from './social-planner-approvals.servic
   ],
   controllers: [SocialPlannerApprovalsController],
   providers: [SocialPlannerApprovalsService],
+  exports: [SocialPlannerApprovalsService],
 })
 export class SocialPlannerApprovalsModule {}

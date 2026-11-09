@@ -5,7 +5,9 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -17,11 +19,13 @@ import {
   type ResolvedMediaAsset,
 } from '../../common/media-assets/media-asset-resolver.service';
 import { approvalScopeWhere, assertApprovalScope } from './approval-scope';
+import { SocialApprovalTransitionRegistry } from './approval-transition.port';
 import type { CreateStandalonePieceDto } from './dto/social-approval-piece.dto';
 import {
   SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
   SocialApprovalStepEntity,
+  type SocialApprovalPieceOrigin,
   type ApprovalFileSnapshotPayload,
   type ApprovalMediaSetSnapshotPayload,
   type ApprovalSnapshotPayload,
@@ -42,6 +46,14 @@ const OPEN_STATUSES = new Set([
   'changes_requested',
 ]);
 
+/** AR4: how an avulsa sent from Projects differs from one sent here. */
+export type StandalonePieceOptions = {
+  origin?: SocialApprovalPieceOrigin;
+  work?: { projectId: string | null; taskId: string; subtaskId: string };
+  /** A task attachment: stored in the public bucket, unlike a media asset. */
+  attachment?: { assetPath: string; fileName: string; mimeType: string };
+};
+
 async function readAll(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) chunks.push(Buffer.from(chunk as Buffer));
@@ -51,12 +63,15 @@ async function readAll(stream: Readable): Promise<Buffer> {
 /** Writes that span a whole piece: creating an avulsa and finishing one. */
 @Injectable()
 export class SocialApprovalPieceActionsService {
+  private readonly logger = new Logger(SocialApprovalPieceActionsService.name);
+
   constructor(
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly approvals: SocialApprovalsService,
     private readonly pieces: SocialApprovalPiecesService,
     private readonly mediaAssets: MediaAssetResolverService,
     private readonly files: FilesService,
+    @Optional() private readonly transitions?: SocialApprovalTransitionRegistry,
   ) {}
 
   /** R-18: an avulsa is born when it is sent, as one atomic write. */
@@ -64,6 +79,7 @@ export class SocialApprovalPieceActionsService {
     scope: CompanyAwareScope,
     actorUserId: string,
     input: CreateStandalonePieceDto,
+    options: StandalonePieceOptions = {},
   ) {
     assertApprovalScope(scope);
     const actor = { type: 'user' as const, userId: actorUserId };
@@ -71,14 +87,19 @@ export class SocialApprovalPieceActionsService {
     if (!title) throw new BadRequestException('O título é obrigatório.');
     // Bytes first: storage cannot join the transaction, and an orphaned
     // private copy is harmless while a request without its file is not.
-    const { kind, payload } = await this.snapshotInput(scope, input);
+    const { kind, payload } = await this.snapshotInput(
+      scope,
+      input,
+      options.attachment,
+    );
 
     const afterCommit: ApprovalOperation['afterCommit'] = [];
     const piece = await this.dataSource.transaction(async (manager) => {
       const created = await this.pieces.createStandalone(manager, scope, {
         title,
         stepKind: input.stepKind,
-        origin: 'approvals',
+        origin: options.origin ?? 'approvals',
+        work: options.work,
       });
       const snapshot = await this.pieces.createSnapshot(
         manager,
@@ -119,6 +140,7 @@ export class SocialApprovalPieceActionsService {
   private async snapshotInput(
     scope: CompanyAwareScope,
     input: CreateStandalonePieceDto,
+    attachment?: StandalonePieceOptions['attachment'],
   ): Promise<{
     kind: SocialApprovalSnapshotKind;
     payload: ApprovalSnapshotPayload;
@@ -144,6 +166,15 @@ export class SocialApprovalPieceActionsService {
         };
       }
       case 'file': {
+        if (attachment)
+          return {
+            kind: 'file',
+            payload: await this.copyAttachment(
+              scope,
+              attachment,
+              input.fileName,
+            ),
+          };
         if (!input.mediaAssetId)
           throw new BadRequestException('Informe o arquivo.');
         return {
@@ -223,6 +254,37 @@ export class SocialApprovalPieceActionsService {
     return {
       fileName: fileName?.trim() || `arquivo${extension}`,
       mimeType: media.mimeType,
+      byteSize: String(body.length),
+      storagePath: path,
+    };
+  }
+
+  /**
+   * D-29 for a task attachment, which AR1 left open. Attachments are public
+   * bucket objects: read from there and copied into the private one, so the
+   * approved file survives the attachment and the client only reaches it by
+   * opaque reference.
+   */
+  private async copyAttachment(
+    scope: CompanyAwareScope,
+    attachment: NonNullable<StandalonePieceOptions['attachment']>,
+    fileName?: string,
+  ): Promise<ApprovalFileSnapshotPayload> {
+    const source = await this.files.getAsset(attachment.assetPath);
+    const body = await readAll(source.body);
+    if (body.length > MAX_FILE_COPY_BYTES)
+      throw new PayloadTooLargeException(
+        'O arquivo excede o limite de 100 MB.',
+      );
+    const extension = extname(attachment.fileName).toLowerCase();
+    const { path } = await this.files.uploadPrivateBuffer({
+      body,
+      path: `social-approvals/${scope.tenantId}/${randomUUID()}${extension}`,
+      contentType: attachment.mimeType || 'application/octet-stream',
+    });
+    return {
+      fileName: fileName?.trim() || attachment.fileName,
+      mimeType: attachment.mimeType || 'application/octet-stream',
       byteSize: String(body.length),
       storagePath: path,
     };
@@ -327,9 +389,22 @@ export class SocialApprovalPieceActionsService {
       return piece;
     });
     for (const run of afterCommit) await run();
+    await this.notifyFinished(finished);
     return {
       id: finished.id,
       finishedAt: finished.finishedAt?.toISOString() ?? null,
     };
+  }
+
+  /** After commit, like every observer: a finish never fails because of one. */
+  private async notifyFinished(piece: SocialApprovalPieceEntity) {
+    for (const observer of this.transitions?.listPieceFinished() ?? [])
+      await observer(piece).catch((error: unknown) =>
+        this.logger.warn(
+          `piece finished observer failed for ${piece.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+      );
   }
 }

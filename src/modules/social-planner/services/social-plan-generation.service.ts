@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -40,6 +41,7 @@ import {
   type PlanGenerationItem,
   type PlanGenerationResult,
 } from './social-plan-generation-provider';
+import { SocialPlanContentChangeRegistry } from './social-plan-content-change.port';
 import { SocialPlannerSettingsService } from './social-planner-settings.service';
 import { SocialPublishingCadenceService } from './social-publishing-cadence.service';
 import type { SocialPlannerScope } from './social-planner.service';
@@ -97,6 +99,10 @@ export class SocialPlanGenerationService {
     private readonly cadenceService: SocialPublishingCadenceService,
     private readonly brandContext: SocialBrandContextPort,
     private readonly copyGenerationService: SocialCopyGenerationService,
+
+    /** D-25: a grid generated after the modal becomes work like any item. */
+    @Optional()
+    private readonly contentChanges?: SocialPlanContentChangeRegistry,
   ) {}
 
   /**
@@ -224,6 +230,11 @@ export class SocialPlanGenerationService {
     );
 
     await this.completeRun(run, result, items.length);
+    await this.contentChanges?.notify({
+      tenantId: plan.tenantId,
+      workspaceId: plan.workspaceId,
+      contentItemIds: items.map((item) => item.id),
+    });
 
     return {
       runId: run.id,

@@ -8,6 +8,8 @@ import {
   LeadFlowBriefingSuggestionEntity,
 } from '../modules/leadflow-briefing/entities';
 import { UserProfileEntity } from '../modules/settings/entities/user-profile.entity';
+import * as socialApprovalEntities from '../modules/social-approvals/entities';
+import * as socialProjectWorkEntities from '../modules/social-project-work/entities';
 import { agencyEntities, getAgencyTypeOrmConfig } from './typeorm.config';
 
 describe('Agency TypeORM configuration', () => {
@@ -35,6 +37,21 @@ describe('Agency TypeORM configuration', () => {
   // first query, with "No metadata for X was found". Naming the entities one by
   // one is what let LeadFlowWebhookDeliveryEntity slip through, so this asserts
   // the whole module export instead: a new entity is covered the day it is added.
+  // AR1 added five approval entities that only reached `forFeature`, so every
+  // real query on them would have failed while the Postgres specs, which list
+  // their entities by hand, passed.
+  it('registers every Social Approvals and work link entity', () => {
+    const exported = [
+      ...Object.values(socialApprovalEntities),
+      ...Object.values(socialProjectWorkEntities),
+    ].filter(
+      (value) => typeof value === 'function' && /Entity$/.test(value.name),
+    );
+
+    expect(exported.length).toBeGreaterThanOrEqual(10);
+    expect(agencyEntities).toEqual(expect.arrayContaining(exported));
+  });
+
   it('registers every LeadFlow Automations entity in the runtime data source', () => {
     // O index exporta as classes e um `type`, que não sobrevive à compilação:
     // em tempo de execução só restam os construtores.
