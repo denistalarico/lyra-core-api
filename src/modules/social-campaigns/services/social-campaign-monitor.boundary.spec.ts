@@ -11,9 +11,10 @@ describe('Social Campaign Monitor boundary', () => {
     'utf8',
   );
 
-  it('reads the local paid account grain and never imports a provider client', () => {
-    expect(service).toContain('metric.entity_level = :level');
-    expect(service).toContain("level: 'account'");
+  it('reads local paid account and Boost campaign grains without a provider client', () => {
+    expect(service).toContain("metric.entity_level = 'account'");
+    expect(service).toContain("metric.entity_level = 'campaign'");
+    expect(service).toContain('FROM social_boost_requests boost');
     expect(service).toContain("source: 'paid'");
     expect(service).not.toMatch(/GraphApi|CredentialResolver|facebook\.com/);
     expect(service).not.toMatch(/\.update\([^)]*SocialAdEntity/);
