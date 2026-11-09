@@ -29,7 +29,10 @@ describe('ApprovalSubjectResolver', () => {
       plans,
       contentItems,
       contentRevisions,
-      resolver: new ApprovalSubjectResolver(assets as never, versions as never, plans as never, contentItems as never, contentRevisions as never),
+      resolver: new ApprovalSubjectResolver(assets as never, versions as never, plans as never, contentItems as never, contentRevisions as never,
+      {} as never,
+      {} as never,
+    ),
     };
   }
 

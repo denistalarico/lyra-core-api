@@ -13,6 +13,7 @@ import {
 } from '../social-creative-studio/entities';
 import { CreativeVersionApprovalService } from '../social-creative-studio/creative-version-approval.service';
 import { NotFoundException } from '@nestjs/common';
+import { approvalWorkflowStubs } from './approval-workflow.test-stubs';
 
 const run = describePostgresIntegration();
 
@@ -69,7 +70,8 @@ run(
         decisions as never,
         db,
         {} as never,
-      );
+      ...approvalWorkflowStubs(),
+    );
     });
     beforeEach(async () => {
       await requests.clear();

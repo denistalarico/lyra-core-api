@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Not, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import type { CompanyAwareScope } from '../../../common/context/company-aware-scope';
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
 import { ClientAreaMembershipEntity } from '../../client-area/entities/client-area-membership.entity';
@@ -9,7 +9,12 @@ import {
   SocialApprovalRequestEntity,
   SocialApprovalStageDecisionEntity,
 } from '../entities';
-import { ApprovalSubjectResolver } from '../subjects/approval-subject-resolver';
+import { SocialApprovalAuthorityService } from '../social-approval-authority.service';
+import { SocialApprovalSettingsService } from '../social-approval-settings.service';
+import {
+  ApprovalSubjectResolver,
+  type ResolvedApprovalSubject,
+} from '../subjects/approval-subject-resolver';
 import {
   buildClientApprovalActions,
   buildClientApprovalComment,
@@ -66,6 +71,10 @@ export class ClientApprovalsService {
     @InjectRepository(ClientAreaMembershipEntity, AGENCY_CONNECTION)
     private readonly memberships: Repository<ClientAreaMembershipEntity>,
     private readonly subjects: ApprovalSubjectResolver,
+    private readonly authority: SocialApprovalAuthorityService,
+    private readonly settings: SocialApprovalSettingsService,
+    @InjectDataSource(AGENCY_CONNECTION)
+    private readonly dataSource: DataSource,
   ) {}
 
   private scopeWhere(scope: CompanyAwareScope) {
@@ -168,8 +177,12 @@ export class ClientApprovalsService {
       }),
       this.decisions.find({
         // Internal decisions never reach a client, by query, not by filtering
-        // a fuller result afterwards.
-        where: { approvalRequestId: approval.id, stage: 'client' },
+        // a fuller result afterwards. The one exception is the override: D-15
+        // says the client sees "Aprovado pela agência" whatever the stage was.
+        where: [
+          { approvalRequestId: approval.id, stage: 'client' },
+          { approvalRequestId: approval.id, decision: 'agency_override' },
+        ],
         order: { createdAt: 'ASC' },
       }),
       // Reuses the entity already fetched above instead of calling the
@@ -178,9 +191,8 @@ export class ClientApprovalsService {
       // now that a `replaced` detail also needs a lookup of its own).
       this.subjects
         .getPreview(scope, {
-          subjectType: approval.subjectType as
-            | 'creative_version'
-            | 'planner_content_revision',
+          subjectType:
+            approval.subjectType as ResolvedApprovalSubject['subjectType'],
           subjectId: approval.subjectId,
           subjectRevisionId: approval.subjectRevisionId,
           title: approval.title,
@@ -220,8 +232,29 @@ export class ClientApprovalsService {
         comments,
         (userId) => names.authorFor(userId).name,
       ),
-      actions: buildClientApprovalActions(approval, reader.permissions),
+      actions: buildClientApprovalActions(approval, {
+        comment: reader.permissions.comment,
+        decide:
+          reader.permissions.decide &&
+          (await this.designated(scope, approval, reader.userId)),
+      }),
     };
+  }
+
+  /** D-17 on the read side, so the UI never offers a decision that would 403. */
+  private async designated(
+    scope: CompanyAwareScope,
+    approval: SocialApprovalRequestEntity,
+    userId: string,
+  ): Promise<boolean> {
+    if (approval.status !== 'awaiting_client') return false;
+    return this.authority.canDecideClient(
+      this.dataSource.manager,
+      scope,
+      approval,
+      await this.settings.get(scope),
+      userId,
+    );
   }
 
   /**
@@ -234,9 +267,8 @@ export class ClientApprovalsService {
   ): Promise<ClientApprovalPreview> {
     const approval = await this.findVisible(scope, approvalId);
     const resolved = await this.subjects.getPreview(scope, {
-      subjectType: approval.subjectType as
-        | 'creative_version'
-        | 'planner_content_revision',
+      subjectType:
+        approval.subjectType as ResolvedApprovalSubject['subjectType'],
       subjectId: approval.subjectId,
       subjectRevisionId: approval.subjectRevisionId,
       title: approval.title,

@@ -16,10 +16,18 @@ import {
   type SocialApprovalCommentVisibility,
   type SocialApprovalStage,
   type SocialApprovalStatus,
+  type SocialApprovalSurface,
 } from './entities';
 import { approvalScopeWhere, assertApprovalScope } from './approval-scope';
-import { internalApprovalIsFinal } from './approval-stage.policy';
+import {
+  approvalScopeKind,
+  internalApprovalIsFinal,
+} from './approval-stage.policy';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
+import type { ResolvedApprovalSubject } from './subjects/approval-subject-resolver';
+import { SocialApprovalAuthorityService } from './social-approval-authority.service';
+import { SocialApprovalPiecesService } from './social-approval-pieces.service';
+import { SocialApprovalSettingsService } from './social-approval-settings.service';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import type { SocialApprovalStateProjection } from './approval-state.projection';
 import { SocialApprovalTransitionRegistry } from './approval-transition.port';
@@ -27,6 +35,10 @@ import { SocialApprovalTransitionRegistry } from './approval-transition.port';
 export type ApprovalActor = {
   type: SocialApprovalActorType;
   userId: string | null;
+};
+export type ApprovalOperation = {
+  manager: EntityManager;
+  afterCommit: Array<() => Promise<unknown>>;
 };
 const ACTIVE = [
   'draft',
@@ -47,6 +59,9 @@ export class SocialApprovalsService {
     private readonly decisions: Repository<SocialApprovalStageDecisionEntity>,
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly subjects: ApprovalSubjectResolver,
+    private readonly pieces: SocialApprovalPiecesService,
+    private readonly authority: SocialApprovalAuthorityService,
+    private readonly settings: SocialApprovalSettingsService,
     private readonly notifications?: SocialApprovalNotificationPublisher,
     /** CS5-B: owner projections told after a transition commits. */
     private readonly transitions?: SocialApprovalTransitionRegistry,
@@ -98,6 +113,24 @@ export class SocialApprovalsService {
       );
     return item;
   }
+  /** F-06: every decision reads the request under a row lock. */
+  private async lockRequest(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    id: string,
+  ) {
+    const request = await manager
+      .getRepository(SocialApprovalRequestEntity)
+      .findOne({
+        where: { ...this.scopeWhere(scope), id },
+        lock: { mode: 'pessimistic_write' },
+      });
+    if (!request)
+      throw new NotFoundException(
+        'Aprovação não encontrada no contexto atual.',
+      );
+    return request;
+  }
   private assertStatus(
     item: SocialApprovalRequestEntity,
     allowed: readonly SocialApprovalStatus[],
@@ -137,7 +170,7 @@ export class SocialApprovalsService {
     manager: DataSource['manager'],
     request: SocialApprovalRequestEntity,
     stage: SocialApprovalStage,
-    decision: 'approved' | 'changes_requested',
+    decision: 'approved' | 'changes_requested' | 'agency_override',
     actor: ApprovalActor,
     commentId: string | null,
   ) {
@@ -163,68 +196,12 @@ export class SocialApprovalsService {
     assertApprovalScope(scope);
     const subject = await this.subjects.resolve(scope, input);
     try {
-      const created = await this.dataSource.transaction(async (manager) => {
-        const requests = manager.getRepository(SocialApprovalRequestEntity);
-        // PostgreSQL serializes replacement workflows per logical subject root.
-        // It prevents concurrent submissions of r2/r3 from both surviving active.
-        if ('query' in manager && typeof manager.query === 'function') {
-          await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-            `social-approval:${scope.tenantId}:${scope.workspaceId}:${scope.agencyClientId}:${scope.companyContextId}:${subject.subjectType}:${subject.subjectId}`,
-          ]);
-        }
-        const previous = await requests.find({
-          where: {
-            ...this.scopeWhere(scope),
-            subjectType: subject.subjectType,
-            subjectId: subject.subjectId,
-          },
-          lock: { mode: 'pessimistic_write' },
-        });
-        const supersededAt = new Date();
-        const superseded = previous.filter(
-          (request) =>
-            request.subjectRevisionId !== subject.subjectRevisionId &&
-            ACTIVE.includes(request.status as (typeof ACTIVE)[number]),
-        );
-        for (const request of superseded) {
-          request.status = 'superseded';
-          request.supersededAt = supersededAt;
-          await requests.save(request);
-        }
-        const saved = await requests.save(
-          requests.create({
-            tenantId: scope.tenantId,
-            workspaceId: scope.workspaceId,
-            agencyClientId: scope.agencyClientId,
-            companyContextId: scope.companyContextId,
-            ...subject,
-            status: 'draft',
-            currentStage: 'internal',
-            requestedByUserId: actor.userId!,
-            requestedAt: new Date(),
-            sentToClientAt: null,
-            clientFirstViewedAt: null,
-            clientLastViewedAt: null,
-            internalFirstViewedAt: null,
-            internalLastViewedAt: null,
-            internalViewedByUserId: null,
-            clientViewedByUserId: null,
-            approvedAt: null,
-            cancelledAt: null,
-            supersededAt: null,
-          }),
-        );
-        return { saved, superseded };
-      });
-      await Promise.all(
-        created.superseded.map(
-          (request) =>
-            this.notifications?.publish('superseded', request, actor.userId) ??
-            Promise.resolve(),
-        ),
+      const afterCommit: ApprovalOperation['afterCommit'] = [];
+      const saved = await this.dataSource.transaction((manager) =>
+        this.createInTransaction(manager, scope, actor, subject, afterCommit),
       );
-      await this.observeTransition(...created.superseded, created.saved);
-      return created.saved;
+      for (const run of afterCommit) await run();
+      return saved;
     } catch (error: unknown) {
       if (this.isActiveUnique(error))
         throw new ConflictException(
@@ -232,6 +209,92 @@ export class SocialApprovalsService {
         );
       throw error;
     }
+  }
+  /**
+   * The body of `create`, usable from a larger transaction. The caller has
+   * already resolved the subject inside this scope and runs `afterCommit`.
+   */
+  async createInTransaction(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    actor: ApprovalActor,
+    subject: ResolvedApprovalSubject,
+    afterCommit: ApprovalOperation['afterCommit'],
+  ) {
+    const requests = manager.getRepository(SocialApprovalRequestEntity);
+    // PostgreSQL serializes replacement workflows per logical subject root.
+    // It prevents concurrent submissions of r2/r3 from both surviving active.
+    if ('query' in manager && typeof manager.query === 'function') {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `social-approval:${scope.tenantId}:${scope.workspaceId}:${scope.agencyClientId}:${scope.companyContextId}:${subject.subjectType}:${subject.subjectId}`,
+      ]);
+    }
+    const previous = await requests.find({
+      where: {
+        ...this.scopeWhere(scope),
+        subjectType: subject.subjectType,
+        subjectId: subject.subjectId,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const supersededAt = new Date();
+    const superseded = previous.filter(
+      (request) =>
+        request.subjectRevisionId !== subject.subjectRevisionId &&
+        ACTIVE.includes(request.status as (typeof ACTIVE)[number]),
+    );
+    for (const request of superseded) {
+      request.status = 'superseded';
+      request.supersededAt = supersededAt;
+      await requests.save(request);
+      await this.pieces.recordRequestEvent(
+        manager,
+        request,
+        'superseded',
+        actor,
+        'agency',
+      );
+    }
+    const step = await this.pieces.resolveStep(manager, scope, subject);
+    const saved = await requests.save(
+      requests.create({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
+        ...subject,
+        status: 'draft',
+        currentStage: 'internal',
+        requestedByUserId: actor.userId!,
+        requestedAt: new Date(),
+        sentToClientAt: null,
+        clientFirstViewedAt: null,
+        clientLastViewedAt: null,
+        internalFirstViewedAt: null,
+        internalLastViewedAt: null,
+        internalViewedByUserId: null,
+        clientViewedByUserId: null,
+        approvedAt: null,
+        cancelledAt: null,
+        supersededAt: null,
+        stepId: step.id,
+        batchId: null,
+        resolution: null,
+        requiredClientApproverIds: null,
+      }),
+    );
+    await this.pieces.attachRequest(manager, step, saved);
+    afterCommit.push(async () => {
+      await Promise.all(
+        superseded.map(
+          (request) =>
+            this.notifications?.publish('superseded', request, actor.userId) ??
+            Promise.resolve(),
+        ),
+      );
+      await this.observeTransition(...superseded, saved);
+    });
+    return saved;
   }
   async list(
     scope: CompanyAwareScope,
@@ -345,9 +408,8 @@ export class SocialApprovalsService {
   async preview(scope: CompanyAwareScope, id: string) {
     const request = await this.find(scope, id);
     return this.subjects.getPreview(scope, {
-      subjectType: request.subjectType as
-        | 'creative_version'
-        | 'planner_content_revision',
+      subjectType:
+        request.subjectType as ResolvedApprovalSubject['subjectType'],
       subjectId: request.subjectId,
       subjectRevisionId: request.subjectRevisionId,
       title: request.title,
@@ -376,23 +438,95 @@ export class SocialApprovalsService {
     const request = await this.find(scope, id);
     this.assertStatus(request, ['awaiting_client']);
     const now = new Date();
+    const firstView = !request.clientFirstViewedAt;
     request.clientFirstViewedAt ??= now;
     request.clientLastViewedAt = now;
     request.clientViewedByUserId = actor.userId;
-    return this.requests.save(request);
+    const saved = await this.requests.save(request);
+    // Only the first one: a reopened tab is not a fact of the trail.
+    if (firstView)
+      await this.pieces.recordRequestEvent(
+        this.dataSource.manager,
+        saved,
+        'viewed',
+        actor,
+        'client_area',
+      );
+    return saved;
   }
   async submit(
     scope: CompanyAwareScope,
     id: string,
     actorUserId: string | null | undefined,
   ) {
-    this.user(actorUserId);
-    const item = await this.find(scope, id);
+    const actor = this.user(actorUserId);
+    const afterCommit: ApprovalOperation['afterCommit'] = [];
+    const saved = await this.dataSource.transaction((manager) =>
+      this.submitInTransaction(manager, scope, actor, id, afterCommit),
+    );
+    for (const run of afterCommit) await run();
+    return saved;
+  }
+  /**
+   * D-14: with the internal stage off, the request goes straight to the
+   * client. The own scope always passes through it, since it is the final
+   * decision there.
+   */
+  async submitInTransaction(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    actor: ApprovalActor,
+    id: string,
+    afterCommit: ApprovalOperation['afterCommit'],
+  ) {
+    const item = await this.lockRequest(manager, scope, id);
     this.assertStatus(item, ['draft', 'changes_requested']);
-    item.status = 'awaiting_internal_review';
-    item.currentStage = 'internal';
-    const saved = await this.requests.save(item);
-    await this.observeTransition(saved);
+    const settings = await this.settings.get(scope, manager);
+    const skipInternal =
+      approvalScopeKind(scope) === 'managed_client' &&
+      !settings.internalApprovalEnabled;
+    if (skipInternal) {
+      item.requiredClientApproverIds =
+        await this.authority.requiredClientApprovers(manager, scope, settings);
+      item.status = 'awaiting_client';
+      item.currentStage = 'client';
+      item.sentToClientAt = new Date();
+    } else {
+      item.status = 'awaiting_internal_review';
+      item.currentStage = 'internal';
+      item.requiredClientApproverIds = null;
+    }
+    const saved = await manager
+      .getRepository(SocialApprovalRequestEntity)
+      .save(item);
+    if (skipInternal)
+      await this.pieces.recordRequestEvent(
+        manager,
+        saved,
+        'internal_skipped',
+        actor,
+        'agency',
+      );
+    await this.pieces.recordRequestEvent(
+      manager,
+      saved,
+      'sent',
+      actor,
+      'agency',
+      {
+        to: skipInternal ? 'client' : 'internal',
+      },
+    );
+    await this.pieces.afterTransition(manager, saved);
+    afterCommit.push(async () => {
+      if (skipInternal)
+        await this.notifications?.publish(
+          'awaiting_client',
+          saved,
+          actor.userId,
+        );
+      await this.observeTransition(saved);
+    });
     return saved;
   }
   /**
@@ -418,16 +552,25 @@ export class SocialApprovalsService {
       throw new ConflictException(
         'Esta aprovação ainda não foi enviada ao cliente.',
       );
-    const saved = await this.dataSource.transaction((manager) =>
-      this.addCommentEntity(
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const comment = await this.addCommentEntity(
         manager,
         request,
         actor,
         body,
         request.currentStage,
         visibility,
-      ),
-    );
+      );
+      await this.pieces.recordRequestEvent(
+        manager,
+        request,
+        'commented',
+        actor,
+        'agency',
+        { visibility, commentId: comment.id },
+      );
+      return comment;
+    });
     // AP4 §24 — an explicit Agency reply to the client is worth an email,
     // same as any other "something changed, go look" moment. Never for an
     // internal note: `visibility` already gates everything above this line.
@@ -481,17 +624,25 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actorUserId: string | null | undefined,
+    role?: string | null,
   ) {
     const actor = this.user(actorUserId);
     const saved = await this.dataSource.transaction(async (manager) => {
-      const request = await manager
-        .getRepository(SocialApprovalRequestEntity)
-        .findOne({ where: { ...this.scopeWhere(scope), id } });
-      if (!request)
-        throw new NotFoundException(
-          'Aprovação não encontrada no contexto atual.',
-        );
+      const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(request, ['awaiting_internal_review']);
+      const settings = await this.settings.get(scope, manager);
+      this.authority.assertInternalDecider(settings, {
+        userId: actor.userId!,
+        role,
+      });
+      const final = internalApprovalIsFinal(request);
+      const required = final
+        ? null
+        : await this.authority.requiredClientApprovers(
+            manager,
+            scope,
+            settings,
+          );
       await this.decision(
         manager,
         request,
@@ -500,15 +651,36 @@ export class SocialApprovalsService {
         actor,
         null,
       );
-      if (internalApprovalIsFinal(request)) {
+      if (final) {
         request.status = 'approved';
         request.approvedAt = new Date();
+        request.resolution = 'internal_final';
       } else {
         request.status = 'awaiting_client';
         request.currentStage = 'client';
         request.sentToClientAt = new Date();
+        request.requiredClientApproverIds = required;
       }
-      return manager.save(request);
+      const updated = await manager.save(request);
+      await this.pieces.recordRequestEvent(
+        manager,
+        updated,
+        'approved',
+        actor,
+        'agency',
+        { stage: 'internal' },
+      );
+      if (!final)
+        await this.pieces.recordRequestEvent(
+          manager,
+          updated,
+          'sent',
+          actor,
+          'agency',
+          { to: 'client' },
+        );
+      await this.pieces.afterTransition(manager, updated);
+      return updated;
     });
     await this.notifications?.publish(
       saved.status === 'approved' ? 'approved' : 'awaiting_client',
@@ -524,9 +696,63 @@ export class SocialApprovalsService {
     id: string,
     actorUserId: string | null | undefined,
     body: string,
+    role?: string | null,
   ) {
     const actor = this.user(actorUserId);
-    return this.requestChangesAs(scope, id, actor, body, 'internal');
+    return this.requestChangesAs(scope, id, actor, body, 'internal', role);
+  }
+  /**
+   * D-15 — the Owner approves on behalf of whoever was left to decide. Status
+   * becomes `approved` (no new status, D-12); `resolution` carries how. The
+   * route's permission key is the authorization, and D-17 lists do not narrow
+   * it.
+   */
+  async agencyOverride(
+    scope: CompanyAwareScope,
+    id: string,
+    actorUserId: string | null | undefined,
+    operation?: ApprovalOperation,
+  ) {
+    const actor = this.user(actorUserId);
+    const run = async (manager: EntityManager) => {
+      const request = await this.lockRequest(manager, scope, id);
+      this.assertStatus(request, ACTIVE);
+      await this.decision(
+        manager,
+        request,
+        request.currentStage,
+        'agency_override',
+        actor,
+        null,
+      );
+      request.status = 'approved';
+      request.approvedAt = new Date();
+      request.resolution = 'agency_override';
+      const updated = await manager.save(request);
+      await this.pieces.recordRequestEvent(
+        manager,
+        updated,
+        'agency_override',
+        actor,
+        'agency',
+        { stage: request.currentStage },
+      );
+      await this.pieces.afterTransition(manager, updated);
+      return updated;
+    };
+    const announce = async (saved: SocialApprovalRequestEntity) => {
+      await this.notifications?.publish('approved', saved, actor.userId);
+      await this.announceTimeline(saved, 'decision_changed');
+      await this.observeTransition(saved);
+    };
+    if (operation) {
+      const saved = await run(operation.manager);
+      operation.afterCommit.push(() => announce(saved));
+      return saved;
+    }
+    const saved = await this.dataSource.transaction(run);
+    await announce(saved);
+    return saved;
   }
   /** Client Area will call this domain method with its authenticated real user; AP1 intentionally exposes no client route. */
   async clientApprove(
@@ -535,26 +761,124 @@ export class SocialApprovalsService {
     actor: ApprovalActor,
   ) {
     this.validateActor(actor);
-    const saved = await this.dataSource.transaction(async (manager) => {
-      const request = await manager
-        .getRepository(SocialApprovalRequestEntity)
-        .findOne({ where: { ...this.scopeWhere(scope), id } });
-      if (!request)
-        throw new NotFoundException(
-          'Aprovação não encontrada no contexto atual.',
-        );
+    const outcome = await this.dataSource.transaction(async (manager) => {
+      const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(request, ['awaiting_client']);
+      const settings = await this.settings.get(scope, manager);
+      await this.authority.assertClientDecider(
+        manager,
+        scope,
+        request,
+        settings,
+        actor.userId,
+      );
       await this.decision(manager, request, 'client', 'approved', actor, null);
-      request.status = 'approved';
-      request.approvedAt = new Date();
-      return manager.save(request);
+      const completed = await this.roundIsComplete(
+        manager,
+        scope,
+        request,
+        actor.userId,
+      );
+      if (completed) {
+        request.status = 'approved';
+        request.approvedAt = new Date();
+        request.resolution = 'client_approved';
+      }
+      const updated = completed ? await manager.save(request) : request;
+      await this.pieces.recordRequestEvent(
+        manager,
+        updated,
+        'approved',
+        actor,
+        'client_area',
+        { stage: 'client', roundCompleted: completed },
+      );
+      if (completed) await this.pieces.afterTransition(manager, updated);
+      return { saved: updated, completed };
     });
-    await this.notifications?.publish('approved', saved, actor.userId);
-    // CCOM2 §45 — the card's status is resolved on read, never persisted, so
-    // a decision only needs the timeline to re-read. No second card is created.
-    await this.announceTimeline(saved, 'decision_changed');
-    await this.observeTransition(saved);
-    return saved;
+    if (outcome.completed) {
+      await this.notifications?.publish(
+        'approved',
+        outcome.saved,
+        actor.userId,
+      );
+      // CCOM2 §45 — the card's status is resolved on read, never persisted, so
+      // a decision only needs the timeline to re-read. No second card is created.
+      await this.announceTimeline(outcome.saved, 'decision_changed');
+      await this.observeTransition(outcome.saved);
+    } else {
+      // D-03: the person who just decided loses the actions; the rest keep them.
+      await this.announceTimeline(outcome.saved, 'decision_changed');
+    }
+    return outcome.saved;
+  }
+  /**
+   * D-03. "Primeira" closes on the first approval. "Todos" closes when every
+   * required person still eligible has approved; a revoked membership simply
+   * no longer counts, and an empty remainder never closes a round on its own.
+   */
+  private async roundIsComplete(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    request: SocialApprovalRequestEntity,
+    justApprovedUserId: string | null,
+  ): Promise<boolean> {
+    if (!request.requiredClientApproverIds) return true;
+    const [eligible, approved] = await Promise.all([
+      this.authority.eligibleClientApprovers(
+        manager,
+        scope,
+        request.requiredClientApproverIds,
+      ),
+      this.authority.roundApprovals(manager, request),
+    ]);
+    if (justApprovedUserId) approved.add(justApprovedUserId);
+    return (
+      eligible.length > 0 &&
+      eligible.every((approver) => approved.has(approver.userId))
+    );
+  }
+  /**
+   * A round waiting only on someone revoked has nobody left to trigger an
+   * evaluation. The reconciliation route is that trigger. Returns how many
+   * rounds it closed.
+   */
+  async reconcileOpenRounds(scope: CompanyAwareScope): Promise<number> {
+    const open = await this.requests.find({
+      where: { ...this.scopeWhere(scope), status: 'awaiting_client' },
+    });
+    let closed = 0;
+    for (const candidate of open) {
+      if (!candidate.requiredClientApproverIds) continue;
+      const saved = await this.dataSource.transaction(async (manager) => {
+        const request = await this.lockRequest(manager, scope, candidate.id);
+        if (
+          request.status !== 'awaiting_client' ||
+          !(await this.roundIsComplete(manager, scope, request, null))
+        )
+          return null;
+        request.status = 'approved';
+        request.approvedAt = new Date();
+        request.resolution = 'client_approved';
+        const updated = await manager.save(request);
+        await this.pieces.recordRequestEvent(
+          manager,
+          updated,
+          'approved',
+          { type: 'system', userId: null },
+          'system',
+          { stage: 'client', roundCompleted: true, reason: 'approver_revoked' },
+        );
+        await this.pieces.afterTransition(manager, updated);
+        return updated;
+      });
+      if (!saved) continue;
+      closed += 1;
+      await this.notifications?.publish('approved', saved, null);
+      await this.announceTimeline(saved, 'decision_changed');
+      await this.observeTransition(saved);
+    }
+    return closed;
   }
   async clientRequestChanges(
     scope: CompanyAwareScope,
@@ -574,9 +898,25 @@ export class SocialApprovalsService {
     const actor = this.user(actorUserId);
     const request = await this.find(scope, id);
     this.assertStatus(request, ['awaiting_client']);
-    const saved = await this.dataSource.transaction((manager) =>
-      this.addCommentEntity(manager, request, actor, body, 'client', 'client'),
-    );
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const comment = await this.addCommentEntity(
+        manager,
+        request,
+        actor,
+        body,
+        'client',
+        'client',
+      );
+      await this.pieces.recordRequestEvent(
+        manager,
+        request,
+        'commented',
+        actor,
+        'client_area',
+        { visibility: 'client', commentId: comment.id },
+      );
+      return comment;
+    });
     // CCOM2 §43 — a client comment is client-visible by construction here, so
     // the Agency "Clientes" timeline and the client's own both re-read.
     await this.announceTimeline(request, 'comment_created');
@@ -588,19 +928,30 @@ export class SocialApprovalsService {
     actor: ApprovalActor,
     body: string,
     stage: SocialApprovalStage,
+    role?: string | null,
   ) {
+    const surface: SocialApprovalSurface =
+      stage === 'client' ? 'client_area' : 'agency';
     const saved = await this.dataSource.transaction(async (manager) => {
-      const request = await manager
-        .getRepository(SocialApprovalRequestEntity)
-        .findOne({ where: { ...this.scopeWhere(scope), id } });
-      if (!request)
-        throw new NotFoundException(
-          'Aprovação não encontrada no contexto atual.',
-        );
+      const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(
         request,
         stage === 'client' ? ['awaiting_client'] : ['awaiting_internal_review'],
       );
+      const settings = await this.settings.get(scope, manager);
+      if (stage === 'client')
+        await this.authority.assertClientDecider(
+          manager,
+          scope,
+          request,
+          settings,
+          actor.userId,
+        );
+      else
+        this.authority.assertInternalDecider(settings, {
+          userId: actor.userId!,
+          role,
+        });
       // The client's own reason is client-visible: they wrote it, and it is
       // the anchor of the thread they see. An internal request-changes note
       // stays internal.
@@ -622,7 +973,19 @@ export class SocialApprovalsService {
       );
       request.status = 'changes_requested';
       request.currentStage = 'internal';
-      return manager.save(request);
+      // D-03: under "Todos" one request for changes closes the round at once.
+      request.requiredClientApproverIds = null;
+      const updated = await manager.save(request);
+      await this.pieces.recordRequestEvent(
+        manager,
+        updated,
+        'changes_requested',
+        actor,
+        surface,
+        { stage, commentId: comment.id },
+      );
+      await this.pieces.afterTransition(manager, updated);
+      return updated;
     });
     if (stage === 'client') {
       await this.notifications?.publish(
@@ -647,19 +1010,32 @@ export class SocialApprovalsService {
       afterCommit: Array<() => Promise<unknown>>;
     },
   ) {
-    if (!operation) this.user(actorUserId);
-    const item = operation
-      ? await operation.manager
-          .getRepository(SocialApprovalRequestEntity)
-          .findOneOrFail({ where: { ...this.scopeWhere(scope), id } })
-      : await this.find(scope, id);
-    this.assertStatus(item, ACTIVE);
-    item.status = 'cancelled';
-    item.cancelledAt = new Date();
-    const saved = await (
-      operation?.manager.getRepository(SocialApprovalRequestEntity) ??
-      this.requests
-    ).save(item);
+    const actor: ApprovalActor = operation
+      ? actorUserId
+        ? { type: 'user', userId: actorUserId }
+        : { type: 'system', userId: null }
+      : this.user(actorUserId);
+    const run = async (manager: EntityManager) => {
+      const item = await this.lockRequest(manager, scope, id);
+      this.assertStatus(item, ACTIVE);
+      item.status = 'cancelled';
+      item.cancelledAt = new Date();
+      const updated = await manager
+        .getRepository(SocialApprovalRequestEntity)
+        .save(item);
+      await this.pieces.recordRequestEvent(
+        manager,
+        updated,
+        'cancelled',
+        actor,
+        actor.userId ? 'agency' : 'system',
+      );
+      await this.pieces.afterTransition(manager, updated);
+      return updated;
+    };
+    const saved = operation
+      ? await run(operation.manager)
+      : await this.dataSource.transaction(run);
     // §49 — only the client channel, and only for something the client
     // already saw. `cancelled` has no Agency catalog event in AP2, and
     // inventing one would be a duplicated taxonomy for no reader.
@@ -676,12 +1052,25 @@ export class SocialApprovalsService {
     id: string,
     actorUserId: string | null | undefined,
   ) {
-    this.user(actorUserId);
-    const item = await this.find(scope, id);
-    this.assertStatus(item, ACTIVE);
-    item.status = 'superseded';
-    item.supersededAt = new Date();
-    const saved = await this.requests.save(item);
+    const actor = this.user(actorUserId);
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const item = await this.lockRequest(manager, scope, id);
+      this.assertStatus(item, ACTIVE);
+      item.status = 'superseded';
+      item.supersededAt = new Date();
+      const updated = await manager
+        .getRepository(SocialApprovalRequestEntity)
+        .save(item);
+      await this.pieces.recordRequestEvent(
+        manager,
+        updated,
+        'superseded',
+        actor,
+        'agency',
+      );
+      await this.pieces.afterTransition(manager, updated);
+      return updated;
+    });
     await this.notifications?.publish('superseded', saved, actorUserId ?? null);
     await this.observeTransition(saved);
     return saved;

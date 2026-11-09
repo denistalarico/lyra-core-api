@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { IsNull, Not } from 'typeorm';
 import { ClientApprovalsService } from './client-approvals.service';
 import type { SocialApprovalRequestEntity } from '../entities';
+import { approvalWorkflowStubs } from '../approval-workflow.test-stubs';
 
 /**
  * AP3 — the read boundary of the Client Area approvals surface.
@@ -109,6 +110,9 @@ function build(
     profiles as never,
     memberships as never,
     subjects as never,
+      approvalWorkflowStubs()[1],
+      approvalWorkflowStubs()[2],
+      { manager: {} } as never,
   );
 
   return {
@@ -238,7 +242,10 @@ describe('AP3 comment visibility', () => {
     );
     expect(decisions.find).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { approvalRequestId: 'approval-1', stage: 'client' },
+        where: [
+          { approvalRequestId: 'approval-1', stage: 'client' },
+          { approvalRequestId: 'approval-1', decision: 'agency_override' },
+        ],
       }),
     );
   });
@@ -391,6 +398,9 @@ describe('AP4 replacement wiring', () => {
       profiles as never,
       memberships as never,
       subjects as never,
+      approvalWorkflowStubs()[1],
+      approvalWorkflowStubs()[2],
+      { manager: {} } as never,
     );
     return { service, requests };
   }
@@ -459,6 +469,9 @@ describe('AP4 replacement wiring', () => {
       profiles as never,
       memberships as never,
       subjects as never,
+      approvalWorkflowStubs()[1],
+      approvalWorkflowStubs()[2],
+      { manager: {} } as never,
     );
 
     await service.detail(scope, 'approval-1', reader);

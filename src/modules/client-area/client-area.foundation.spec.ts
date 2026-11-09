@@ -122,6 +122,7 @@ describe('CA1 Client Area permission catalog', () => {
     expect([...permissionsForClientAreaRole('client_admin')].sort()).toEqual([
       'client_area.approvals.comment',
       'client_area.approvals.decide',
+      'client_area.approvals.edit_text',
       'client_area.approvals.view',
       'client_area.conversations.send',
       'client_area.conversations.view',
@@ -133,6 +134,7 @@ describe('CA1 Client Area permission catalog', () => {
       [
         'client_area.approvals.comment',
         'client_area.approvals.decide',
+        'client_area.approvals.edit_text',
         'client_area.approvals.view',
         'client_area.conversations.send',
         'client_area.conversations.view',
@@ -268,6 +270,7 @@ describe('CA7 exhaustive account roles and module permissions', () => {
                   : []),
                 'client_area.approvals.comment',
                 'client_area.approvals.decide',
+                'client_area.approvals.edit_text',
                 'client_area.approvals.view',
                 'client_area.conversations.send',
                 'client_area.conversations.view',

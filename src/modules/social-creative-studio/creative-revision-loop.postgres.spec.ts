@@ -23,6 +23,7 @@ import {
   CreativeAssetVersionEntity,
   CreativeFolderEntity,
 } from './entities';
+import { approvalWorkflowStubs } from '../social-approvals/approval-workflow.test-stubs';
 
 const run = describePostgresIntegration();
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB', 'base64');
@@ -104,8 +105,11 @@ run(
           plans,
           items,
           {} as never,
-        ),
-      );
+      {} as never,
+      {} as never,
+    ),
+      ...approvalWorkflowStubs(),
+    );
       assetService = new CreativeAssetService(
         assets,
         versions,

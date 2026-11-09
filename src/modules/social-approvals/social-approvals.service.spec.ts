@@ -8,6 +8,7 @@ import {
   SocialApprovalRequestEntity,
 } from './entities';
 import { SocialApprovalsService } from './social-approvals.service';
+import { approvalWorkflowStubs } from './approval-workflow.test-stubs';
 
 const scope = {
   tenantId: 'tenant-a',
@@ -105,6 +106,7 @@ function createHarness() {
       { find: jest.fn() } as never,
       dataSource as never,
       subjectResolver as never,
+      ...approvalWorkflowStubs(),
     ),
   };
 }
@@ -469,6 +471,7 @@ describe('SocialApprovalsService AP4 comment visibility', () => {
       { find: jest.fn() } as never,
       { transaction: base.manager ? (fn: (m: unknown) => unknown) => fn(base.manager) : undefined } as never,
       base.subjectResolver as never,
+      ...approvalWorkflowStubs(),
       notifications as never,
     );
     return { ...base, service, notifications };

@@ -25,6 +25,7 @@ describe('CA10 / R-23 deliverable download route', () => {
       {} as never,
       media as never,
       files as never,
+      {} as never,
     );
     const headers: Record<string, string> = {};
     const response = new PassThrough() as unknown as Response;

@@ -10,9 +10,11 @@ import {
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
 } from '../../social-creative-studio/entities';
+import { SocialApprovalMediaService } from '../social-approval-media.service';
 import { ClientApprovalsService } from './client-approvals.service';
 import {
   isClientApprovalMediaRef,
+  isClientSnapshotMediaRef,
   type ClientApprovalMediaRef,
 } from './client-approval.view';
 
@@ -84,7 +86,31 @@ export class ClientApprovalMediaService {
     private readonly versions: Repository<CreativeAssetVersionEntity>,
     private readonly approvals: ClientApprovalsService,
     private readonly media: MediaAssetResolverService,
+    private readonly snapshotMedia: SocialApprovalMediaService,
   ) {}
+
+  /**
+   * F-02 — bytes of an `approval_snapshot`, addressed the same way as a
+   * version's: the approval proves company and phase, and the snapshot is
+   * read off that approval, never named by the caller.
+   */
+  async openSnapshot(
+    scope: CompanyAwareScope,
+    approvalId: string,
+    mediaRef: string,
+  ) {
+    if (!isClientSnapshotMediaRef(mediaRef))
+      throw new NotFoundException('Mídia não encontrada.');
+    const approval = await this.approvals.findVisible(scope, approvalId);
+    if (approval.subjectType !== 'approval_snapshot')
+      throw new NotFoundException('Mídia não encontrada.');
+    return this.snapshotMedia.open(
+      scope,
+      approval.subjectRevisionId,
+      mediaRef,
+      approval.subjectId,
+    );
+  }
 
   async resolve(
     scope: CompanyAwareScope,

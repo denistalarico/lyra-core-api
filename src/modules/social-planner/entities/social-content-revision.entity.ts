@@ -14,7 +14,8 @@ export type SocialContentRevisionSource =
   | 'ai_then_human'
   | 'human_then_ai'
   | 'restored'
-  | 'import';
+  | 'import'
+  | 'client_edit';
 
 @Entity('social_content_revisions')
 @Unique('UQ_social_content_revisions_number', [
@@ -32,7 +33,7 @@ export type SocialContentRevisionSource =
 ])
 @Check(
   'CK_social_content_revisions_source',
-  `"source" IN ('human', 'ai', 'ai_then_human', 'human_then_ai', 'restored', 'import')`,
+  `"source" IN ('human', 'ai', 'ai_then_human', 'human_then_ai', 'restored', 'import', 'client_edit')`,
 )
 @Check('CK_social_content_revisions_number', '"revision_number" > 0')
 @Check(

@@ -16,13 +16,26 @@ import {
   SocialPlanEntity,
 } from '../../social-planner/entities';
 import { approvalClientWhere, approvalScopeWhere } from '../approval-scope';
+import {
+  SocialApprovalSnapshotEntity,
+  SocialApprovalStepEntity,
+  type ApprovalFileSnapshotPayload,
+  type ApprovalLinkSnapshotPayload,
+  type ApprovalMediaSetSnapshotPayload,
+  type ApprovalTableSnapshotPayload,
+  type ApprovalTextSnapshotPayload,
+  type SocialApprovalSnapshotKind,
+} from '../entities';
 
 export type ResolvedApprovalSubject = {
-  subjectType: 'creative_version' | 'planner_content_revision';
+  subjectType:
+    | 'creative_version'
+    | 'planner_content_revision'
+    | 'approval_snapshot';
   subjectId: string;
   subjectRevisionId: string;
-  sourceModule: 'creative_studio' | 'social_planner';
-  displayType: 'creative' | 'content_revision';
+  sourceModule: 'creative_studio' | 'social_planner' | 'social_approvals';
+  displayType: 'creative' | 'content_revision' | SocialApprovalSnapshotKind;
   title: string;
   subjectVersionLabel: string;
 };
@@ -32,7 +45,7 @@ export type ApprovalSubjectPreview = {
   subjectType: ResolvedApprovalSubject['subjectType'];
   title: string;
   versionLabel: string;
-  format: 'media' | 'text';
+  format: 'media' | 'text' | 'table' | 'link' | 'file' | 'media_set';
   text?: {
     copy: string | null;
     caption: string | null;
@@ -45,6 +58,21 @@ export type ApprovalSubjectPreview = {
     assetType: 'image' | 'video';
     contentPath: string;
     thumbnailPath: string | null;
+  };
+  table?: ApprovalTableSnapshotPayload;
+  link?: ApprovalLinkSnapshotPayload;
+  file?: {
+    fileName: string;
+    mimeType: string;
+    byteSize: string;
+    contentPath: string;
+  };
+  mediaSet?: {
+    items: Array<{
+      assetType: 'image' | 'video';
+      contentPath: string;
+      thumbnailPath: string | null;
+    }>;
   };
 };
 
@@ -62,6 +90,10 @@ export class ApprovalSubjectResolver {
     private readonly contentItems: Repository<SocialContentItemEntity>,
     @InjectRepository(SocialContentRevisionEntity, 'agency')
     private readonly contentRevisions: Repository<SocialContentRevisionEntity>,
+    @InjectRepository(SocialApprovalSnapshotEntity, 'agency')
+    private readonly snapshots: Repository<SocialApprovalSnapshotEntity>,
+    @InjectRepository(SocialApprovalStepEntity, 'agency')
+    private readonly steps: Repository<SocialApprovalStepEntity>,
   ) {}
   async resolve(
     scope: CompanyAwareScope,
@@ -75,6 +107,8 @@ export class ApprovalSubjectResolver {
       return this.resolveCreativeVersion(scope, input);
     if (input.subjectType === 'planner_content_revision')
       return this.resolvePlannerContentRevision(scope, input);
+    if (input.subjectType === 'approval_snapshot')
+      return this.resolveSnapshot(scope, input);
     throw new BadRequestException(
       'Tipo de aprovação não suportado nesta fase.',
     );
@@ -88,6 +122,8 @@ export class ApprovalSubjectResolver {
     },
   ): Promise<ApprovalSubjectPreview> {
     const subject = await this.resolve(scope, input);
+    if (subject.subjectType === 'approval_snapshot')
+      return this.snapshotPreview(scope, subject, input);
     if (subject.subjectType === 'creative_version') {
       const asset = await this.assets.findOneOrFail({
         where: {
@@ -134,6 +170,113 @@ export class ApprovalSubjectResolver {
         firstComment: revision.firstComment,
       },
     };
+  }
+
+  private async resolveSnapshot(
+    scope: CompanyAwareScope,
+    input: { subjectId: string; subjectRevisionId: string },
+  ): Promise<ResolvedApprovalSubject> {
+    const snapshot = await this.snapshots.findOne({
+      where: {
+        id: input.subjectRevisionId,
+        stepId: input.subjectId,
+        ...approvalScopeWhere(scope),
+      },
+    });
+    const step = snapshot
+      ? await this.steps.findOne({
+          where: { id: snapshot.stepId, ...approvalScopeWhere(scope) },
+        })
+      : null;
+    if (!snapshot || !step)
+      throw new NotFoundException('Retrato não encontrado no contexto atual.');
+    return {
+      subjectType: 'approval_snapshot',
+      subjectId: step.id,
+      subjectRevisionId: snapshot.id,
+      sourceModule: 'social_approvals',
+      displayType: snapshot.kind,
+      title: step.title,
+      subjectVersionLabel: `r${snapshot.revisionNumber}`,
+    };
+  }
+
+  /** Never hands out a storage path: bytes are always addressed by slot. */
+  private async snapshotPreview(
+    scope: CompanyAwareScope,
+    subject: ResolvedApprovalSubject,
+    input: { title?: string; subjectVersionLabel?: string },
+  ): Promise<ApprovalSubjectPreview> {
+    const snapshot = await this.snapshots.findOneOrFail({
+      where: {
+        id: subject.subjectRevisionId,
+        stepId: subject.subjectId,
+        ...approvalScopeWhere(scope),
+      },
+    });
+    const base = {
+      subjectType: subject.subjectType,
+      title: input.title ?? subject.title,
+      versionLabel: input.subjectVersionLabel ?? subject.subjectVersionLabel,
+    };
+    const path = (slot: string) =>
+      `/social/approvals/snapshots/${snapshot.id}/media/${slot}`;
+    switch (snapshot.kind) {
+      case 'table':
+        return {
+          ...base,
+          format: 'table',
+          table: snapshot.payload as ApprovalTableSnapshotPayload,
+        };
+      case 'link':
+        return {
+          ...base,
+          format: 'link',
+          link: snapshot.payload as ApprovalLinkSnapshotPayload,
+        };
+      case 'file': {
+        const file = snapshot.payload as ApprovalFileSnapshotPayload;
+        return {
+          ...base,
+          format: 'file',
+          file: {
+            fileName: file.fileName,
+            mimeType: file.mimeType,
+            byteSize: file.byteSize,
+            contentPath: path('file'),
+          },
+        };
+      }
+      case 'media_set':
+        return {
+          ...base,
+          format: 'media_set',
+          mediaSet: {
+            items: (
+              snapshot.payload as ApprovalMediaSetSnapshotPayload
+            ).items.map((item, index) => ({
+              assetType: item.assetType,
+              contentPath: path(`item-${index}`),
+              thumbnailPath: item.thumbnailMediaAssetId
+                ? path(`item-${index}-thumb`)
+                : null,
+            })),
+          },
+        };
+      default:
+        return {
+          ...base,
+          format: 'text',
+          text: {
+            copy: (snapshot.payload as ApprovalTextSnapshotPayload).body,
+            caption: null,
+            script: null,
+            cta: null,
+            hashtags: [],
+            firstComment: null,
+          },
+        };
+    }
   }
 
   private async resolveCreativeVersion(

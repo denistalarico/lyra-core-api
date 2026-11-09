@@ -19,13 +19,17 @@ import {
 } from '../../social-planner/entities';
 import {
   SocialApprovalCommentEntity,
+  SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
+  SocialApprovalSnapshotEntity,
   SocialApprovalStageDecisionEntity,
+  SocialApprovalStepEntity,
 } from '../entities';
 import { ApprovalClientReviewService } from '../approval-client-review.service';
 import { ClientApprovalNotifierRegistry } from '../client-approval-notifier.port';
 import { SocialApprovalsModule } from '../social-approvals.module';
 import { ApprovalSubjectResolver } from '../subjects/approval-subject-resolver';
+import { ClientApprovalBoardService } from './client-approval-board.service';
 import { ClientApprovalMediaService } from './client-approval-media.service';
 import { ClientApprovalNotificationService } from './client-approval-notification.service';
 import { ClientAreaApprovalNotificationEntity } from './client-approval-notification.entity';
@@ -81,6 +85,9 @@ import { ClientApprovalsService } from './client-approvals.service';
         SocialApprovalRequestEntity,
         SocialApprovalCommentEntity,
         SocialApprovalStageDecisionEntity,
+        SocialApprovalPieceEntity,
+        SocialApprovalStepEntity,
+        SocialApprovalSnapshotEntity,
         CreativeAssetEntity,
         CreativeAssetVersionEntity,
         SocialPlanEntity,
@@ -100,6 +107,7 @@ import { ClientApprovalsService } from './client-approvals.service';
   ],
   providers: [
     ClientApprovalsService,
+    ClientApprovalBoardService,
     ClientApprovalMediaService,
     ClientApprovalNotificationService,
     ApprovalSubjectResolver,

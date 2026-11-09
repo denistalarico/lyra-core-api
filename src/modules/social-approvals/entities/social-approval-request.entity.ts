@@ -19,6 +19,10 @@ export const SOCIAL_APPROVAL_STATUSES = [
 ] as const;
 export type SocialApprovalStatus = (typeof SOCIAL_APPROVAL_STATUSES)[number];
 export type SocialApprovalStage = 'internal' | 'client';
+export type SocialApprovalResolution =
+  | 'internal_final'
+  | 'client_approved'
+  | 'agency_override';
 
 @Entity('social_approval_requests')
 @Index('IDX_social_approval_requests_scope_created', [
@@ -113,6 +117,21 @@ export class SocialApprovalRequestEntity {
   cancelledAt!: Date | null;
   @Column({ name: 'superseded_at', type: 'timestamptz', nullable: true })
   supersededAt!: Date | null;
+  /** AR1: nullable only for rows the backfill has not reached. */
+  @Column({ name: 'step_id', type: 'uuid', nullable: true })
+  stepId!: string | null;
+  /** D-19: one card and one notification per batch. */
+  @Column({ name: 'batch_id', type: 'uuid', nullable: true })
+  batchId!: string | null;
+  /** How `approved` was reached; `status` stays the same (D-12, D-15). */
+  @Column({ type: 'varchar', length: 24, nullable: true })
+  resolution!: SocialApprovalResolution | null;
+  /**
+   * D-03: membership ids fixed when the round is sent under "Todos". NULL
+   * means "Primeira decisão vale".
+   */
+  @Column({ name: 'required_client_approver_ids', type: 'jsonb', nullable: true })
+  requiredClientApproverIds!: string[] | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })

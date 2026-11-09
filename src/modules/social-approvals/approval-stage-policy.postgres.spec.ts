@@ -31,6 +31,7 @@ import {
 import { SocialApprovalInboxService } from './social-approval-inbox.service';
 import { SocialApprovalsService } from './social-approvals.service';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
+import { approvalWorkflowStubs } from './approval-workflow.test-stubs';
 
 const run = describePostgresIntegration();
 
@@ -148,6 +149,12 @@ run('CS5 Closeout approval stage policy (real PostgreSQL)', () => {
     await new CreateSocialApprovals1795100000000().up(runner);
     await new AddSocialApprovalViewedAudit1795800000000().up(runner);
     await new AddSocialApprovalCommentVisibility1797400000000().up(runner);
+    // AR1 columns only: this suite's workflow stubs use steps that do not exist.
+    await runner.query(`ALTER TABLE social_approval_requests
+      ADD COLUMN step_id uuid,
+      ADD COLUMN batch_id uuid,
+      ADD COLUMN resolution varchar(24),
+      ADD COLUMN required_client_approver_ids jsonb`);
     // A company request that exists BEFORE the CS5 Closeout migration.
     await runner.query(
       `INSERT INTO social_approval_requests
@@ -190,6 +197,8 @@ run('CS5 Closeout approval stage policy (real PostgreSQL)', () => {
       db.getRepository(SocialPlanEntity),
       db.getRepository(SocialContentItemEntity),
       db.getRepository(SocialContentRevisionEntity),
+      {} as never,
+      {} as never,
     );
     const publisher = {
       publish: jest.fn(async (type: string, approval: { id: string }) => {
@@ -203,6 +212,7 @@ run('CS5 Closeout approval stage policy (real PostgreSQL)', () => {
       decisions,
       db,
       resolver,
+      ...approvalWorkflowStubs(),
       publisher as never,
     );
     inbox = new SocialApprovalInboxService(requests, directory as never);

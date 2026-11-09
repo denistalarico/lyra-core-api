@@ -4,11 +4,17 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { MediaAssetsModule } from '../../common/media-assets/media-assets.module';
+import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
+import { ClientAreaMemberModuleAccessEntity } from '../client-area/entities/client-area-member-module-access.entity';
+import { ClientAreaMembershipEntity } from '../client-area/entities/client-area-membership.entity';
+import { AgencyChatChannel } from '../team-chat/entities/agency-chat-channel.entity';
 import {
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
 } from '../social-creative-studio/entities';
 import {
+  SocialCampaignInstanceEntity,
   SocialContentItemEntity,
   SocialContentRevisionEntity,
   SocialPlanEntity,
@@ -20,9 +26,21 @@ import { ClientConversationCardRegistry } from './client-conversation-card.port'
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import {
   SocialApprovalCommentEntity,
+  SocialApprovalEventEntity,
+  SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
+  SocialApprovalSettingsEntity,
+  SocialApprovalSnapshotEntity,
   SocialApprovalStageDecisionEntity,
+  SocialApprovalStepEntity,
 } from './entities';
+import { SocialApprovalAuthorityService } from './social-approval-authority.service';
+import { SocialApprovalBoardService } from './social-approval-board.service';
+import { SocialApprovalMediaService } from './social-approval-media.service';
+import { SocialApprovalPieceActionsService } from './social-approval-piece-actions.service';
+import { SocialApprovalPieceSyncService } from './social-approval-piece-sync.service';
+import { SocialApprovalPiecesService } from './social-approval-pieces.service';
+import { SocialApprovalSettingsService } from './social-approval-settings.service';
 import { SocialApprovalsController } from './social-approvals.controller';
 import { SocialApprovalInboxService } from './social-approval-inbox.service';
 import { SocialApprovalsService } from './social-approvals.service';
@@ -46,16 +64,29 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     CompanyProductsModule,
     PermissionsModule,
     NotificationsModule,
+    MediaAssetsModule,
     TypeOrmModule.forFeature(
       [
         SocialApprovalRequestEntity,
         SocialApprovalCommentEntity,
         SocialApprovalStageDecisionEntity,
+        SocialApprovalPieceEntity,
+        SocialApprovalStepEntity,
+        SocialApprovalSnapshotEntity,
+        SocialApprovalEventEntity,
+        SocialApprovalSettingsEntity,
         CreativeAssetEntity,
         CreativeAssetVersionEntity,
         SocialPlanEntity,
         SocialContentItemEntity,
         SocialContentRevisionEntity,
+        SocialCampaignInstanceEntity,
+        // AR1: entity metadata only. No Client Area provider is imported, so
+        // D-17 reads memberships without depending on its auth stack.
+        ClientAreaMembershipEntity,
+        ClientAreaMemberModuleAccessEntity,
+        AgencyUserProfileEntity,
+        AgencyChatChannel,
       ],
       'agency',
     ),
@@ -64,6 +95,13 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
   providers: [
     SocialApprovalsCompanyProductParticipant,
     SocialApprovalsService,
+    SocialApprovalAuthorityService,
+    SocialApprovalSettingsService,
+    SocialApprovalPiecesService,
+    SocialApprovalPieceSyncService,
+    SocialApprovalPieceActionsService,
+    SocialApprovalBoardService,
+    SocialApprovalMediaService,
     // CS5 Closeout — cross-context list (reads the managed-context directory
     // re-exported by PermissionsModule).
     SocialApprovalInboxService,
@@ -87,6 +125,11 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
   ],
   exports: [
     SocialApprovalsService,
+    SocialApprovalAuthorityService,
+    SocialApprovalSettingsService,
+    SocialApprovalPiecesService,
+    SocialApprovalPieceSyncService,
+    SocialApprovalMediaService,
     ApprovalClientReviewService,
     ApprovalSubjectResolver,
     SocialApprovalNotificationPublisher,

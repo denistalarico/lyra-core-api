@@ -426,6 +426,9 @@ const RAW_PERMISSIONS: RawPermission[] = [
     ADMIN_UP,
     true,
   ],
+  // D-15: finishing over a pending decision is the Owner's alone.
+  ['social.approvals.review.agency_override.owner', OWNER_ONLY, true],
+  ['social.approvals.settings.manage', ADMIN_UP],
 
   // 11.5 Social - Brand Kit
   ['social.brandkit.asset.view.client', ALL_ROLES],

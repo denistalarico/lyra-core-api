@@ -9,6 +9,7 @@ import {
 import { SocialApprovalRequestEntity } from './entities';
 import { SocialApprovalsService } from './social-approvals.service';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
+import { approvalWorkflowStubs } from './approval-workflow.test-stubs';
 
 const agency = {
   tenantId: 'tenant-a',
@@ -109,7 +110,9 @@ function resolverHarness() {
     plans as never,
     contentItems as never,
     contentRevisions as never,
-  );
+      {} as never,
+      {} as never,
+    );
   return { resolver, assets };
 }
 
@@ -265,6 +268,7 @@ describe('SocialApprovalsService — agency scope never widens or 500s', () => {
       { find: jest.fn(async () => []) } as never,
       { transaction } as never,
       subjects as never,
+      ...approvalWorkflowStubs(),
     );
     return { service, subjects, transaction, where, clientRequest };
   }

@@ -1,4 +1,5 @@
 import type { ApprovalSubjectPreview } from '../subjects/approval-subject-resolver';
+import { isApprovalSnapshotMediaRef } from '../approval-snapshot-media-ref';
 import type {
   SocialApprovalCommentEntity,
   SocialApprovalRequestEntity,
@@ -63,6 +64,7 @@ export type ClientApprovalHistoryEntry = {
     | 'commented'
     | 'changes_requested'
     | 'approved'
+    | 'approved_by_agency'
     | 'replaced'
     | 'withdrawn';
   at: string;
@@ -80,6 +82,8 @@ export type ClientApprovalListItem = {
   lastActivityAt: string;
   /** Drives the "what needs me?" ordering, computed server-side. */
   needsYou: boolean;
+  /** D-15: approved by the agency on the client's behalf. */
+  approvedByAgency: boolean;
   /**
    * AP4 §17/§18 — present only on a `replaced` item, and only when
    * `resolveReplacementApproval` found a replacement that is itself
@@ -117,7 +121,7 @@ export type ClientApprovalDetail = ClientApprovalListItem & {
 export type ClientApprovalPreview = {
   title: string;
   versionLabel: string;
-  format: 'media' | 'text';
+  format: 'media' | 'text' | 'table' | 'link' | 'file' | 'media_set';
   text?: {
     copy: string | null;
     caption: string | null;
@@ -130,6 +134,24 @@ export type ClientApprovalPreview = {
     assetType: 'image' | 'video';
     contentRef: string;
     thumbnailRef: string | null;
+  };
+  table?: {
+    columns: Array<{ key: string; label: string }>;
+    rows: Array<Record<string, string | null>>;
+  };
+  link?: { url: string; label: string | null };
+  file?: {
+    fileName: string;
+    mimeType: string;
+    byteSize: string;
+    contentRef: string;
+  };
+  mediaSet?: {
+    items: Array<{
+      assetType: 'image' | 'video';
+      contentRef: string;
+      thumbnailRef: string | null;
+    }>;
   };
 };
 
@@ -146,6 +168,9 @@ export function isClientApprovalMediaRef(
     (CLIENT_APPROVAL_MEDIA_REFS as readonly string[]).includes(value)
   );
 }
+
+/** AR1: slots of a snapshot (`file`, `item-0`, `item-0-thumb`), equally opaque. */
+export const isClientSnapshotMediaRef = isApprovalSnapshotMediaRef;
 
 /**
  * CA0 §AB. `changes_requested` and a return to internal review are the same
@@ -225,6 +250,7 @@ export function buildClientApprovalListItem(
     approvedAt: iso(approval.approvedAt),
     lastActivityAt: lastActivityAt(approval, comments),
     needsYou: status === 'awaiting_your_review',
+    approvedByAgency: approval.resolution === 'agency_override',
     downloadable:
       status === 'approved' && approval.subjectType === 'creative_version',
     ...(status === 'replaced' && replacementApprovalId
@@ -299,7 +325,12 @@ export function buildClientApprovalHistory(
   for (const decision of clientDecisions) {
     entries.push({
       id: `decision:${decision.id}`,
-      kind: decision.decision === 'approved' ? 'approved' : 'changes_requested',
+      kind:
+        decision.decision === 'agency_override'
+          ? 'approved_by_agency'
+          : decision.decision === 'approved'
+            ? 'approved'
+            : 'changes_requested',
       at: iso(decision.createdAt)!,
       actorName: nameFor(decision.actorUserId),
     });
@@ -336,6 +367,56 @@ export function buildClientApprovalHistory(
 export function buildClientApprovalPreview(
   preview: ApprovalSubjectPreview,
 ): ClientApprovalPreview {
+  const base = { title: preview.title, versionLabel: preview.versionLabel };
+  if (preview.format === 'table' && preview.table)
+    return {
+      ...base,
+      format: 'table',
+      table: {
+        columns: preview.table.columns.map((column) => ({
+          key: column.key,
+          label: column.label,
+        })),
+        rows: preview.table.rows.map((row) =>
+          Object.fromEntries(
+            preview.table!.columns.map((column) => [
+              column.key,
+              row[column.key] ?? null,
+            ]),
+          ),
+        ),
+      },
+    };
+  if (preview.format === 'link' && preview.link)
+    return {
+      ...base,
+      format: 'link',
+      link: { url: preview.link.url, label: preview.link.label },
+    };
+  if (preview.format === 'file' && preview.file)
+    return {
+      ...base,
+      format: 'file',
+      file: {
+        fileName: preview.file.fileName,
+        mimeType: preview.file.mimeType,
+        byteSize: preview.file.byteSize,
+        contentRef: 'file',
+      },
+    };
+  if (preview.format === 'media_set' && preview.mediaSet)
+    return {
+      ...base,
+      format: 'media_set',
+      mediaSet: {
+        items: preview.mediaSet.items.map((item, index) => ({
+          assetType: item.assetType,
+          contentRef: `item-${index}`,
+          thumbnailRef: item.thumbnailPath ? `item-${index}-thumb` : null,
+        })),
+      },
+    };
+
   if (preview.format === 'media' && preview.media) {
     return {
       title: preview.title,

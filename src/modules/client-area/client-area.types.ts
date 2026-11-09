@@ -33,6 +33,8 @@ export const CLIENT_AREA_PERMISSION_KEYS = [
   'client_area.approvals.view',
   'client_area.approvals.comment',
   'client_area.approvals.decide',
+  // AR1 (used by AR3): editing approval text, on top of the per-context switch.
+  'client_area.approvals.edit_text',
   // CCOM1 — conversations. `send` is separate from `view` because a viewer
   // preset must be able to read a thread without being able to speak into it.
   'client_area.conversations.view',

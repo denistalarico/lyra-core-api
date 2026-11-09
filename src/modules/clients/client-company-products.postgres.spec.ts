@@ -54,6 +54,7 @@ import {
 } from '../leadflow-settings/entities';
 import { lastValueFrom, of, defer } from 'rxjs';
 import type { ExecutionContext } from '@nestjs/common';
+import { approvalWorkflowStubs } from '../social-approvals/approval-workflow.test-stubs';
 
 describePostgresIntegration()(
   'CA6 company products (lyra_agency_test only)',
@@ -116,6 +117,13 @@ describePostgresIntegration()(
           `CREATE TABLE "${schema}"."${table}" (LIKE public."${table}" INCLUDING ALL)`,
         );
       }
+      // The entity already maps the AR1 columns; `public` of this database only
+      // has them once its migrations catch up.
+      await admin.query(`ALTER TABLE "${schema}"."social_approval_requests"
+        ADD COLUMN IF NOT EXISTS step_id uuid,
+        ADD COLUMN IF NOT EXISTS batch_id uuid,
+        ADD COLUMN IF NOT EXISTS resolution varchar(24),
+        ADD COLUMN IF NOT EXISTS required_client_approver_ids jsonb`);
       db = await new DataSource({
         ...options,
         name: 'ca6',
@@ -178,7 +186,8 @@ describePostgresIntegration()(
         db.getRepository(SocialApprovalStageDecisionEntity),
         db,
         {} as never,
-      );
+      ...approvalWorkflowStubs(),
+    );
       settings = new LeadFlowClientSettingsService(
         db,
         db.getRepository(AgencyClient),

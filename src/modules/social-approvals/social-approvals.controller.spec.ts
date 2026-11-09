@@ -32,6 +32,11 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
   const controller = new SocialApprovalsController(
     approvals as unknown as SocialApprovalsService,
     inbox as unknown as SocialApprovalInboxService,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -215,12 +220,14 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
         scope,
         id,
         'user-a',
+        context.role,
       );
       expect(approvals.requestChanges).toHaveBeenCalledWith(
         scope,
         id,
         'user-a',
         'ajuste',
+        context.role,
       );
       expect(approvals.cancel).toHaveBeenCalledWith(scope, id, 'user-a');
     });

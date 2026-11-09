@@ -9,7 +9,10 @@ import {
 import type { SocialApprovalStage } from './social-approval-request.entity';
 
 export type SocialApprovalActorType = 'user' | 'system';
-export type SocialApprovalDecision = 'approved' | 'changes_requested';
+export type SocialApprovalDecision =
+  | 'approved'
+  | 'changes_requested'
+  | 'agency_override';
 
 @Entity('social_approval_stage_decisions')
 @Index('IDX_social_approval_stage_decisions_request_created', [
@@ -22,7 +25,7 @@ export type SocialApprovalDecision = 'approved' | 'changes_requested';
 )
 @Check(
   'CK_social_approval_stage_decisions_kind',
-  "\"decision\" IN ('approved', 'changes_requested')",
+  "\"decision\" IN ('approved', 'changes_requested', 'agency_override')",
 )
 @Check(
   'CK_social_approval_stage_decisions_actor',

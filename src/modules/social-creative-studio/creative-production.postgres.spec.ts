@@ -54,6 +54,7 @@ import {
   CreativeProductionEntity,
   CreativeProductionEventEntity,
 } from './entities';
+import { approvalWorkflowStubs } from '../social-approvals/approval-workflow.test-stubs';
 
 const run = describePostgresIntegration();
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB', 'base64');
@@ -243,6 +244,8 @@ run('CS5-B creative production (real PostgreSQL)', () => {
       plans,
       items,
       {} as never,
+      {} as never,
+      {} as never,
     );
     const approvalArgs = [
       requests,
@@ -250,6 +253,7 @@ run('CS5-B creative production (real PostgreSQL)', () => {
       db.getRepository(SocialApprovalStageDecisionEntity),
       db,
       resolver,
+      ...approvalWorkflowStubs(),
     ] as const;
     approvals = new SocialApprovalsService(
       ...approvalArgs,

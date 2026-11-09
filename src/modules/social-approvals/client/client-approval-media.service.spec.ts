@@ -67,7 +67,8 @@ function build({
     versions as never,
     approvals as never,
     media as never,
-  );
+      {} as never,
+    );
 
   return { service, approvals, assets, versions, media };
 }

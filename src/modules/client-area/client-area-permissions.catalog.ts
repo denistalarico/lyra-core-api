@@ -23,6 +23,7 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
     'client_area.approvals.view',
     'client_area.approvals.comment',
     'client_area.approvals.decide',
+    'client_area.approvals.edit_text',
     'client_area.conversations.view',
     'client_area.conversations.send',
     'client_area.self.overview.view',
@@ -32,6 +33,7 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
     'client_area.approvals.view',
     'client_area.approvals.comment',
     'client_area.approvals.decide',
+    'client_area.approvals.edit_text',
     'client_area.conversations.view',
     'client_area.conversations.send',
     'client_area.self.overview.view',
@@ -40,6 +42,7 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
     'client_area.approvals.view',
     'client_area.approvals.comment',
     'client_area.approvals.decide',
+    'client_area.approvals.edit_text',
     'client_area.conversations.view',
     'client_area.conversations.send',
     'client_area.self.overview.view',
@@ -112,6 +115,7 @@ export function permissionsForMemberAccess(
     if (access.approvals.level !== 'viewer') {
       result.add('client_area.approvals.comment');
       result.add('client_area.approvals.decide');
+      result.add('client_area.approvals.edit_text');
     }
   }
   if (access.conversations.available) {

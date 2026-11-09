@@ -26,6 +26,7 @@ import { SocialApprovalsService } from '../social-approvals/social-approvals.ser
 import { ApprovalSubjectResolver } from '../social-approvals/subjects/approval-subject-resolver';
 import { CreativeVersionApprovalController } from './creative-version-approval.controller';
 import { CreativeVersionApprovalService } from './creative-version-approval.service';
+import { approvalWorkflowStubs } from '../social-approvals/approval-workflow.test-stubs';
 
 const ASSET_A = '11111111-1111-4111-8111-111111111111';
 const ASSET_B = '22222222-2222-4222-8222-222222222222';
@@ -434,6 +435,8 @@ describe('CS2B.2 contract — Studio → real SocialApprovalsService', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
     const approvals = new SocialApprovalsService(
       requests as never,
@@ -443,6 +446,7 @@ describe('CS2B.2 contract — Studio → real SocialApprovalsService', () => {
         transaction: async (fn: (m: typeof manager) => unknown) => fn(manager),
       } as never,
       resolver,
+      ...approvalWorkflowStubs(),
       notifications as never,
     );
     const studio = new CreativeVersionApprovalService(

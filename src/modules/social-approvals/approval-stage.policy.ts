@@ -14,8 +14,9 @@ import type { SocialApprovalStage } from './entities';
  * "Own" is the tenant operating its own Social: an agency producing for
  * itself, or a B2B company running its own channels. The platform has no
  * tenant kind that tells the two apart, and both are structurally the same
- * scope, so both get the internal stage only. No configuration exists or is
- * implied: this table is the policy.
+ * scope, so both get the internal stage only. This table is the policy for
+ * which stages exist; a managed client can skip the internal one per context
+ * (D-14, `SocialApprovalSettingsService`), and the own scope never can.
  *
  * Legacy `(client, null)` scope cannot hold a request (CC2G): it never
  * degrades to client-wide data, so it is refused here exactly as before.

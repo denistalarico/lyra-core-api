@@ -151,7 +151,7 @@ export class SocialApprovalInboxService {
   }
 
   /** The (client, company) pairs this caller may operate Social in. */
-  private async companies(
+  async companies(
     ctx: RequestContext,
     scope: ReturnType<typeof resolveCompanyAwareScope>,
   ): Promise<ContextEntry[]> {

@@ -5,6 +5,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -23,13 +24,18 @@ import {
   ClientAreaMembershipGuard,
 } from '../../client-area/guards/client-area.guards';
 import { ApprovalClientReviewService } from '../approval-client-review.service';
+import { ClientApprovalBoardQueryDto } from '../dto/social-approval-piece.dto';
+import { ClientApprovalBoardService } from './client-approval-board.service';
 import { ClientApprovalMediaService } from './client-approval-media.service';
 import {
   ClientApprovalCommentDto,
   ClientApprovalRequestChangesDto,
 } from './client-approval.dto';
 import { ClientApprovalsService } from './client-approvals.service';
-import { buildClientApprovalListItem } from './client-approval.view';
+import {
+  buildClientApprovalListItem,
+  isClientApprovalMediaRef,
+} from './client-approval.view';
 
 /**
  * AP3 — the Client Area approvals boundary.
@@ -69,6 +75,7 @@ export class ClientAreaApprovalsController {
     private readonly review: ApprovalClientReviewService,
     private readonly media: ClientApprovalMediaService,
     private readonly files: FilesService,
+    private readonly board: ClientApprovalBoardService,
   ) {}
 
   private reader(context: ClientAreaContext) {
@@ -85,6 +92,29 @@ export class ClientAreaApprovalsController {
   @RequireClientAreaPermission('client_area.approvals.view')
   list(@ClientAreaContextData() context: ClientAreaContext) {
     return this.approvals.list(toCompanyAwareScope(context));
+  }
+
+  /** AR1 — literal segments, declared before `:approvalId`. */
+  @Get('board')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  boardList(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Query() query: ClientApprovalBoardQueryDto,
+  ) {
+    return this.board.board(toCompanyAwareScope(context), query);
+  }
+
+  @Get('pieces/:pieceId')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  piece(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+  ) {
+    return this.board.piece(
+      toCompanyAwareScope(context),
+      pieceId,
+      this.reader(context),
+    );
   }
 
   @Get(':approvalId')
@@ -192,11 +222,16 @@ export class ClientAreaApprovalsController {
     @Param('mediaRef') mediaRef: string,
     @Res() response: Response,
   ) {
-    const media = await this.media.resolve(
-      toCompanyAwareScope(context),
-      approvalId,
-      mediaRef,
-    );
+    const scope = toCompanyAwareScope(context);
+    if (!isClientApprovalMediaRef(mediaRef)) {
+      const opened = await this.media.openSnapshot(scope, approvalId, mediaRef);
+      response.setHeader('Content-Type', opened.mimeType);
+      response.setHeader('Cache-Control', 'private, no-store');
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      opened.file.body.pipe(response);
+      return;
+    }
+    const media = await this.media.resolve(scope, approvalId, mediaRef);
     const file = await this.files.getPrivateAsset(media.storagePath);
     response.setHeader('Content-Type', media.mimeType);
     response.setHeader('Cache-Control', 'private, no-store');

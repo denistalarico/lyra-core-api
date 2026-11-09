@@ -9,10 +9,13 @@ import {
   isClientApprovalMediaRef,
   toClientApprovalStatus,
 } from './client-approval.view';
+import { buildClientBoardCard } from './client-approval-board.view';
 import type {
   SocialApprovalCommentEntity,
+  SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
   SocialApprovalStageDecisionEntity,
+  SocialApprovalStepEntity,
 } from '../entities';
 
 /**
@@ -246,6 +249,151 @@ describe('AP3 client approval projection contract', () => {
     // §AB calls out; this keeps the file honest as it grows.
     expect(source).not.toMatch(/\.\.\.approval\b/);
     expect(source).not.toMatch(/\bdelete\s+\w+\./);
+  });
+});
+
+describe('AR1 client board and snapshot projection contract', () => {
+  const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-/;
+  const piece = {
+    id: 'piece-1',
+    tenantId: 'tenant-secret',
+    workspaceId: 'workspace-secret',
+    agencyClientId: 'client-secret',
+    companyContextId: 'company-secret',
+    kind: 'content_item',
+    sourceId: 'source-secret',
+    origin: 'social_planner',
+    title: 'Post',
+    sendOrder: 'sequential',
+    boardColumn: 'preparation',
+    activeStepId: 'step-1',
+    sourceState: 'active',
+    finishedAt: null,
+    finishedByUserId: 'finisher-secret',
+    finishReason: 'motivo interno',
+    createdAt: new Date('2026-11-01'),
+    updatedAt: new Date('2026-11-02'),
+  } as unknown as SocialApprovalPieceEntity;
+  const step = {
+    id: 'step-1',
+    pieceId: 'piece-1',
+    kind: 'copy',
+    position: 0,
+    title: 'Copy',
+    currentRequestId: 'request-secret',
+    isStale: false,
+    workProjectId: 'project-secret',
+    workTaskId: 'task-secret',
+    workSubtaskId: 'subtask-secret',
+  } as unknown as SocialApprovalStepEntity;
+
+  it('never emits internal keys from a board card', () => {
+    const card = buildClientBoardCard(piece, [step], new Map());
+    const keys = deepKeys(card);
+    for (const forbidden of [
+      ...INTERNAL_KEYS,
+      'sourceId',
+      'sourceState',
+      'origin',
+      'boardColumn',
+      'activeStepId',
+      'sendOrder',
+      'finishReason',
+      'finishedByUserId',
+      'currentRequestId',
+      'isStale',
+      'workTaskId',
+    ])
+      expect(keys.has(forbidden)).toBe(false);
+    expect(deepStrings(card).join(' ')).not.toContain('secret');
+  });
+
+  it('hides the internal columns behind "with the agency"', () => {
+    for (const boardColumn of ['preparation', 'internal_review', 'changes'] as const)
+      expect(
+        buildClientBoardCard({ ...piece, boardColumn }, [step], new Map()).column,
+      ).toBe('with_agency');
+  });
+
+  it('counts a stale approval as not approved', () => {
+    const card = buildClientBoardCard(
+      piece,
+      [{ ...step, isStale: true }],
+      new Map([
+        ['step-1', { id: 'a', status: 'approved', resolution: null } as never],
+      ]),
+    );
+    expect(card.steps[0].status).toBe('in_revision');
+  });
+
+  it('turns every snapshot format into opaque refs', () => {
+    const file = buildClientApprovalPreview({
+      subjectType: 'approval_snapshot',
+      title: 'Doc',
+      versionLabel: 'r1',
+      format: 'file',
+      file: {
+        fileName: 'a.pdf',
+        mimeType: 'application/pdf',
+        byteSize: '10',
+        contentPath: '/social/approvals/snapshots/x/media/file',
+      },
+    });
+    const media = buildClientApprovalPreview({
+      subjectType: 'approval_snapshot',
+      title: 'Set',
+      versionLabel: 'r1',
+      format: 'media_set',
+      mediaSet: {
+        items: [
+          {
+            assetType: 'image',
+            contentPath: '/social/approvals/snapshots/x/media/item-0',
+            thumbnailPath: '/social/approvals/snapshots/x/media/item-0-thumb',
+          },
+        ],
+      },
+    });
+    expect(file.file?.contentRef).toBe('file');
+    expect(media.mediaSet?.items[0]).toEqual({
+      assetType: 'image',
+      contentRef: 'item-0',
+      thumbnailRef: 'item-0-thumb',
+    });
+    for (const projected of [file, media]) {
+      const keys = deepKeys(projected);
+      expect(keys.has('contentPath')).toBe(false);
+      expect(keys.has('storagePath')).toBe(false);
+      expect(deepStrings(projected).join(' ')).not.toMatch(UUID);
+      expect(deepStrings(projected).join(' ')).not.toContain('/social/');
+    }
+  });
+
+  it('narrates an agency override as approved by the agency', () => {
+    const history = buildClientApprovalHistory(
+      approval,
+      [
+        {
+          id: 'd',
+          decision: 'agency_override',
+          stage: 'internal',
+          createdAt: new Date('2026-11-03'),
+          actorUserId: 'u',
+          commentId: null,
+        } as unknown as SocialApprovalStageDecisionEntity,
+      ],
+      [],
+      () => 'Equipe da agência',
+    );
+    expect(history.find((entry) => entry.id === 'decision:d')?.kind).toBe(
+      'approved_by_agency',
+    );
+    expect(
+      buildClientApprovalListItem({
+        ...approval,
+        resolution: 'agency_override',
+      }).approvedByAgency,
+    ).toBe(true);
   });
 });
 
