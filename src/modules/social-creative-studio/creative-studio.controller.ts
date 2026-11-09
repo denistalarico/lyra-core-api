@@ -10,6 +10,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   UploadedFile,
@@ -41,7 +42,9 @@ import {
   ListCreativeAssetsQueryDto,
   UpdateCreativeAssetDto,
   UpdateCreativeFolderDto,
+  UpdateCreativeRetentionDto,
 } from './dto/creative-studio.dto';
+import { CreativeStudioSettingsService } from './creative-studio-settings.service';
 import { creativeStudioScope } from './creative-studio.scope';
 import { FilesService } from '../../common/files/files.service';
 
@@ -64,6 +67,7 @@ export class CreativeStudioController {
     private readonly files: FilesService,
     private readonly brandContext: CreativeStudioBrandContextService,
     private readonly versionApprovals: CreativeVersionApprovalService,
+    private readonly settings: CreativeStudioSettingsService,
   ) {}
   @ClientAreaExposed('social_creative_studio')
   @Get('brand-context')
@@ -174,6 +178,31 @@ export class CreativeStudioController {
       creativeStudioScope(ctx),
       id,
       permanent === 'true',
+    );
+  }
+  @Post('assets/:id/restore')
+  @RequirePermission(DELETE)
+  restore(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.assets.restore(creativeStudioScope(ctx), id);
+  }
+  @Get('retention')
+  @RequirePermission(VIEW)
+  retention(@RequestContextData() ctx: RequestContext) {
+    return this.settings.retention(creativeStudioScope(ctx));
+  }
+  @Put('retention')
+  @RequirePermission(DELETE)
+  updateRetention(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: UpdateCreativeRetentionDto,
+  ) {
+    return this.settings.updateRetention(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      dto.plannerUploadRetentionDays,
     );
   }
   @Post('trash/empty')

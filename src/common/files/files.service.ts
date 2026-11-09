@@ -47,9 +47,13 @@ type AssetFile = {
   cacheControl: string;
 };
 
+/** A stored path starting with this lives in R2; the rest of the path is the key. */
+const R2_PATH_PREFIX = 'r2/';
+
 @Injectable()
 export class FilesService {
   private readonly client: S3Client;
+  private readonly r2?: { client: S3Client; bucket: string };
   private readonly endpoint: string;
   private readonly bucket: string;
   private readonly privateBucket: string;
@@ -85,6 +89,51 @@ export class FilesService {
           'lyra_minio_dev_password',
       },
     });
+
+    const r2 = this.configService.get<{
+      endpoint?: string;
+      bucket?: string;
+      region?: string;
+      accessKeyId?: string;
+      secretAccessKey?: string;
+    }>('files.r2');
+    if (r2?.endpoint && r2.bucket && r2.accessKeyId && r2.secretAccessKey) {
+      this.r2 = {
+        bucket: r2.bucket,
+        client: new S3Client({
+          region: r2.region || 'auto',
+          endpoint: r2.endpoint,
+          forcePathStyle: true,
+          // R2 rejects the checksum headers the SDK adds by default.
+          requestChecksumCalculation: 'WHEN_REQUIRED',
+          responseChecksumValidation: 'WHEN_REQUIRED',
+          credentials: {
+            accessKeyId: r2.accessKeyId,
+            secretAccessKey: r2.secretAccessKey,
+          },
+        }),
+      };
+    }
+  }
+
+  /** Where a new private object should live; unchanged while R2 is not configured. */
+  r2Path(objectKey: string): string {
+    return this.r2 ? `${R2_PATH_PREFIX}${objectKey}` : objectKey;
+  }
+
+  private async privateTarget(path: string) {
+    const key = this.normalizeAssetPath(path);
+    if (!key.startsWith(R2_PATH_PREFIX)) {
+      await this.ensurePrivateBucket();
+      return { client: this.client, bucket: this.privateBucket, key };
+    }
+    if (!this.r2)
+      throw new InternalServerErrorException('R2 storage is not configured.');
+    return {
+      client: this.r2.client,
+      bucket: this.r2.bucket,
+      key: key.slice(R2_PATH_PREFIX.length),
+    };
   }
 
   async uploadImageAsset({
@@ -190,11 +239,11 @@ export class FilesService {
     contentType: string;
   }): Promise<{ path: string }> {
     const normalizedPath = this.normalizeAssetPath(input.path);
-    await this.ensurePrivateBucket();
-    await this.client.send(
+    const target = await this.privateTarget(normalizedPath);
+    await target.client.send(
       new PutObjectCommand({
-        Bucket: this.privateBucket,
-        Key: normalizedPath,
+        Bucket: target.bucket,
+        Key: target.key,
         Body: input.body,
         ContentType: input.contentType,
         CacheControl: 'private, no-store',
@@ -204,13 +253,12 @@ export class FilesService {
   }
 
   async getPrivateAsset(path: string): Promise<AssetFile> {
-    const normalizedPath = this.normalizeAssetPath(path);
     try {
-      await this.ensurePrivateBucket();
-      const object = await this.client.send(
+      const target = await this.privateTarget(path);
+      const object = await target.client.send(
         new GetObjectCommand({
-          Bucket: this.privateBucket,
-          Key: normalizedPath,
+          Bucket: target.bucket,
+          Key: target.key,
         }),
       );
       if (!(object.Body instanceof Readable)) {
@@ -257,12 +305,11 @@ export class FilesService {
       throw new BadRequestException('Only private assets can be deleted.');
     }
 
-    const normalizedPath = this.normalizeAssetPath(input.path);
-    await this.ensurePrivateBucket();
-    await this.client.send(
+    const target = await this.privateTarget(input.path);
+    await target.client.send(
       new DeleteObjectCommand({
-        Bucket: this.privateBucket,
-        Key: normalizedPath,
+        Bucket: target.bucket,
+        Key: target.key,
       }),
     );
   }
@@ -293,16 +340,14 @@ export class FilesService {
       throw new BadRequestException('Only private assets can be presigned.');
     }
 
-    const normalizedPath = this.normalizeAssetPath(input.path);
     const expiresInSeconds = this.clampPresignedTtl(input.ttlSeconds);
-
-    await this.ensurePrivateBucket();
+    const target = await this.privateTarget(input.path);
 
     const url = await getSignedUrl(
-      this.client,
+      target.client,
       new GetObjectCommand({
-        Bucket: this.privateBucket,
-        Key: normalizedPath,
+        Bucket: target.bucket,
+        Key: target.key,
       }),
       { expiresIn: expiresInSeconds },
     );

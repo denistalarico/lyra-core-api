@@ -429,6 +429,7 @@ run('CS4-B creative video generation (real PostgreSQL)', () => {
     await db.initialize();
 
     const files = {
+      r2Path: (key: string) => key,
       uploadPrivateBuffer: async (input: { path: string; body: Buffer }) => {
         objects.set(input.path, input.body);
         return { path: input.path };

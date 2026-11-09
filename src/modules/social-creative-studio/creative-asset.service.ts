@@ -280,6 +280,75 @@ export class CreativeAssetService {
           : 'O vídeo excede o limite de 300 MB.',
       );
   }
+  /**
+   * Lists a file sent in the Planner, sharing its binary rather than copying
+   * it. A thumbnail is a convenience and never blocks the listing.
+   */
+  async adoptPlannerUpload(
+    scope: CreativeStudioScope,
+    actor: string | null,
+    input: { mediaAssetId: string; contentItemId: string },
+  ) {
+    const link = await this.assertContentItem(scope, input.contentItemId);
+    if (!link) return null;
+    const folderId = await this.plannerFolder(scope, actor, link);
+    const { asset: media, file } = await this.mediaUpload.getContent(
+      scope,
+      input.mediaAssetId,
+    );
+    const assetType = media.mimeType.startsWith('image/') ? 'image' : 'video';
+    let thumbnailId: string | null = null;
+    if (assetType === 'image') {
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of file.body)
+          chunks.push(Buffer.from(chunk as Uint8Array));
+        thumbnailId = await this.thumbnailFor(
+          scope,
+          actor,
+          {
+            buffer: Buffer.concat(chunks),
+            originalname: media.originalFilename ?? 'imagem',
+            mimetype: media.mimeType,
+          },
+          assetType,
+        );
+      } catch {
+        thumbnailId = null;
+      }
+    } else file.body.destroy();
+    return this.dataSource.transaction(async (manager) => {
+      const assets = manager.getRepository(CreativeAssetEntity);
+      const versions = manager.getRepository(CreativeAssetVersionEntity);
+      const asset = await assets.save(
+        assets.create({
+          ...this.scopeValues(scope),
+          name: (media.originalFilename || 'Criativo').slice(0, 255),
+          assetType,
+          sourceType: 'planner_upload',
+          status: 'ready',
+          folderId,
+          contentItemId: input.contentItemId,
+          currentVersionId: null,
+          metadata: {},
+          createdById: actor,
+          archivedAt: null,
+        }),
+      );
+      const version = await versions.save(
+        versions.create({
+          creativeAssetId: asset.id,
+          versionNumber: 1,
+          mediaAssetId: media.id,
+          thumbnailMediaAssetId: thumbnailId,
+          source: 'upload',
+          createdById: actor,
+        }),
+      );
+      asset.currentVersionId = version.id;
+      return assets.save(asset);
+    });
+  }
   private async thumbnailFor(
     scope: CreativeStudioScope,
     actor: string | null,
@@ -684,19 +753,50 @@ export class CreativeAssetService {
    */
   async remove(scope: CreativeStudioScope, id: string, permanent = false) {
     const asset = await this.find(scope, id);
-    if (asset.contentItemId)
+    // A Planner upload is held by the purge until its post is out.
+    if (
+      asset.contentItemId &&
+      asset.sourceType !== 'planner_upload' &&
+      !asset.trashedAt
+    )
       throw new ConflictException({
         code: 'creative_linked_to_content',
         message:
           'Este criativo está vinculado a um conteúdo do Planner. Arquive-o em vez de excluir.',
       });
     const now = new Date();
+    if (!asset.trashedAt) asset.restoreFolderId = asset.folderId;
     asset.status = 'archived';
     asset.archivedAt = asset.archivedAt ?? now;
     asset.trashedAt = asset.trashedAt ?? now;
     asset.folderId = null;
     if (permanent) asset.deletedAt = now;
     await this.assets.save(asset);
+  }
+  /**
+   * Back to its folder, or the root if that folder is gone. Trashing stamps
+   * both dates together, so a difference means it was archived before.
+   */
+  async restore(scope: CreativeStudioScope, id: string) {
+    const asset = await this.find(scope, id);
+    if (!asset.trashedAt)
+      throw new BadRequestException('Este arquivo não está na Lixeira.');
+    const wasArchived =
+      asset.archivedAt !== null &&
+      asset.archivedAt.getTime() !== asset.trashedAt.getTime();
+    const folderExists =
+      asset.restoreFolderId !== null &&
+      (await this.folders.exists({
+        where: { ...this.scopeWhere(scope), id: asset.restoreFolderId },
+      }));
+    asset.folderId = folderExists ? asset.restoreFolderId : null;
+    asset.status = wasArchived ? 'archived' : 'ready';
+    asset.archivedAt = wasArchived ? asset.archivedAt : null;
+    asset.trashedAt = null;
+    asset.restoreFolderId = null;
+    asset.purgeAfter = null;
+    asset.restoredAt = new Date();
+    return this.toView(await this.assets.save(asset));
   }
   async emptyTrash(scope: CreativeStudioScope) {
     const result = await this.assets.update(

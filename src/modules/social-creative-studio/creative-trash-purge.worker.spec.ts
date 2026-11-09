@@ -5,7 +5,7 @@ function harness(batches: { id: string }[][]) {
   const dataSource = {
     query: jest.fn(async (sql: string, params: unknown[]) => {
       statements.push({ sql, params });
-      return sql.includes('UPDATE') ? [] : (batches.shift() ?? []);
+      return /UPDATE|DELETE/.test(sql) ? [] : (batches.shift() ?? []);
     }),
   };
   const mediaUpload = { purgeRetiredObject: jest.fn(async () => undefined) };
@@ -25,6 +25,7 @@ describe('CreativeTrashPurgeWorker', () => {
     await h.worker.run(new Date('2026-12-31T00:00:00.000Z'));
     expect(h.statements[0].params).toEqual([
       new Date('2026-12-01T00:00:00.000Z'),
+      new Date('2026-12-31T00:00:00.000Z'),
     ]);
   });
 

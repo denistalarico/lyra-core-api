@@ -65,6 +65,15 @@ export class CreativeAssetEntity {
   /** In the Lixeira since this moment; purged after the retention period. */
   @Column({ name: 'trashed_at', type: 'timestamptz', nullable: true })
   trashedAt!: Date | null;
+  /** The folder it left, for Restaurar. No FK: the folder may be gone by then. */
+  @Column({ name: 'restore_folder_id', type: 'uuid', nullable: true })
+  restoreFolderId!: string | null;
+  /** Set by Restaurar: retention never takes this file again. */
+  @Column({ name: 'restored_at', type: 'timestamptz', nullable: true })
+  restoredAt!: Date | null;
+  /** Overrides the default Lixeira period when retention sent it there. */
+  @Column({ name: 'purge_after', type: 'timestamptz', nullable: true })
+  purgeAfter!: Date | null;
   /**
    * Library deletion. A plain column, not `@DeleteDateColumn`: Approvals and
    * Production keep resolving the rows they already reference.

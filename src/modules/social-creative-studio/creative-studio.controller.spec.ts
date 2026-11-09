@@ -67,6 +67,7 @@ describe('Creative Studio controller permission contract', () => {
       {} as never,
       brandContext as never,
       {} as never,
+      {} as never,
     );
     const clientContext = {
       tenantId: 'tenant-a',
@@ -91,7 +92,10 @@ describe('Creative Studio controller permission contract', () => {
     expect(() =>
       controller.brandContextForStudio({
         ...clientContext,
-        managedContext: { ...clientContext.managedContext!, companyContextId: null },
+        managedContext: {
+          ...clientContext.managedContext!,
+          companyContextId: null,
+        },
       }),
     ).toThrow(BadRequestException);
     expect(brandContext.load).toHaveBeenCalledTimes(1);
@@ -108,6 +112,7 @@ describe('Creative Studio controller permission contract', () => {
       {} as never,
       {} as never,
       versionApprovals as never,
+      {} as never,
     );
     const ctx = {
       tenantId: 'tenant-a',

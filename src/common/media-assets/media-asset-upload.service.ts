@@ -53,6 +53,12 @@ export type UploadMediaAssetInput = {
 /** Upper bound on one listing page, so a scope with thousands of assets cannot be asked for all of them at once. */
 const MAX_LIST_LIMIT = 100;
 const DEFAULT_LIST_LIMIT = 50;
+/** Everything else, Brand Kit and references included, stays where it is. */
+const R2_SOURCES = new Set([
+  'creative_studio',
+  'creative_studio_thumbnail',
+  'planner_upload',
+]);
 
 @Injectable()
 export class MediaAssetUploadService {
@@ -116,9 +122,13 @@ export class MediaAssetUploadService {
     });
 
     // 4. Object first.
+    const storagePath =
+      R2_SOURCES.has(input.source) || isTemporaryMediaAssetSource(input.source)
+        ? this.filesService.r2Path(objectKey)
+        : objectKey;
     await this.filesService.uploadPrivateBuffer({
       body: file.buffer,
-      path: objectKey,
+      path: storagePath,
       contentType,
     });
 
@@ -131,7 +141,7 @@ export class MediaAssetUploadService {
           workspaceId: scope.workspaceId,
           agencyClientId: scope.agencyClientId,
           companyContextId: scope.companyContextId,
-          storagePath: objectKey,
+          storagePath,
           mimeType: contentType,
           byteSize: String(file.buffer.length),
           originalFilename: sanitizeMediaAssetFilename(file.originalname),
@@ -149,7 +159,7 @@ export class MediaAssetUploadService {
         }),
       );
     } catch (error) {
-      await this.bestEffortRemoveObject(objectKey);
+      await this.bestEffortRemoveObject(storagePath);
       throw error;
     }
   }

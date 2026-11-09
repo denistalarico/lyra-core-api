@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { SELF_DECLARED_DEPS_METADATA } from '@nestjs/common/constants';
 import { getDataSourceToken } from '@nestjs/typeorm';
+import { Readable } from 'node:stream';
 import { FindOperator, IsNull, Repository } from 'typeorm';
 import type { CreativeStudioScope } from './creative-studio.scope';
 import {
@@ -823,11 +824,11 @@ describe('Creative Studio asset service', () => {
 
     expect(h.plans.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
-      where: expect.objectContaining({
-        id: planId,
-        agencyClientId: clientA.agencyClientId,
-        companyContextId: clientA.companyContextId,
-      }),
+        where: expect.objectContaining({
+          id: planId,
+          agencyClientId: clientA.agencyClientId,
+          companyContextId: clientA.companyContextId,
+        }),
       }),
     );
     expect(h.mediaUpload.upload).not.toHaveBeenCalled();
@@ -859,9 +860,146 @@ describe('Creative Studio asset service', () => {
     );
     expect(h.plans.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
-      where: expect.objectContaining({ id: id(73), deletedAt: IsNull() }),
+        where: expect.objectContaining({ id: id(73), deletedAt: IsNull() }),
       }),
     );
+  });
+
+  describe('Restaurar', () => {
+    it('returns a file to the folder it left, active again', async () => {
+      const h = makeHarness();
+      const folder = await h.folderService.create(clientA, 'user-a', {
+        name: 'Pasta',
+      });
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+        folderId: folder.id,
+      });
+      await h.assetService.remove(clientA, asset.id);
+      await expect(
+        h.assetService.restore(clientA, asset.id),
+      ).resolves.toMatchObject({ status: 'ready', folderId: folder.id });
+      expect(h.state.assets.find((row) => row.id === asset.id)).toMatchObject({
+        trashedAt: null,
+        purgeAfter: null,
+        archivedAt: null,
+        restoredAt: expect.any(Date),
+      });
+    });
+
+    it('keeps a file archived if it was archived before the Lixeira', async () => {
+      const h = makeHarness();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+      });
+      const row = h.state.assets.find((item) => item.id === asset.id)!;
+      row.status = 'archived';
+      row.archivedAt = new Date('2026-01-01T00:00:00.000Z');
+      await h.assetService.remove(clientA, asset.id);
+      await expect(
+        h.assetService.restore(clientA, asset.id),
+      ).resolves.toMatchObject({ status: 'archived' });
+    });
+
+    it('falls back to the root when the folder no longer exists', async () => {
+      const h = makeHarness();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+      });
+      const row = h.state.assets.find((item) => item.id === asset.id)!;
+      await h.assetService.remove(clientA, asset.id);
+      row.restoreFolderId = id(500);
+      await expect(
+        h.assetService.restore(clientA, asset.id),
+      ).resolves.toMatchObject({ folderId: null });
+    });
+
+    it('refuses a file that is not in the Lixeira', async () => {
+      const h = makeHarness();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+      });
+      await expect(
+        h.assetService.restore(clientA, asset.id),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('never reaches a file of another company', async () => {
+      const h = makeHarness();
+      const asset = await h.assetService.upload(clientA, 'user-a', {
+        file: file(PNG),
+      });
+      await h.assetService.remove(clientA, asset.id);
+      await expect(
+        h.assetService.restore(clientB, asset.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('Planner uploads', () => {
+    const contentItemId = id(95);
+    const mediaAssetId = id(96);
+    const adoptable = (mimeType = 'image/png') => {
+      const h = makeHarness();
+      h.contentItems.findOne.mockResolvedValue({
+        id: contentItemId,
+        planId: id(97),
+        title: 'Post',
+        plannedDate: null,
+      });
+      h.plans.findOne.mockResolvedValue({ id: id(97), title: 'Plano' });
+      const body = Readable.from([Buffer.from(PNG)]);
+      (h.mediaUpload as Row).getContent = jest.fn(async () => ({
+        asset: { id: mediaAssetId, mimeType, originalFilename: 'post.png' },
+        file: { body },
+      }));
+      return { h, body };
+    };
+
+    it('lists the upload in the folder of its item, sharing the binary', async () => {
+      const { h } = adoptable();
+      const asset = await h.assetService.adoptPlannerUpload(clientA, 'user-a', {
+        mediaAssetId,
+        contentItemId,
+      });
+      expect(asset).toMatchObject({
+        name: 'post.png',
+        sourceType: 'planner_upload',
+        contentItemId,
+        folderId: h.state.folders.find(
+          (folder) => folder.contentItemId === contentItemId,
+        )?.id,
+      });
+      expect(h.state.versions[0]).toMatchObject({
+        mediaAssetId,
+        thumbnailMediaAssetId: expect.stringContaining('thumbnail-'),
+      });
+      expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+      expect(h.plannerStatus.reflectCreativeStatus).not.toHaveBeenCalled();
+    });
+
+    it('still lists the file when its thumbnail fails', async () => {
+      const { h } = adoptable();
+      h.thumbnails.create.mockRejectedValue(new Error('bad image'));
+      await h.assetService.adoptPlannerUpload(clientA, 'user-a', {
+        mediaAssetId,
+        contentItemId,
+      });
+      expect(h.state.versions[0].thumbnailMediaAssetId).toBeNull();
+    });
+
+    it('can be sent to the Lixeira and deleted from it while linked', async () => {
+      const { h } = adoptable();
+      const asset = await h.assetService.adoptPlannerUpload(clientA, 'user-a', {
+        mediaAssetId,
+        contentItemId,
+      });
+      await h.assetService.remove(clientA, asset!.id);
+      await h.assetService.remove(clientA, asset!.id, true);
+      expect(
+        h.state.assets.find((row) => row.id === asset!.id)?.deletedAt,
+      ).toEqual(expect.any(Date));
+    });
   });
 
   describe('Planner folders', () => {

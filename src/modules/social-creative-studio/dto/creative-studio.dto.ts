@@ -23,6 +23,9 @@ export class ListCreativeAssetsQueryDto {
   @IsOptional() @IsString() cursor?: string;
   @IsOptional() @IsIn(['true']) trashed?: 'true';
 }
+export class UpdateCreativeRetentionDto {
+  @IsIn([0, 7, 15, 30]) plannerUploadRetentionDays!: number;
+}
 export class CreateCreativeAssetDto {
   @IsOptional() @IsString() @MaxLength(255) name?: string;
   @IsOptional() @IsUUID() folderId?: string;

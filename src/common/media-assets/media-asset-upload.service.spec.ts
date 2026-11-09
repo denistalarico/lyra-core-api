@@ -51,6 +51,7 @@ describe('MediaAssetUploadService', () => {
     findAndCount: jest.Mock;
   };
   let files: {
+    r2Path: jest.Mock;
     uploadPrivateBuffer: jest.Mock;
     getPrivateAsset: jest.Mock;
     deleteObject: jest.Mock;
@@ -69,6 +70,7 @@ describe('MediaAssetUploadService', () => {
       findAndCount: jest.fn().mockResolvedValue([[], 0]),
     };
     files = {
+      r2Path: jest.fn((key: string) => `r2/${key}`),
       uploadPrivateBuffer: jest.fn().mockResolvedValue({ path: 'ok' }),
       getPrivateAsset: jest.fn(),
       deleteObject: jest.fn().mockResolvedValue(undefined),
@@ -112,6 +114,25 @@ describe('MediaAssetUploadService', () => {
           agencyClientId: clientScope.agencyClientId,
           createdById: actorId,
         }),
+      );
+    });
+
+    it.each([
+      ['planner_upload', true],
+      ['creative_studio', true],
+      ['creative_studio_thumbnail', true],
+      ['temporary:creative_generation', true],
+      ['brand_kit', false],
+      ['planner_reference', false],
+    ])('routes %s to R2: %s', async (source, inR2) => {
+      await service.upload(agencyScope, actorId, {
+        file: { buffer: PNG, originalname: 'a.png', mimetype: 'image/png' },
+        source,
+      });
+      const path = files.uploadPrivateBuffer.mock.calls[0][0].path as string;
+      expect(path.startsWith('r2/')).toBe(inR2);
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ storagePath: path }),
       );
     });
 

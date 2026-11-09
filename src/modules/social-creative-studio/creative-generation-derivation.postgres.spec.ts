@@ -348,6 +348,7 @@ run('CS3.6.2 regeneration & variations (real PostgreSQL)', () => {
     await db.initialize();
 
     const files = {
+      r2Path: (key: string) => key,
       uploadPrivateBuffer: async (input: { path: string; body: Buffer }) => {
         objects.set(input.path, input.body);
         return { path: input.path };

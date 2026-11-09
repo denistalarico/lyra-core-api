@@ -243,6 +243,7 @@ run('CS3.1.1 media_assets company scope (real PostgreSQL)', () => {
       await new ScopeMediaAssetsByCompany1797800000000().up(runner);
       const repository = runner.manager.getRepository(MediaAssetEntity);
       const files = {
+        r2Path: (key: string) => key,
         uploadPrivateBuffer: jest.fn((input: { path: string }) =>
           Promise.resolve({ path: input.path }),
         ),

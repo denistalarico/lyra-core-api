@@ -59,6 +59,13 @@ export default () => ({
       createBucket: process.env.S3_CREATE_BUCKET !== 'false',
       setPublicReadPolicy: process.env.S3_SET_PUBLIC_READ_POLICY !== 'false',
     },
+    r2: {
+      endpoint: process.env.R2_ENDPOINT,
+      bucket: process.env.R2_BUCKET,
+      region: process.env.R2_REGION,
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    },
   },
   leadflowBriefing: {
     clamav: {
