@@ -19,6 +19,7 @@ import {
 } from '../../social-planner/entities';
 import {
   SocialApprovalCommentEntity,
+  SocialApprovalEventEntity,
   SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
   SocialApprovalSnapshotEntity,
@@ -36,6 +37,8 @@ import { ClientAreaApprovalNotificationEntity } from './client-approval-notifica
 import { ClientAreaApprovalsPreviewController } from './client-approvals-preview.controller';
 import { ClientAreaApprovalsController } from './client-approvals.controller';
 import { ClientApprovalsService } from './client-approvals.service';
+import { SelfApprovalsController } from './self-approvals.controller';
+import { SelfApprovalsService } from './self-approvals.service';
 
 /**
  * AP3 — the Client Area approvals surface, wired separately from
@@ -85,6 +88,7 @@ import { ClientApprovalsService } from './client-approvals.service';
         SocialApprovalRequestEntity,
         SocialApprovalCommentEntity,
         SocialApprovalStageDecisionEntity,
+        SocialApprovalEventEntity,
         SocialApprovalPieceEntity,
         SocialApprovalStepEntity,
         SocialApprovalSnapshotEntity,
@@ -104,10 +108,12 @@ import { ClientApprovalsService } from './client-approvals.service';
   controllers: [
     ClientAreaApprovalsController,
     ClientAreaApprovalsPreviewController,
+    SelfApprovalsController,
   ],
   providers: [
     ClientApprovalsService,
     ClientApprovalBoardService,
+    SelfApprovalsService,
     ClientApprovalMediaService,
     ClientApprovalNotificationService,
     ApprovalSubjectResolver,

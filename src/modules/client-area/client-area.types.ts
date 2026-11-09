@@ -269,9 +269,9 @@ export interface ClientAreaSelfContext {
    */
   memberAccess?: ClientAreaMemberAccess;
   /**
-   * Always all-false in V1. Approvals and Conversations are company-bound
-   * artefacts (they need `agencyClientId`/`companyContextId`), so enabling
-   * them here would require inventing a company scope. PD3 §15/§34.
+   * Conversations stay company-bound (no invented company scope, PD3 §15/§34).
+   * Approvals run over the agency's own scope when the self modules are on and
+   * Social is contracted (D-24), never through a fake company.
    */
   modules: ClientAreaModules;
 }

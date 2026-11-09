@@ -7,6 +7,7 @@ import {
   SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
   SocialApprovalStepEntity,
+  type SocialApprovalBoardColumn,
 } from '../entities';
 import { approvalScopeWhere } from '../approval-scope';
 import { SocialApprovalPieceSyncService } from '../social-approval-piece-sync.service';
@@ -16,8 +17,10 @@ import {
   buildClientBoardCard,
   buildClientBoardStep,
   CLIENT_BOARD_COLUMNS,
+  type ClientBoardColumn,
   type ClientPieceDetail,
 } from './client-approval-board.view';
+import type { ClientApprovalDetail } from './client-approval.view';
 import {
   ClientApprovalsService,
   type ClientApprovalReader,
@@ -29,6 +32,26 @@ const SENT_TO_CLIENT = `EXISTS (
     JOIN "social_approval_steps" sent_step ON sent_step.id = sent.step_id
    WHERE sent_step.piece_id = piece.id AND sent.sent_to_client_at IS NOT NULL
 )`;
+
+/**
+ * What differs between a company's board and the agency's own (D-24): which
+ * pieces exist for the reader and which request each step shows. The board
+ * itself, its columns and its projection are the same code.
+ */
+export type ClientBoardSource = {
+  scope: CompanyAwareScope;
+  /** Piece-level phase rule, over the alias `piece`. */
+  visibleSql: string;
+  columnsFor: (column: ClientBoardColumn) => SocialApprovalBoardColumn[];
+  latestVisible: (
+    steps: readonly SocialApprovalStepEntity[],
+  ) => Promise<Map<string, SocialApprovalRequestEntity>>;
+  /** Maps a piece to the client vocabulary before it is projected. */
+  presentPiece?: (
+    piece: SocialApprovalPieceEntity,
+  ) => SocialApprovalPieceEntity;
+  detail: (approvalId: string) => Promise<ClientApprovalDetail>;
+};
 
 /**
  * AR1 — the client's board and piece. Same two fail-closed filters as
@@ -49,20 +72,30 @@ export class ClientApprovalBoardService {
     private readonly sync: SocialApprovalPieceSyncService,
   ) {}
 
-  private visible(scope: CompanyAwareScope) {
+  private companySource(
+    scope: CompanyAwareScope,
+    reader?: ClientApprovalReader,
+  ): ClientBoardSource {
+    return {
+      scope,
+      visibleSql: SENT_TO_CLIENT,
+      columnsFor: agencyColumnsFor,
+      latestVisible: (steps) => this.latestSent(scope, steps),
+      detail: (approvalId) =>
+        this.approvals.detail(
+          scope,
+          approvalId,
+          reader as ClientApprovalReader,
+        ),
+    };
+  }
+
+  private visible(source: ClientBoardSource) {
     return this.pieces
       .createQueryBuilder('piece')
-      .where(
-        'piece.tenantId = :tenantId AND piece.workspaceId = :workspaceId AND piece.agencyClientId = :clientId AND piece.companyContextId = :companyId',
-        {
-          tenantId: scope.tenantId,
-          workspaceId: scope.workspaceId,
-          clientId: scope.agencyClientId,
-          companyId: scope.companyContextId,
-        },
-      )
+      .where(approvalScopeWhere(source.scope))
       .andWhere(`piece.sourceState <> 'hidden'`)
-      .andWhere(SENT_TO_CLIENT);
+      .andWhere(source.visibleSql);
   }
 
   private async latestSent(
@@ -83,22 +116,38 @@ export class ClientApprovalBoardService {
     return latest;
   }
 
-  async board(scope: CompanyAwareScope, query: ClientApprovalBoardQueryDto) {
-    await this.sync.syncContexts(scope, [
+  board(scope: CompanyAwareScope, query: ClientApprovalBoardQueryDto) {
+    return this.boardFor(this.companySource(scope), query);
+  }
+
+  piece(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    reader: ClientApprovalReader,
+  ): Promise<ClientPieceDetail> {
+    return this.pieceFor(this.companySource(scope, reader), pieceId);
+  }
+
+  async boardFor(
+    source: ClientBoardSource,
+    query: ClientApprovalBoardQueryDto,
+  ) {
+    await this.sync.syncContexts(source.scope, [
       {
-        clientId: scope.agencyClientId,
-        companyContextId: scope.companyContextId,
+        clientId: source.scope.agencyClientId,
+        companyContextId: source.scope.companyContextId,
       },
     ]);
+    const present = source.presentPiece ?? ((piece) => piece);
     const limit = query.limit ?? DEFAULT_LIMIT;
     const offset = parseBoardCursor(query.cursor);
     const columns = query.column ? [query.column] : [...CLIENT_BOARD_COLUMNS];
     const result: Record<string, unknown> = {};
     await Promise.all(
       columns.map(async (column) => {
-        const [pieces, total] = await this.visible(scope)
+        const [pieces, total] = await this.visible(source)
           .andWhere('piece.boardColumn IN (:...columns)', {
-            columns: agencyColumnsFor(column),
+            columns: source.columnsFor(column),
           })
           .orderBy('piece.updatedAt', 'DESC')
           .addOrderBy('piece.id', 'DESC')
@@ -111,11 +160,11 @@ export class ClientApprovalBoardService {
               order: { position: 'ASC' },
             })
           : [];
-        const latest = await this.latestSent(scope, steps);
+        const latest = await source.latestVisible(steps);
         result[column] = {
           items: pieces.map((piece) =>
             buildClientBoardCard(
-              piece,
+              present(piece),
               steps.filter((step) => step.pieceId === piece.id),
               latest,
             ),
@@ -131,12 +180,11 @@ export class ClientApprovalBoardService {
     return { columns: result };
   }
 
-  async piece(
-    scope: CompanyAwareScope,
+  async pieceFor(
+    source: ClientBoardSource,
     pieceId: string,
-    reader: ClientApprovalReader,
   ): Promise<ClientPieceDetail> {
-    const piece = await this.visible(scope)
+    const piece = await this.visible(source)
       .andWhere('piece.id = :pieceId', { pieceId })
       .getOne();
     if (!piece) throw new NotFoundException('Aprovação não encontrada.');
@@ -144,17 +192,16 @@ export class ClientApprovalBoardService {
       where: { pieceId: piece.id },
       order: { position: 'ASC' },
     });
-    const latest = await this.latestSent(scope, steps);
+    const latest = await source.latestVisible(steps);
+    const present = source.presentPiece ?? ((item) => item);
     return {
-      ...buildClientBoardCard(piece, steps, latest),
+      ...buildClientBoardCard(present(piece), steps, latest),
       steps: await Promise.all(
         steps.map(async (step) => {
           const request = latest.get(step.id);
           return {
             ...buildClientBoardStep(step, request),
-            approval: request
-              ? await this.approvals.detail(scope, request.id, reader)
-              : null,
+            approval: request ? await source.detail(request.id) : null,
           };
         }),
       ),

@@ -135,8 +135,8 @@ export class ClientAreaSelfContextGuard implements CanActivate {
       ClientAreaModuleKey | undefined
     >(CLIENT_AREA_MODULE_KEY, targets);
 
-    // Modules are all-false in the self-context V1, so a module-gated route
-    // is unreachable here by construction rather than by omission (§15).
+    // A module-gated self route answers only for a module with real self
+    // semantics; the others stay false in `selfContext.modules` (§15, D-24).
     if (module && !selfContext.modules[module]) {
       throw new ForbiddenException({
         statusCode: 403,

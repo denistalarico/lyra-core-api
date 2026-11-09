@@ -224,6 +224,10 @@ export class ClientAreaSelfAccessService {
     const agencyRole = operator.role;
     if (agencyRole !== 'owner' && agencyRole !== 'admin') return null;
 
+    const memberAccess = resolveSelfMemberAccess(
+      isClientAreaSelfModulesEnabled(this.config),
+      await this.agencyProducts(access.tenantId),
+    );
     return {
       surface: 'client_area',
       kind: AGENCY_SELF_CONTEXT_ID,
@@ -239,14 +243,13 @@ export class ClientAreaSelfAccessService {
       role: access.role,
       agencyRole,
       permissions: permissionsForClientAreaRole(access.role),
-      memberAccess: resolveSelfMemberAccess(
-        isClientAreaSelfModulesEnabled(this.config),
-        await this.agencyProducts(access.tenantId),
-      ),
-      // V1: no module is company-free yet (§15). Not a placeholder for a
-      // future fake scope — approvals/conversations stay off until they have
-      // real self semantics.
-      modules: { approvals: false, conversations: false },
+      memberAccess,
+      // D-24: approvals run over the own scope. Conversations stay off until
+      // they have real self semantics; there is no fake company scope (§15).
+      modules: {
+        approvals: memberAccess.approvals.available,
+        conversations: false,
+      },
     };
   }
 
@@ -602,9 +605,14 @@ export class ClientAreaSelfAccessService {
         scope.tenantId,
         scope.workspaceId,
       ),
-      // V1 is honest about this: no module is available in the self-context
-      // yet, because approvals and conversations are company-bound (§15).
-      modules: { approvals: false, conversations: false },
+      // Same rule as `resolveSelfContext`: approvals over the own scope (D-24),
+      // conversations still company-bound (§15).
+      modules: {
+        approvals:
+          isClientAreaSelfModulesEnabled(this.config) &&
+          (await this.agencyProducts(scope.tenantId)).has('social'),
+        conversations: false,
+      },
       activeAccessCount: accesses.filter((access) =>
         eligible.some((operator) => operator.userId === access.userId),
       ).length,

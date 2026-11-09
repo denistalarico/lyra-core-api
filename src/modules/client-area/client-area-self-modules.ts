@@ -21,14 +21,15 @@ export type SelfProductKey = 'social' | 'leadflow';
 
 /**
  * CA15 — modules the agency sees in its own Client Area, over its own data
- * (Agency operating mode). Company-bound modules (approvals, conversations,
- * billing, analytics dashboards) stay off: they would need a fake company
- * scope (PD3 §15/§34).
+ * (Agency operating mode). Company-bound modules (conversations, billing,
+ * analytics dashboards) stay off: they would need a fake company scope (PD3
+ * §15/§34). Approvals have real self semantics over the own scope (D-24).
  */
 const SELF_MODULE_PRODUCT: Partial<
   Record<ClientAreaModuleKey, SelfProductKey | null>
 > = {
   agency_projects: null,
+  approvals: 'social',
   social_planner: 'social',
   social_creative_studio: 'social',
   social_campaigns: 'social',

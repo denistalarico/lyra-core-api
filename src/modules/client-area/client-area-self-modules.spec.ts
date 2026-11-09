@@ -29,6 +29,7 @@ describe('CA15 self modules', () => {
       available(resolveSelfMemberAccess(true, new Set(['social']))),
     ).toEqual([
       'agency_projects',
+      'approvals',
       'overview',
       'settings',
       'social_campaigns',
@@ -37,7 +38,6 @@ describe('CA15 self modules', () => {
     ]);
     const all = resolveSelfMemberAccess(true, new Set(['social', 'leadflow']));
     for (const key of [
-      'approvals',
       'conversations',
       'agency_billing',
       'analytics',
@@ -47,6 +47,8 @@ describe('CA15 self modules', () => {
         reason: 'company_bound',
       });
     expect(all.leadflow_inbox).toEqual({ available: true, level: 'manager' });
+    // D-24: approvals run over the own scope and need Social contracted.
+    expect(all.approvals).toEqual({ available: true, level: 'manager' });
   });
 
   it('confines the self Projects scope to internal projects (D-CA15-2)', () => {

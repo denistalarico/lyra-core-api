@@ -11,6 +11,8 @@ import {
   CreativeAssetVersionEntity,
 } from '../../social-creative-studio/entities';
 import { SocialApprovalMediaService } from '../social-approval-media.service';
+import { approvalScopeWhere } from '../approval-scope';
+import type { SocialApprovalRequestEntity } from '../entities';
 import { ClientApprovalsService } from './client-approvals.service';
 import {
   isClientApprovalMediaRef,
@@ -123,7 +125,18 @@ export class ClientApprovalMediaService {
 
     // Step 2: proves company scope *and* that the approval reached the client.
     const approval = await this.approvals.findVisible(scope, approvalId);
+    return this.resolveForApproval(scope, approval, mediaRef);
+  }
 
+  /**
+   * Steps 3 to 5, for an approval the caller already proved visible under its
+   * own surface's rule. D-24: the self area reaches it with the own scope.
+   */
+  async resolveForApproval(
+    scope: CompanyAwareScope,
+    approval: SocialApprovalRequestEntity,
+    mediaRef: ClientApprovalMediaRef,
+  ): Promise<ResolvedMediaAsset> {
     if (approval.subjectType !== 'creative_version') {
       // A text revision has no media slot; asking for one is not an error
       // worth distinguishing from a missing file.
@@ -131,13 +144,7 @@ export class ClientApprovalMediaService {
     }
 
     const asset = await this.assets.findOne({
-      where: {
-        id: approval.subjectId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId!,
-        companyContextId: scope.companyContextId!,
-      },
+      where: { id: approval.subjectId, ...approvalScopeWhere(scope) },
     });
     if (!asset) throw new NotFoundException('Mídia não encontrada.');
 
@@ -176,19 +183,20 @@ export class ClientApprovalMediaService {
     approvalId: string,
   ): Promise<{ media: ResolvedMediaAsset; fileName: string }> {
     const approval = await this.approvals.findVisible(scope, approvalId);
+    return this.deliverableForApproval(scope, approval);
+  }
+
+  async deliverableForApproval(
+    scope: CompanyAwareScope,
+    approval: SocialApprovalRequestEntity,
+  ): Promise<{ media: ResolvedMediaAsset; fileName: string }> {
     if (
       approval.status !== 'approved' ||
       approval.subjectType !== 'creative_version'
     )
       throw new NotFoundException('Mídia não encontrada.');
     const asset = await this.assets.findOne({
-      where: {
-        id: approval.subjectId,
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId!,
-        companyContextId: scope.companyContextId!,
-      },
+      where: { id: approval.subjectId, ...approvalScopeWhere(scope) },
     });
     if (!asset) throw new NotFoundException('Mídia não encontrada.');
     const version = await this.versions.findOne({

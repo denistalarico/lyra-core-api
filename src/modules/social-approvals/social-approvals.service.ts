@@ -420,14 +420,26 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actorUserId: string | null | undefined,
+    surface: SocialApprovalSurface = 'agency',
   ) {
     const actor = this.user(actorUserId);
     const request = await this.find(scope, id);
     const now = new Date();
+    const firstView = !request.internalFirstViewedAt;
     request.internalFirstViewedAt ??= now;
     request.internalLastViewedAt = now;
     request.internalViewedByUserId = actor.userId;
-    return this.requests.save(request);
+    const saved = await this.requests.save(request);
+    // D-24: in the self area this view plays the part of the client's.
+    if (firstView && surface === 'self')
+      await this.pieces.recordRequestEvent(
+        this.dataSource.manager,
+        saved,
+        'viewed',
+        actor,
+        surface,
+      );
+    return saved;
   }
   async markClientViewed(
     scope: CompanyAwareScope,
@@ -541,6 +553,7 @@ export class SocialApprovalsService {
     actorUserId: string | null | undefined,
     body: string,
     visibility: SocialApprovalCommentVisibility = 'internal',
+    surface: SocialApprovalSurface = 'agency',
   ) {
     const actor = this.user(actorUserId);
     const request = await this.find(scope, id);
@@ -566,7 +579,7 @@ export class SocialApprovalsService {
         request,
         'commented',
         actor,
-        'agency',
+        surface,
         { visibility, commentId: comment.id },
       );
       return comment;
@@ -625,6 +638,7 @@ export class SocialApprovalsService {
     id: string,
     actorUserId: string | null | undefined,
     role?: string | null,
+    surface: SocialApprovalSurface = 'agency',
   ) {
     const actor = this.user(actorUserId);
     const saved = await this.dataSource.transaction(async (manager) => {
@@ -667,7 +681,7 @@ export class SocialApprovalsService {
         updated,
         'approved',
         actor,
-        'agency',
+        surface,
         { stage: 'internal' },
       );
       if (!final)
@@ -676,7 +690,7 @@ export class SocialApprovalsService {
           updated,
           'sent',
           actor,
-          'agency',
+          surface,
           { to: 'client' },
         );
       await this.pieces.afterTransition(manager, updated);
@@ -697,9 +711,18 @@ export class SocialApprovalsService {
     actorUserId: string | null | undefined,
     body: string,
     role?: string | null,
+    surface: SocialApprovalSurface = 'agency',
   ) {
     const actor = this.user(actorUserId);
-    return this.requestChangesAs(scope, id, actor, body, 'internal', role);
+    return this.requestChangesAs(
+      scope,
+      id,
+      actor,
+      body,
+      'internal',
+      role,
+      surface,
+    );
   }
   /**
    * D-15 — the Owner approves on behalf of whoever was left to decide. Status
@@ -929,9 +952,10 @@ export class SocialApprovalsService {
     body: string,
     stage: SocialApprovalStage,
     role?: string | null,
+    surface: SocialApprovalSurface = stage === 'client'
+      ? 'client_area'
+      : 'agency',
   ) {
-    const surface: SocialApprovalSurface =
-      stage === 'client' ? 'client_area' : 'agency';
     const saved = await this.dataSource.transaction(async (manager) => {
       const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(

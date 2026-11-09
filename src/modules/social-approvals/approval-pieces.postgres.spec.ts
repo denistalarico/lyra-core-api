@@ -36,6 +36,7 @@ import {
 } from './social-approval-authority.service';
 import { ClientApprovalBoardService } from './client/client-approval-board.service';
 import { ClientApprovalsService } from './client/client-approvals.service';
+import { SelfApprovalsService } from './client/self-approvals.service';
 import {
   SocialApprovalCommentEntity,
   SocialApprovalEventEntity,
@@ -126,6 +127,7 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
   let board: SocialApprovalBoardService;
   let actions: SocialApprovalPieceActionsService;
   let clientBoard: ClientApprovalBoardService;
+  let selfApprovals: SelfApprovalsService;
   const directory = {
     listAuthorizedClients: jest.fn(async () => [
       {
@@ -255,6 +257,20 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       db.getRepository(SocialApprovalRequestEntity),
       clientApprovals,
       sync,
+    );
+    selfApprovals = new SelfApprovalsService(
+      db.getRepository(SocialApprovalRequestEntity),
+      db.getRepository(SocialApprovalCommentEntity),
+      db.getRepository(SocialApprovalStageDecisionEntity),
+      db.getRepository(SocialApprovalEventEntity),
+      db.getRepository(AgencyUserProfileEntity),
+      resolver,
+      approvals,
+      authority,
+      settings,
+      clientBoard,
+      {} as never,
+      {} as never,
     );
 
     const members = db.getRepository(ClientAreaMembershipEntity);
@@ -949,6 +965,147 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       const detail = await clientBoard.piece(scopeA, piece.id, reader);
       expect(detail.column).toBe('awaiting_you');
       const serialized = JSON.stringify(detail);
+      for (const key of [
+        'tenantId',
+        'workspaceId',
+        'agencyClientId',
+        'companyContextId',
+        'sourceId',
+        'requestedByUserId',
+        'subjectId',
+        'subjectRevisionId',
+        'storagePath',
+      ])
+        expect(serialized).not.toContain(key);
+    });
+  });
+
+  describe('agency self area (D-24)', () => {
+    const ownerReader = {
+      userId: ownerUser,
+      agencyRole: 'owner' as const,
+      permissions: { comment: true, decide: true },
+    };
+    const adminReader = {
+      ...ownerReader,
+      userId: operator,
+      agencyRole: 'admin' as const,
+    };
+    type Columns = {
+      columns: Record<string, { items: Array<{ id: string; column: string }> }>;
+    };
+    const selfCards = async () =>
+      Object.values(
+        ((await selfApprovals.boardList(own, { limit: 100 })) as Columns)
+          .columns,
+      ).flatMap((column) => column.items);
+
+    it('a draft does not exist on self; the first submit shows it awaiting you', async () => {
+      const { request, item } = await draftRequest(own);
+      await sync.syncContexts(own, [
+        { clientId: null, companyContextId: null },
+      ]);
+      const piece = await pieceOf(item.id);
+      expect((await selfCards()).map((card) => card.id)).not.toContain(
+        piece.id,
+      );
+      await expect(
+        selfApprovals.piece(own, piece.id, ownerReader),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        selfApprovals.detail(own, request.id, ownerReader),
+      ).rejects.toMatchObject({ status: 404 });
+
+      await approvals.submit(own, request.id, operator);
+      const card = (await selfCards()).find((c) => c.id === piece.id);
+      expect(card?.column).toBe('awaiting_you');
+      const detail = await selfApprovals.detail(own, request.id, ownerReader);
+      expect(detail).toMatchObject({
+        status: 'awaiting_your_review',
+        needsYou: true,
+        actions: { canComment: true, canDecide: true },
+      });
+      expect(detail.sentToClientAt).toEqual(expect.any(String));
+    });
+
+    it('the decision is the internal approval, recorded as coming from self', async () => {
+      const { request } = await draftRequest(own);
+      await approvals.submit(own, request.id, operator);
+      const detail = await selfApprovals.approve(own, request.id, ownerReader);
+      expect(detail.status).toBe('approved');
+      const row = await db
+        .getRepository(SocialApprovalRequestEntity)
+        .findOneByOrFail({ id: request.id });
+      expect(row).toMatchObject({
+        resolution: 'internal_final',
+        sentToClientAt: null,
+      });
+      const event = await db
+        .getRepository(SocialApprovalEventEntity)
+        .findOneByOrFail({ requestId: request.id, type: 'approved' });
+      expect(event.surface).toBe('self');
+      expect(detail.history.map((entry) => entry.kind)).toContain('approved');
+    });
+
+    it('request changes returns to the agency, and an Admin needs D-17', async () => {
+      const { request } = await draftRequest(own);
+      await approvals.submit(own, request.id, operator);
+      const asAdmin = await selfApprovals.detail(own, request.id, adminReader);
+      expect(asAdmin.actions.canDecide).toBe(false);
+      await expect(
+        selfApprovals.approve(own, request.id, adminReader),
+      ).rejects.toEqual(expectCode('approval_not_designated'));
+
+      await settings.update(own, ownerUser, {
+        internalApproverUserIds: [ownerUser],
+      });
+      const detail = await selfApprovals.requestChanges(
+        own,
+        request.id,
+        ownerReader,
+        'ajustar o texto',
+      );
+      expect(detail.status).toBe('in_revision');
+      expect(detail.comments[0]).toMatchObject({
+        body: 'ajustar o texto',
+        mine: true,
+        author: { name: 'Dono da Agência', side: 'agency' },
+      });
+    });
+
+    it('comments only while open, and never as a client-visible row', async () => {
+      const { request } = await draftRequest(own);
+      await approvals.submit(own, request.id, operator);
+      await selfApprovals.comment(own, request.id, ownerReader, 'nota');
+      const comment = await db
+        .getRepository(SocialApprovalCommentEntity)
+        .findOneByOrFail({ approvalRequestId: request.id });
+      expect(comment.visibility).toBe('internal');
+      await selfApprovals.approve(own, request.id, ownerReader);
+      await expect(
+        selfApprovals.comment(own, request.id, ownerReader, 'outra'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('never shows a company piece, and the projection has no internal key', async () => {
+      const company = await awaitingClient(scopeA);
+      const companyPiece = await pieceOf(company.item.id);
+      expect((await selfCards()).map((card) => card.id)).not.toContain(
+        companyPiece.id,
+      );
+      await expect(
+        selfApprovals.piece(own, companyPiece.id, ownerReader),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        selfApprovals.detail(own, company.request.id, ownerReader),
+      ).rejects.toMatchObject({ status: 404 });
+
+      const { request, item } = await draftRequest(own);
+      await approvals.submit(own, request.id, operator);
+      const piece = await pieceOf(item.id);
+      const serialized = JSON.stringify(
+        await selfApprovals.piece(own, piece.id, ownerReader),
+      );
       for (const key of [
         'tenantId',
         'workspaceId',
