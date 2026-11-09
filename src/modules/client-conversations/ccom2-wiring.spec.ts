@@ -7,8 +7,12 @@ import { ClientConversationApprovalsAdapter } from '../social-approvals/client/c
 import { ClientConversationCardRegistry } from '../social-approvals/client-conversation-card.port';
 import {
   SocialApprovalCommentEntity,
+  SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
+  SocialApprovalStepEntity,
 } from '../social-approvals/entities';
+import { SocialApprovalAuthorityService } from '../social-approvals/social-approval-authority.service';
+import { SocialApprovalSettingsService } from '../social-approvals/social-approval-settings.service';
 import { ClientConversationApprovalsRegistry } from './client-conversation-approvals.port';
 import { AgencyClientConversationsGateway } from './gateways/agency-client-conversations.gateway';
 import { ClientConversationsGateway } from './gateways/client-conversations.gateway';
@@ -59,6 +63,16 @@ describe('CCOM2 port registries', () => {
         { provide: ClientConversationsGateway, useValue: {} },
         { provide: AgencyClientConversationsGateway, useValue: {} },
         { provide: ClientApprovalsService, useValue: {} },
+        { provide: SocialApprovalAuthorityService, useValue: {} },
+        { provide: SocialApprovalSettingsService, useValue: {} },
+        {
+          provide: getRepositoryToken(SocialApprovalStepEntity, 'agency'),
+          useValue: {},
+        },
+        {
+          provide: getRepositoryToken(SocialApprovalPieceEntity, 'agency'),
+          useValue: {},
+        },
         {
           provide: getRepositoryToken(SocialApprovalRequestEntity, 'agency'),
           useValue: {},
@@ -90,6 +104,10 @@ describe('CCOM2 port registries', () => {
    */
   describe('resolveActions', () => {
     const adapter = new ClientConversationApprovalsAdapter(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
       {} as never,
       {} as never,
       {} as never,

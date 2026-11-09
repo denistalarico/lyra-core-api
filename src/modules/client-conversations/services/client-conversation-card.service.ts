@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ClientAreaManagementService } from '../../client-area/services/client-area-management.service';
-import type { ClientConversationCardPublisher } from '../../social-approvals/client-conversation-card.port';
+import type {
+  ApprovalDecisionRecord,
+  ClientConversationCardPublisher,
+} from '../../social-approvals/client-conversation-card.port';
 import type { SocialApprovalRequestEntity } from '../../social-approvals/entities';
 import { AgencyClientConversationsGateway } from '../gateways/agency-client-conversations.gateway';
 import { ClientConversationsGateway } from '../gateways/client-conversations.gateway';
@@ -75,6 +78,13 @@ export class ClientConversationCardService implements ClientConversationCardPubl
       if (result.status === 'posted' && result.conversationId) {
         this.broadcastMessage(scope, result.conversationId, result.message);
       }
+      // D-19: another item of a batch joined the card that is already there.
+      if (result.status === 'duplicate' && input.approval.batchId) {
+        await this.announceApprovalActivity({
+          approval: input.approval,
+          reason: 'decision_changed',
+        });
+      }
 
       return { status: result.status };
     } catch (error) {
@@ -128,6 +138,43 @@ export class ClientConversationCardService implements ClientConversationCardPubl
   }
 
   /**
+   * AR5 entrega 2 — one line per decision, deduplicated by the event id. The
+   * reason of a change request is not here: it is a client-visible comment the
+   * timeline already projects. An override never names the operator.
+   */
+  async publishDecisionLine(input: {
+    approval: SocialApprovalRequestEntity;
+    record: ApprovalDecisionRecord;
+  }): Promise<void> {
+    try {
+      const scope = this.scopeOf(input.approval);
+      if (!scope) return;
+      const modules = await this.management.resolveCompanyModules(scope);
+      if (!modules.conversations) return;
+
+      const result = await this.conversations.publishSystemLine(
+        scope,
+        decisionLine(input.approval, input.record),
+        {
+          decision: {
+            approvalId: input.approval.id,
+            type: input.record.decision,
+          },
+        },
+        `social.approval.decision:${input.record.eventId}`,
+      );
+      if (result.status === 'posted' && result.conversationId) {
+        this.broadcastMessage(scope, result.conversationId, result.message);
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to record decision for ${input.approval.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
    * The conversation scope of an approval.
    *
    * All four ids come off the approval row itself, which carries the same
@@ -169,4 +216,17 @@ export class ClientConversationCardService implements ClientConversationCardPubl
     this.clientRealtime.broadcastMessageCreated(payload);
     this.agencyRealtime.broadcastMessageCreated(payload);
   }
+}
+
+function decisionLine(
+  approval: SocialApprovalRequestEntity,
+  record: ApprovalDecisionRecord,
+): string {
+  const subject = `${approval.title} (${approval.subjectVersionLabel})`;
+  if (record.decision === 'agency_override')
+    return `Aprovado pela agência: ${subject}.`;
+  const who = record.actorName ?? 'Cliente';
+  return record.decision === 'approved'
+    ? `${who} aprovou ${subject}.`
+    : `${who} solicitou alterações em ${subject}.`;
 }

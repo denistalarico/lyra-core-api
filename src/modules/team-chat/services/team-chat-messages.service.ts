@@ -33,6 +33,7 @@ import { TeamChatNotificationPublisher } from './team-chat-notification.publishe
 import { TeamChatChannelKind, TeamChatChannelVisibility } from '../enums';
 import { isElevatedRole, type TeamChatContext } from './team-chat-access';
 import { TeamChatOrionMentionService } from './team-chat-orion-mention.service';
+import { TeamChatCardResolverRegistry } from './team-chat-card-resolver.port';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -53,7 +54,45 @@ export class TeamChatMessagesService {
     // Other side of the gateway's forward reference (OR6 cycle).
     @Inject(forwardRef(() => TeamChatOrionMentionService))
     private readonly orionMentions: TeamChatOrionMentionService,
+    private readonly cardResolvers?: TeamChatCardResolverRegistry,
   ) {}
+
+  /**
+   * AR5 — a card's status and actions are per reader, so they are resolved
+   * here and never stored. A failure leaves the card without them, which the
+   * client renders as a record with no action.
+   */
+  private async withResolvedCards(
+    context: TeamChatContext,
+    messages: AgencyChatMessage[],
+  ): Promise<AgencyChatMessage[]> {
+    const resolver = this.cardResolvers?.get();
+    if (!resolver) return messages;
+    try {
+      const resolved = await resolver.resolve(context, messages);
+      return messages.map((message) => {
+        const extra = resolved.get(message.id);
+        if (!extra) return message;
+        return {
+          ...message,
+          metadata: {
+            ...message.metadata,
+            card: {
+              ...(message.metadata?.card as Record<string, unknown>),
+              ...extra,
+            },
+          },
+        };
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Team chat card resolution failed: ${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+      return messages;
+    }
+  }
 
   /**
    * Appends a fresh, viewer-bound grant to any attachment URL the message
@@ -111,9 +150,12 @@ export class TeamChatMessagesService {
       take: limit,
     });
 
-    return messages
-      .reverse()
-      .map((message) => this.authorizeMessage(message, context.userId));
+    return this.withResolvedCards(
+      context,
+      messages
+        .reverse()
+        .map((message) => this.authorizeMessage(message, context.userId)),
+    );
   }
 
   async create(
@@ -469,8 +511,9 @@ export class TeamChatMessagesService {
       .take(limit)
       .getMany();
 
-    return results.map((message) =>
-      this.authorizeMessage(message, context.userId),
+    return this.withResolvedCards(
+      context,
+      results.map((message) => this.authorizeMessage(message, context.userId)),
     );
   }
 

@@ -58,6 +58,55 @@ export class TeamChatCardPostService {
     return this.postMessage(input, undefined, input.parentMessageId);
   }
 
+  /** The newest top-level card a module published about a resource. */
+  findCardMessage(input: {
+    tenantId: string;
+    workspaceId: string;
+    module: string;
+    resourceId: string;
+  }): Promise<AgencyChatMessage | null> {
+    return this.messagesRepository
+      .createQueryBuilder('message')
+      .where('message.tenant_id = :tenantId', { tenantId: input.tenantId })
+      .andWhere('message.workspace_id = :workspaceId', {
+        workspaceId: input.workspaceId,
+      })
+      .andWhere('message.parent_message_id IS NULL')
+      .andWhere('message.sender_user_id IS NULL')
+      .andWhere("message.metadata -> 'card' IS NOT NULL")
+      .andWhere("message.metadata -> 'source' ->> 'module' = :module", {
+        module: input.module,
+      })
+      .andWhere("message.metadata -> 'source' ->> 'resourceId' = :resourceId", {
+        resourceId: input.resourceId,
+      })
+      .orderBy('message.created_at', 'DESC')
+      .getOne();
+  }
+
+  /** R-21 — a signal, not a payload: status is resolved per reader. */
+  broadcastCardChanged(input: {
+    tenantId: string;
+    workspaceId: string;
+    channelId: string;
+    messageId: string;
+  }): void {
+    try {
+      this.gateway.broadcastCardChanged(
+        input.tenantId,
+        input.workspaceId,
+        input.channelId,
+        input.messageId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Team chat card broadcast failed: ${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+    }
+  }
+
   private async postMessage(
     input: TeamChatCardPostInput | TeamChatAgentReplyInput,
     card: TeamChatCardPostInput['card'] | undefined,
@@ -90,34 +139,48 @@ export class TeamChatCardPostService {
       return { status: 'duplicate', messageId: existing.id };
     }
 
-    const saved = await this.messagesRepository.save(
-      this.messagesRepository.create({
-        tenantId: input.tenantId,
-        workspaceId: input.workspaceId,
-        channelId: channel.id,
-        meetingRoomId: null,
-        parentMessageId,
-        senderUserId: null,
-        senderTeamMemberId: null,
-        externalGuestId: null,
-        senderDisplayName: input.sender.displayName,
-        kind: TeamChatMessageKind.TEXT,
-        status: TeamChatMessageStatus.SENT,
-        body: input.body,
-        metadata: {
-          ...(card ? { card } : {}),
-          ...('replyTo' in input ? { replyTo: input.replyTo } : {}),
-          dedupeKey: input.dedupeKey,
-          agent: {
-            id: input.sender.agentId ?? null,
-            name: input.sender.displayName,
-            type: input.sender.agentType ?? null,
+    let saved: AgencyChatMessage;
+    try {
+      saved = await this.messagesRepository.save(
+        this.messagesRepository.create({
+          ...('messageId' in input && input.messageId
+            ? { id: input.messageId }
+            : {}),
+          tenantId: input.tenantId,
+          workspaceId: input.workspaceId,
+          channelId: channel.id,
+          meetingRoomId: null,
+          parentMessageId,
+          senderUserId: null,
+          senderTeamMemberId: null,
+          externalGuestId: null,
+          senderDisplayName: input.sender.displayName,
+          kind: TeamChatMessageKind.TEXT,
+          status: TeamChatMessageStatus.SENT,
+          body: input.body,
+          metadata: {
+            ...(card ? { card } : {}),
+            ...('replyTo' in input ? { replyTo: input.replyTo } : {}),
+            dedupeKey: input.dedupeKey,
+            agent: {
+              id: input.sender.agentId ?? null,
+              name: input.sender.displayName,
+              type: input.sender.agentType ?? null,
+            },
+            source: input.source ?? null,
           },
-          source: input.source ?? null,
-        },
-        deliveredAt: new Date(),
-      }),
-    );
+          deliveredAt: new Date(),
+        }),
+      );
+    } catch (error) {
+      if (
+        'messageId' in input &&
+        input.messageId &&
+        (error as { code?: string })?.code === '23505'
+      )
+        return { status: 'duplicate', messageId: input.messageId };
+      throw error;
+    }
 
     try {
       this.gateway.broadcastMessageCreated(

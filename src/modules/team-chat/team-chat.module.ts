@@ -29,6 +29,7 @@ import { NotificationsModule } from '../notifications';
 import { PermissionsModule } from '../permissions';
 import { TeamChatNotificationPublisher } from './services/team-chat-notification.publisher';
 import { TeamChatCardPostService } from './services/team-chat-card-post.service';
+import { TeamChatCardResolverRegistry } from './services/team-chat-card-resolver.port';
 // Agency connection: the agency `workspace_users` mapping (the core entity has no metadata there).
 import { AgencyWorkspaceUserEntity as WorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
@@ -100,6 +101,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatNotificationPublisher,
     TeamChatUserSettingsService,
     TeamChatCardPostService,
+    TeamChatCardResolverRegistry,
     TeamChatGateway,
     TeamChatOrionMentionService,
   ],
@@ -112,6 +114,7 @@ const AGENCY_CONNECTION = 'agency';
     TeamChatNotificationPublisher,
     TeamChatUserSettingsService,
     TeamChatCardPostService,
+    TeamChatCardResolverRegistry,
   ],
 })
 export class TeamChatModule {}

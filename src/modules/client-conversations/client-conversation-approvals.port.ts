@@ -51,6 +51,30 @@ export type ConversationApprovalCardState = {
   sentToClientAt: string;
   /** AP4 — present only when a client-visible replacement was proven safe. */
   replacementApprovalId?: string;
+  /** AR5 — what the card is about, for the drawer's format. */
+  piece?: { id: string; kind: string; stepKind: string; stepTitle: string };
+  /**
+   * D-17 for this reader, so a person who cannot decide gets no action. Absent
+   * for a reader with no client identity (Agency, support preview).
+   */
+  designated?: boolean;
+  /** D-19 — present only when the card stands for more than one approval. */
+  batch?: ConversationApprovalBatch;
+};
+
+export type ConversationApprovalBatchItem = {
+  approvalId: string;
+  title: string;
+  displayType: string;
+  versionLabel: string;
+  status: ConversationApprovalStatus;
+  needsAction: boolean;
+};
+
+export type ConversationApprovalBatch = {
+  total: number;
+  pending: number;
+  items: ConversationApprovalBatchItem[];
 };
 
 /** One projected approval comment, in the timeline's terms. */
@@ -82,10 +106,13 @@ export type ClientConversationApprovalsPort = {
    * simply does not appear in the returned map, and the renderer then has a
    * card it cannot resolve (§15). It is never an error, because one unresolvable
    * row must not take down a whole timeline page.
+   *
+   * `reader.userId` is null for a reader with no client identity.
    */
   resolveCards(
     scope: ClientConversationScope,
     approvalIds: readonly string[],
+    reader: { userId: string | null },
   ): Promise<Map<string, ConversationApprovalCardState>>;
 
   /**

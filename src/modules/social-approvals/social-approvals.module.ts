@@ -23,6 +23,7 @@ import { ApprovalClientReviewService } from './approval-client-review.service';
 import { ClientApprovalNotifierRegistry } from './client-approval-notifier.port';
 import { SocialApprovalTransitionRegistry } from './approval-transition.port';
 import { ClientConversationCardRegistry } from './client-conversation-card.port';
+import { TeamChatApprovalCardRegistry } from './team-chat-approval-card.port';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import {
   SocialApprovalCommentEntity,
@@ -115,6 +116,8 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     // until then, which is how this domain keeps working without the
     // conversation surface.
     ClientConversationCardRegistry,
+    // AR5 — same shape; `SocialApprovalsTeamChatModule` fills it on init.
+    TeamChatApprovalCardRegistry,
     /**
      * NTF-C1 §48 — declared here, inside the publisher's own resolution
      * context, for the same reason as the card registry. The token this
@@ -135,6 +138,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     ApprovalSubjectResolver,
     SocialApprovalNotificationPublisher,
     ClientConversationCardRegistry,
+    TeamChatApprovalCardRegistry,
     ClientApprovalNotifierRegistry,
     SocialApprovalTransitionRegistry,
     TypeOrmModule,

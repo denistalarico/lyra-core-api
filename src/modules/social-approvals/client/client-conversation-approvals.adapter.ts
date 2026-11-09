@@ -10,13 +10,19 @@ import type {
 import type { ClientConversationScope } from '../../client-conversations/services/client-conversation-access';
 import {
   SocialApprovalCommentEntity,
+  SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
+  SocialApprovalStepEntity,
 } from '../entities';
+import { SocialApprovalAuthorityService } from '../social-approval-authority.service';
+import { SocialApprovalSettingsService } from '../social-approval-settings.service';
 import { ClientApprovalsService } from './client-approvals.service';
 import { buildClientApprovalListItem } from './client-approval.view';
 import { resolveReplacementApproval } from './resolve-replacement-approval';
 
 const AGENCY_CONNECTION = 'agency';
+/** D-19: what a batch card lists; the board shows the rest. */
+const MAX_BATCH_ITEMS = 50;
 
 /**
  * CCOM2 §11/§16/§17 — the approvals side of the conversation timeline.
@@ -51,7 +57,13 @@ export class ClientConversationApprovalsAdapter implements ClientConversationApp
     private readonly requests: Repository<SocialApprovalRequestEntity>,
     @InjectRepository(SocialApprovalCommentEntity, AGENCY_CONNECTION)
     private readonly comments: Repository<SocialApprovalCommentEntity>,
+    @InjectRepository(SocialApprovalStepEntity, AGENCY_CONNECTION)
+    private readonly steps: Repository<SocialApprovalStepEntity>,
+    @InjectRepository(SocialApprovalPieceEntity, AGENCY_CONNECTION)
+    private readonly pieces: Repository<SocialApprovalPieceEntity>,
     private readonly approvals: ClientApprovalsService,
+    private readonly authority: SocialApprovalAuthorityService,
+    private readonly settings: SocialApprovalSettingsService,
   ) {}
 
   /**
@@ -83,6 +95,7 @@ export class ClientConversationApprovalsAdapter implements ClientConversationApp
   async resolveCards(
     scope: ClientConversationScope,
     approvalIds: readonly string[],
+    reader: { userId: string | null },
   ): Promise<Map<string, ConversationApprovalCardState>> {
     const resolved = new Map<string, ConversationApprovalCardState>();
     if (approvalIds.length === 0) return resolved;
@@ -90,6 +103,26 @@ export class ClientConversationApprovalsAdapter implements ClientConversationApp
     const approvals = await this.requests.find({
       where: { ...this.visibleWhere(scope), id: In([...approvalIds]) },
     });
+    if (approvals.length === 0) return resolved;
+
+    const approvalScope = this.toApprovalScope(scope);
+    const [pieces, batches, settings] = await Promise.all([
+      this.pieceFacts(approvals),
+      this.batchMembers(scope, approvals),
+      reader.userId ? this.settings.get(approvalScope) : null,
+    ]);
+
+    /** D-17, re-read per request, so a revoked person loses it immediately. */
+    const designatedFor = async (approval: SocialApprovalRequestEntity) =>
+      reader.userId && settings && approval.status === 'awaiting_client'
+        ? this.authority.canDecideClient(
+            this.requests.manager,
+            approvalScope,
+            approval,
+            settings,
+            reader.userId,
+          )
+        : false;
 
     for (const approval of approvals) {
       // AP4 — only a `superseded` row can carry a replacement, and the
@@ -99,7 +132,7 @@ export class ClientConversationApprovalsAdapter implements ClientConversationApp
         approval.status === 'superseded'
           ? await resolveReplacementApproval(
               this.requests,
-              this.toApprovalScope(scope),
+              approvalScope,
               approval,
             )
           : null;
@@ -110,21 +143,126 @@ export class ClientConversationApprovalsAdapter implements ClientConversationApp
         replacement?.id ?? null,
       );
 
+      const members = approval.batchId
+        ? (batches.get(approval.batchId) ?? [])
+        : [];
+      const batched = members.length > 1;
+      const open = batched
+        ? members.find((member) => member.status === 'awaiting_client')
+        : approval;
+      const designated = reader.userId
+        ? await designatedFor(open ?? approval)
+        : undefined;
+      const batch = batched ? this.batchState(members) : undefined;
+      const status = batch
+        ? batch.pending > 0
+          ? ('awaiting_your_review' as const)
+          : batch.items.every((entry) => entry.status === 'approved')
+            ? ('approved' as const)
+            : item.status
+        : item.status;
+
       resolved.set(approval.id, {
+        approvalId: item.id,
+        title: item.title,
+        displayType: item.displayType,
+        versionLabel: item.versionLabel,
+        status,
+        needsAction:
+          (batch ? batch.pending > 0 : item.needsYou) && designated !== false,
+        sentToClientAt: item.sentToClientAt,
+        ...(item.replacementApprovalId
+          ? { replacementApprovalId: item.replacementApprovalId }
+          : {}),
+        ...(pieces.has(approval.id) ? { piece: pieces.get(approval.id)! } : {}),
+        ...(designated === undefined ? {} : { designated }),
+        ...(batch ? { batch } : {}),
+      });
+    }
+
+    return resolved;
+  }
+
+  /** Field by field, through the same projector as a single card (§11). */
+  private batchState(members: readonly SocialApprovalRequestEntity[]) {
+    const items = members.map((member) => {
+      const item = buildClientApprovalListItem(member, [], null);
+      return {
         approvalId: item.id,
         title: item.title,
         displayType: item.displayType,
         versionLabel: item.versionLabel,
         status: item.status,
         needsAction: item.needsYou,
-        sentToClientAt: item.sentToClientAt,
-        ...(item.replacementApprovalId
-          ? { replacementApprovalId: item.replacementApprovalId }
-          : {}),
-      });
-    }
+      };
+    });
+    return {
+      total: items.length,
+      pending: items.filter((entry) => entry.needsAction).length,
+      items: items.slice(0, MAX_BATCH_ITEMS),
+    };
+  }
 
-    return resolved;
+  /** Visible members of each batch, under the same rule as the cards. */
+  private async batchMembers(
+    scope: ClientConversationScope,
+    approvals: readonly SocialApprovalRequestEntity[],
+  ) {
+    const batchIds = [
+      ...new Set(
+        approvals
+          .map((approval) => approval.batchId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const byBatch = new Map<string, SocialApprovalRequestEntity[]>();
+    if (batchIds.length === 0) return byBatch;
+    const members = await this.requests.find({
+      where: { ...this.visibleWhere(scope), batchId: In(batchIds) },
+      order: { sentToClientAt: 'ASC', id: 'ASC' },
+    });
+    for (const member of members) {
+      const bucket = byBatch.get(member.batchId!) ?? [];
+      bucket.push(member);
+      byBatch.set(member.batchId!, bucket);
+    }
+    return byBatch;
+  }
+
+  /** The piece and step of each approval; absent for an unbackfilled row. */
+  private async pieceFacts(approvals: readonly SocialApprovalRequestEntity[]) {
+    const facts = new Map<
+      string,
+      NonNullable<ConversationApprovalCardState['piece']>
+    >();
+    const stepIds = [
+      ...new Set(
+        approvals
+          .map((approval) => approval.stepId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    if (stepIds.length === 0) return facts;
+    const steps = await this.steps.find({ where: { id: In(stepIds) } });
+    const pieces = steps.length
+      ? await this.pieces.find({
+          where: { id: In(steps.map((step) => step.pieceId)) },
+        })
+      : [];
+    const stepById = new Map(steps.map((step) => [step.id, step]));
+    const pieceById = new Map(pieces.map((piece) => [piece.id, piece]));
+    for (const approval of approvals) {
+      const step = approval.stepId ? stepById.get(approval.stepId) : undefined;
+      const piece = step ? pieceById.get(step.pieceId) : undefined;
+      if (step && piece)
+        facts.set(approval.id, {
+          id: piece.id,
+          kind: piece.kind,
+          stepKind: step.kind,
+          stepTitle: step.title,
+        });
+    }
+    return facts;
   }
 
   /**
@@ -242,7 +380,9 @@ export class ClientConversationApprovalsAdapter implements ClientConversationApp
     const open = input.state.status === 'awaiting_your_review';
     return {
       canComment: open && input.permissions.comment,
-      canDecide: open && input.permissions.decide,
+      // D-17: the role grants the right, and the designation narrows it.
+      canDecide:
+        open && input.permissions.decide && input.state.designated !== false,
       canOpenPreview: true,
     };
   }

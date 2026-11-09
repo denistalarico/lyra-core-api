@@ -335,6 +335,21 @@ export class TeamChatGateway
       .emit('team-chat:message-created', message);
   }
 
+  /**
+   * AR5 / R-21 — a card's status changed. Only the ids travel: status and
+   * actions are per reader, so each client re-reads its own view.
+   */
+  broadcastCardChanged(
+    tenantId: string,
+    workspaceId: string,
+    channelId: string,
+    messageId: string,
+  ): void {
+    this.server
+      ?.to(this.getChannelRoom(tenantId, workspaceId, channelId))
+      .emit('team-chat:card-changed', { channelId, messageId });
+  }
+
   private async emitTyping(
     client: TeamChatSocket,
     payload: TypingPayload,

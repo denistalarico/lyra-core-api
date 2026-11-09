@@ -1,5 +1,19 @@
 import { Injectable } from '@nestjs/common';
-import type { SocialApprovalRequestEntity } from './entities';
+import type {
+  SocialApprovalRequestEntity,
+  SocialApprovalStage,
+  SocialApprovalSurface,
+} from './entities';
+
+/** AR5: one decision, as the conversation and the Team Chat narrate it. */
+export type ApprovalDecisionRecord = {
+  /** `social_approval_events.id`, which is what deduplicates the record. */
+  eventId: string;
+  decision: 'approved' | 'changes_requested' | 'agency_override';
+  stage: SocialApprovalStage;
+  actorName: string | null;
+  surface: SocialApprovalSurface;
+};
 
 /**
  * CCOM2 §7 — the seam between the approvals domain and the Client Conversation
@@ -63,6 +77,15 @@ export type ClientConversationCardPublisher = {
   announceApprovalActivity(input: {
     approval: SocialApprovalRequestEntity;
     reason: 'comment_created' | 'decision_changed';
+  }): Promise<void>;
+
+  /**
+   * AR5 entrega 2: a system line recording one decision, once per event. Never
+   * throws, for the same reason as the card (§10).
+   */
+  publishDecisionLine(input: {
+    approval: SocialApprovalRequestEntity;
+    record: ApprovalDecisionRecord;
   }): Promise<void>;
 };
 

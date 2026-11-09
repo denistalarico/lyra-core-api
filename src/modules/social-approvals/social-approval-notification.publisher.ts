@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import {
   NotificationActorType,
   NotificationInterestReason,
@@ -11,7 +12,37 @@ import {
   ClientApprovalNotifierRegistry,
   type ClientApprovalNotificationType,
 } from './client-approval-notifier.port';
-import { ClientConversationCardRegistry } from './client-conversation-card.port';
+import {
+  ClientConversationCardRegistry,
+  type ApprovalDecisionRecord,
+} from './client-conversation-card.port';
+import {
+  SocialApprovalSettingsService,
+  type EffectiveSocialApprovalSettings,
+} from './social-approval-settings.service';
+import { TeamChatApprovalCardRegistry } from './team-chat-approval-card.port';
+
+export type ApprovalNotificationAudience = 'agency' | 'client';
+
+/**
+ * AR5 entrega 8 — whether a context left an event on for an audience. An
+ * absent key means on, so a context with no configuration keeps today's
+ * behaviour. This is the agency's switch for the context; each person's own
+ * preferences are still applied by the notifications core.
+ */
+export function approvalNotificationEnabled(
+  events: Record<string, unknown> | null | undefined,
+  event: string,
+  audience: ApprovalNotificationAudience,
+): boolean {
+  const value = events?.[event];
+  if (typeof value === 'boolean') return value;
+  if (value && typeof value === 'object') {
+    const flag = (value as Record<string, unknown>)[audience];
+    if (typeof flag === 'boolean') return flag;
+  }
+  return true;
+}
 
 export type SocialApprovalNotificationType =
   | 'awaiting_client'
@@ -103,17 +134,219 @@ export class SocialApprovalNotificationPublisher {
      */
     @Optional()
     private readonly conversationCards?: ClientConversationCardRegistry,
+    /** AR5 — optional only for specs that build this publisher by hand. */
+    @Optional()
+    private readonly teamChatCards?: TeamChatApprovalCardRegistry,
+    @Optional()
+    private readonly settings?: SocialApprovalSettingsService,
   ) {}
+
+  /**
+   * AR5 — the context's configuration, or null when it cannot be read. Null
+   * behaves as "no row" (everything on): a fan-out failure may never fail the
+   * transition that already committed.
+   */
+  private async settingsFor(
+    approval: SocialApprovalRequestEntity,
+  ): Promise<EffectiveSocialApprovalSettings | null> {
+    if (!this.settings) return null;
+    try {
+      return await this.settings.get({
+        tenantId: approval.tenantId,
+        workspaceId: approval.workspaceId,
+        agencyClientId: approval.agencyClientId,
+        companyContextId: approval.companyContextId,
+      } as CompanyAwareScope);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to read approval settings for ${approval.id}: ${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+      return null;
+    }
+  }
 
   async publish(
     type: SocialApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
     actorUserId: string | null,
   ): Promise<void> {
+    const settings = await this.settingsFor(approval);
     await Promise.all([
-      this.publishToAgency(type, approval, actorUserId),
-      this.publishToConversation(type, approval),
+      this.publishToAgency(type, approval, actorUserId, settings),
+      this.publishToConversation(type, approval, settings),
     ]);
+  }
+
+  /**
+   * AR5 — a request entered the internal stage: the designated approvers hear
+   * about it (D-17) and the configured channel gets the card (D-07, R-20).
+   * `sentEventId` keeps a second round of one request from colliding with the
+   * first, since the request id alone does not change between them.
+   */
+  async publishInternalReview(
+    approval: SocialApprovalRequestEntity,
+    actorUserId: string | null,
+    sentEventId: string | null,
+  ): Promise<void> {
+    const settings = await this.settingsFor(approval);
+    const key = approval.batchId
+      ? `batch:${approval.batchId}`
+      : `${approval.id}:${sentEventId ?? approval.updatedAt?.toISOString()}`;
+    const eventId = `social.approval.awaiting_internal_review:${key}`;
+    await Promise.all([
+      this.notifyInternalApprovers(approval, actorUserId, settings, eventId),
+      this.publishToTeamChat(approval, settings, eventId),
+    ]);
+  }
+
+  private async notifyInternalApprovers(
+    approval: SocialApprovalRequestEntity,
+    actorUserId: string | null,
+    settings: EffectiveSocialApprovalSettings | null,
+    eventId: string,
+  ): Promise<void> {
+    if (!settings || !this.settings) return;
+    if (
+      !approvalNotificationEnabled(
+        settings.notificationEvents,
+        'awaiting_internal_review',
+        'agency',
+      )
+    )
+      return;
+    try {
+      const userIds = await this.settings.internalApproverRecipients(
+        {
+          tenantId: approval.tenantId,
+          workspaceId: approval.workspaceId,
+        } as CompanyAwareScope,
+        settings,
+      );
+      if (userIds.length === 0) return;
+      const title = approval.batchId
+        ? 'Lote aguardando aprovação interna'
+        : 'Aprovação interna pendente';
+      await this.notifications.process({
+        eventId,
+        eventType: 'social.approval.awaiting_internal_review',
+        tenantId: approval.tenantId,
+        workspaceId: approval.workspaceId,
+        productKey: NotificationProductKey.SOCIAL,
+        moduleKey: 'approvals',
+        actorType: actorUserId
+          ? NotificationActorType.USER
+          : NotificationActorType.SYSTEM,
+        actorUserId,
+        resourceType: 'social_approval_request',
+        resourceId: approval.id,
+        occurredAt: (approval.updatedAt ?? new Date()).toISOString(),
+        recipients: userIds.map((userId) => ({
+          userId,
+          interestReason: NotificationInterestReason.APPROVER,
+        })),
+        payload: {
+          title,
+          body: approval.batchId
+            ? 'Um lote de peças aguarda a sua aprovação interna.'
+            : `${approval.title} (${approval.subjectVersionLabel}): ${title}.`,
+          actionUrl: approval.batchId
+            ? '/social/approvals'
+            : `/social/approvals?approvalId=${encodeURIComponent(approval.id)}`,
+          approvalId: approval.id,
+          subjectType: approval.subjectType,
+          subjectTitle: approval.title,
+          subjectVersionLabel: approval.subjectVersionLabel,
+          status: approval.status,
+          companyContextId: approval.companyContextId,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Failed to notify internal approvers for ${approval.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  private async publishToTeamChat(
+    approval: SocialApprovalRequestEntity,
+    settings: EffectiveSocialApprovalSettings | null,
+    dedupeKey: string,
+  ): Promise<void> {
+    const channelId = settings?.teamChatChannelId;
+    const cards = this.teamChatCards?.get();
+    if (!channelId || !cards) return;
+    try {
+      await cards.publishCard({ approval, channelId, dedupeKey });
+    } catch (error) {
+      this.logger.error(
+        `Failed to post Team Chat card for ${approval.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  /**
+   * AR5 entregas 2 e 6 — one decision, written down where people follow it.
+   *
+   * The conversation only ever hears about what the client may know: a client
+   * decision, or the override D-15 shows them as "Aprovado pela agência". An
+   * internal decision stays out of it. The Team Chat is the Agency's own room
+   * and gets every decision that has a card to answer.
+   */
+  async publishDecisionRecord(
+    approval: SocialApprovalRequestEntity,
+    record: ApprovalDecisionRecord,
+  ): Promise<void> {
+    const settings = await this.settingsFor(approval);
+    const conversation = this.conversationCards?.get();
+    const teamChat = this.teamChatCards?.get();
+    const clientVisible =
+      Boolean(approval.companyContextId && approval.sentToClientAt) &&
+      (record.stage === 'client' || record.decision === 'agency_override');
+    await Promise.all([
+      conversation &&
+      clientVisible &&
+      settings?.registerDecisionsInConversation !== false
+        ? this.quietly(approval, 'decision line', () =>
+            conversation.publishDecisionLine({ approval, record }),
+          )
+        : Promise.resolve(),
+      teamChat
+        ? this.quietly(approval, 'Team Chat reply', () =>
+            teamChat.publishDecisionReply({ approval, record }),
+          )
+        : Promise.resolve(),
+    ]);
+  }
+
+  /** R-21 — every transition, whichever surface it came from. */
+  async announceTeamChatCardChanged(
+    approval: SocialApprovalRequestEntity,
+  ): Promise<void> {
+    const teamChat = this.teamChatCards?.get();
+    if (!teamChat) return;
+    await this.quietly(approval, 'Team Chat broadcast', () =>
+      teamChat.announceCardChanged(approval),
+    );
+  }
+
+  private async quietly(
+    approval: SocialApprovalRequestEntity,
+    what: string,
+    run: () => Promise<unknown>,
+  ): Promise<void> {
+    try {
+      await run();
+    } catch (error) {
+      this.logger.warn(
+        `Failed to publish ${what} for ${approval.id}: ${
+          error instanceof Error ? error.message : 'unknown_error'
+        }`,
+      );
+    }
   }
 
   /**
@@ -124,10 +357,11 @@ export class SocialApprovalNotificationPublisher {
     approval: SocialApprovalRequestEntity,
     actorUserId: string | null,
   ): Promise<void> {
+    const settings = await this.settingsFor(approval);
     await Promise.all([
-      this.publishToAgency('client_edited', approval, actorUserId),
+      this.publishToAgency('client_edited', approval, actorUserId, settings),
       approval.status === 'awaiting_client'
-        ? this.publishToConversation('awaiting_client', approval)
+        ? this.publishToConversation('awaiting_client', approval, settings)
         : Promise.resolve(),
     ]);
   }
@@ -145,6 +379,11 @@ export class SocialApprovalNotificationPublisher {
     approval: SocialApprovalRequestEntity,
     event?: { id: string; occurredAt: Date },
   ): Promise<void> {
+    const settings = await this.settingsFor(approval);
+    if (
+      !approvalNotificationEnabled(settings?.notificationEvents, type, 'client')
+    )
+      return;
     const client = this.clientNotifications?.get();
     if (!client) {
       // §48 — a client notification that reaches nobody is now reported. The
@@ -205,11 +444,17 @@ export class SocialApprovalNotificationPublisher {
       requiredModule: 'approvals',
       interestReason: NotificationInterestReason.APPROVER,
       // §16 — a Client Area route, never the Agency one in `payload.actionUrl`.
-      actionUrl: `/client-area/companies/${encodeURIComponent(
-        companyContextId,
-      )}/approvals/${encodeURIComponent(approval.id)}`,
-      title: CLIENT_COPY[type].title,
-      body: CLIENT_COPY[type].body(approval),
+      actionUrl: this.isBatched(type, approval)
+        ? `/client-area/companies/${encodeURIComponent(companyContextId)}/approvals`
+        : `/client-area/companies/${encodeURIComponent(
+            companyContextId,
+          )}/approvals/${encodeURIComponent(approval.id)}`,
+      title: this.isBatched(type, approval)
+        ? 'Novas aprovações aguardam você'
+        : CLIENT_COPY[type].title,
+      body: this.isBatched(type, approval)
+        ? 'Um lote de peças foi enviado para a sua aprovação.'
+        : CLIENT_COPY[type].body(approval),
     };
   }
 
@@ -233,12 +478,15 @@ export class SocialApprovalNotificationPublisher {
    * the same `occurredAt()`. So a retried publication of one event cannot
    * produce a second card (§9/§51), and the card's idempotency cannot drift
    * from the notification's — there is one key, not two derivations of one.
+   * A batch shares one key, which is what makes it one card (D-19).
    */
   private async publishToConversation(
     type: SocialApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
+    settings: EffectiveSocialApprovalSettings | null,
   ): Promise<void> {
     if (type !== 'awaiting_client') return;
+    if (settings && !settings.sendToConversation) return;
 
     const cards = this.conversationCards?.get();
     if (!cards) return;
@@ -289,18 +537,43 @@ export class SocialApprovalNotificationPublisher {
     type: SocialApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
   ): string {
+    if (this.isBatched(type, approval))
+      return `social.approval.${type}:batch:${approval.batchId}`;
     return `social.approval.${type}:${approval.id}:${this.occurredAt(
       type,
       approval,
     ).toISOString()}`;
   }
 
+  /** D-19: only the announcement is grouped; decisions stay per approval. */
+  private isBatched(
+    type: SocialApprovalNotificationType | ClientApprovalNotificationType,
+    approval: SocialApprovalRequestEntity,
+  ): boolean {
+    return type === 'awaiting_client' && Boolean(approval.batchId);
+  }
+
   private async publishToAgency(
     type: SocialApprovalNotificationType,
     approval: SocialApprovalRequestEntity,
     actorUserId: string | null,
+    settings: EffectiveSocialApprovalSettings | null,
   ): Promise<void> {
     const occurredAt = this.occurredAt(type, approval);
+    const agencyOn = approvalNotificationEnabled(
+      settings?.notificationEvents,
+      type,
+      'agency',
+    );
+    const clientAudience = approvalNotificationEnabled(
+      settings?.notificationEvents,
+      type,
+      'client',
+    )
+      ? this.clientAudienceFor(type, approval)
+      : undefined;
+    if (!agencyOn && !clientAudience) return;
+    const batched = this.isBatched(type, approval);
     try {
       await this.notifications.process({
         // Shared with the conversation card's dedupe key (§9), so one event
@@ -318,22 +591,30 @@ export class SocialApprovalNotificationPublisher {
         resourceType: 'social_approval_request',
         resourceId: approval.id,
         occurredAt: occurredAt.toISOString(),
-        recipients: [
-          {
-            userId: approval.requestedByUserId,
-            interestReason: NotificationInterestReason.REQUESTER,
-          },
-        ],
+        recipients: agencyOn
+          ? [
+              {
+                userId: approval.requestedByUserId,
+                interestReason: NotificationInterestReason.REQUESTER,
+              },
+            ]
+          : [],
         /**
          * NTF-C1 §27 — the second audience of the same event, on the same
          * notification. The core resolves who that is; this only says which
          * company, which permission and which module define the audience.
          */
-        clientAudience: this.clientAudienceFor(type, approval),
+        clientAudience,
         payload: {
-          title: this.titleFor(type, approval),
-          body: this.bodyFor(type, approval),
-          actionUrl: `/social/approvals?approvalId=${encodeURIComponent(approval.id)}`,
+          title: batched
+            ? 'Lote aguardando cliente'
+            : this.titleFor(type, approval),
+          body: batched
+            ? 'Um lote de peças foi enviado para aprovação do cliente.'
+            : this.bodyFor(type, approval),
+          actionUrl: batched
+            ? '/social/approvals'
+            : `/social/approvals?approvalId=${encodeURIComponent(approval.id)}`,
           approvalId: approval.id,
           subjectType: approval.subjectType,
           subjectTitle: approval.title,

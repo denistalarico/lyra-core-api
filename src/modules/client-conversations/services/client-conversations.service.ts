@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   BadRequestException,
   ForbiddenException,
@@ -1258,6 +1259,48 @@ export class ClientConversationsService {
     conversationId?: string;
     message?: ConversationMessageView;
   }> {
+    return this.publishPlatformLine(
+      scope,
+      card.kind === 'approval_card'
+        ? approvalCardBody(card.title, card.version)
+        : card.title,
+      { card, dedupeKey },
+      dedupeKey,
+    );
+  }
+
+  /**
+   * AR5 — a system line with no card: a decision recorded in the timeline.
+   * Same rules as `publishCard`: found, never created, and once per key.
+   */
+  async publishSystemLine(
+    scope: ClientConversationScope,
+    body: string,
+    metadata: ClientConversationMessageMetadata,
+    dedupeKey: string,
+  ): Promise<{
+    status: 'posted' | 'duplicate' | 'skipped';
+    conversationId?: string;
+    message?: ConversationMessageView;
+  }> {
+    return this.publishPlatformLine(
+      scope,
+      body,
+      { ...metadata, dedupeKey },
+      dedupeKey,
+    );
+  }
+
+  private async publishPlatformLine(
+    scope: ClientConversationScope,
+    body: string,
+    metadata: ClientConversationMessageMetadata,
+    dedupeKey: string,
+  ): Promise<{
+    status: 'posted' | 'duplicate' | 'skipped';
+    conversationId?: string;
+    message?: ConversationMessageView;
+  }> {
     const conversation = await this.conversations.findOne({
       where: {
         tenantId: scope.tenantId,
@@ -1287,23 +1330,30 @@ export class ClientConversationsService {
       };
     }
 
-    const saved = await this.messages.save(
-      this.messages.create({
-        tenantId: conversation.tenantId,
-        workspaceId: conversation.workspaceId,
-        agencyClientId: conversation.agencyClientId,
-        companyContextId: conversation.companyContextId,
-        conversationId: conversation.id,
-        senderSurface: 'agency',
-        senderUserId: null,
-        body:
-          card.kind === 'approval_card'
-            ? approvalCardBody(card.title, card.version)
-            : card.title,
-        kind: 'system',
-        metadata: { card, dedupeKey },
-      }),
-    );
+    let saved: ClientConversationMessageEntity;
+    try {
+      saved = await this.messages.save(
+        this.messages.create({
+          // AR5 — derived from the key, so two publications racing past the
+          // check above collide on the primary key instead of both landing.
+          id: messageIdForDedupeKey(dedupeKey),
+          tenantId: conversation.tenantId,
+          workspaceId: conversation.workspaceId,
+          agencyClientId: conversation.agencyClientId,
+          companyContextId: conversation.companyContextId,
+          conversationId: conversation.id,
+          senderSurface: 'agency',
+          senderUserId: null,
+          body,
+          kind: 'system',
+          metadata,
+        }),
+      );
+    } catch (error) {
+      if ((error as { code?: string })?.code === '23505')
+        return { status: 'duplicate', conversationId: conversation.id };
+      throw error;
+    }
 
     await this.conversations.update(
       { id: conversation.id },
@@ -1508,7 +1558,14 @@ const RESERVED_METADATA_KEYS: ReadonlySet<string> = new Set([
   // OR7 — the Orion reply marker, written by `publishAssistantReply` alone.
   'assistant',
   'replyToMessageId',
+  // AR5 — the decision line, written by `publishSystemLine` alone.
+  'decision',
 ]);
+
+function messageIdForDedupeKey(dedupeKey: string): string {
+  const hex = createHash('md5').update(dedupeKey).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function stripReservedMetadata(
   metadata: ClientConversationMessageMetadata | null | undefined,

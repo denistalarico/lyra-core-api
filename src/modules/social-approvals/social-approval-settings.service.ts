@@ -2,7 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, type EntityManager, In, IsNull } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
-import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
+import {
+  AgencyUserProfileEntity,
+  AgencyWorkspaceUserEntity,
+} from '../agency/entities/agency-settings.entities';
 import { AgencyChatChannel } from '../team-chat/entities/agency-chat-channel.entity';
 import { approvalScopeWhere } from './approval-scope';
 import { approvalScopeKind } from './approval-stage.policy';
@@ -73,6 +76,28 @@ export class SocialApprovalSettingsService {
       teamChatChannelId: row?.teamChatChannelId ?? null,
       notificationEvents: row?.notificationEvents ?? {},
     };
+  }
+
+  /** D-17: who hears about an internal review. Empty list means the Owners. */
+  async internalApproverRecipients(
+    scope: CompanyAwareScope,
+    settings: Pick<EffectiveSocialApprovalSettings, 'internalApproverUserIds'>,
+  ): Promise<string[]> {
+    if (settings.internalApproverUserIds.length)
+      return settings.internalApproverUserIds;
+    const owners = await this.dataSource
+      .getRepository(AgencyWorkspaceUserEntity)
+      .find({
+        where: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          status: 'active',
+          role: 'owner',
+        },
+      });
+    return owners
+      .map((owner) => owner.userId)
+      .filter((userId): userId is string => Boolean(userId));
   }
 
   async update(

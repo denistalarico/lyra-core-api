@@ -194,6 +194,7 @@ export class ClientConversationTimelineService {
           ? (readApprovalCard(item.message.metadata)?.approvalId ?? [])
           : [],
       ),
+      reader,
     );
 
     return {
@@ -209,12 +210,15 @@ export class ClientConversationTimelineService {
   private async resolveCards(
     scope: ClientConversationScope,
     approvalIds: readonly string[],
+    reader: ConversationTimelineReader,
   ): Promise<Map<string, ConversationApprovalCardState>> {
     const unique = [...new Set(approvalIds)];
     if (unique.length === 0 || !this.approvals) {
       return new Map<string, ConversationApprovalCardState>();
     }
-    return this.approvals.resolveCards(scope, unique);
+    return this.approvals.resolveCards(scope, unique, {
+      userId: reader.userId,
+    });
   }
 
   private toMessageItem(

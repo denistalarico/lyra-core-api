@@ -208,6 +208,47 @@ export class ClientAreaApprovalsController {
   }
 
   /**
+   * AR5 — the same decision, taken from the conversation card. A separate
+   * route so `client_conversation` is set here by the server (D-16), and the
+   * body can never claim a surface.
+   */
+  @Post(':approvalId/conversation/approve')
+  @RequireClientAreaPermission('client_area.approvals.decide')
+  async approveFromConversation(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+  ) {
+    const scope = toCompanyAwareScope(context);
+    await this.approvals.findVisible(scope, approvalId);
+    await this.review.approve(
+      scope,
+      approvalId,
+      context.userId,
+      'client_conversation',
+    );
+    return this.approvals.detail(scope, approvalId, this.reader(context));
+  }
+
+  @Post(':approvalId/conversation/request-changes')
+  @RequireClientAreaPermission('client_area.approvals.decide')
+  async requestChangesFromConversation(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+    @Body() dto: ClientApprovalRequestChangesDto,
+  ) {
+    const scope = toCompanyAwareScope(context);
+    await this.approvals.findVisible(scope, approvalId);
+    await this.review.requestChanges(
+      scope,
+      approvalId,
+      context.userId,
+      dto.body,
+      'client_conversation',
+    );
+    return this.approvals.detail(scope, approvalId, this.reader(context));
+  }
+
+  /**
    * D-02. The answer is the detail of the request that resulted: when the text
    * changed, its `id` is a new one and the screen moves to it.
    */

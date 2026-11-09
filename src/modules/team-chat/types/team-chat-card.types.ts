@@ -37,6 +37,19 @@ export interface TeamChatMessageCard {
   cta?: { label: string; href: string };
 }
 
+/**
+ * AR5 — a pointer, not content: status and actions are resolved per reader when
+ * the message is read (`TeamChatCardResolver`), and nothing else here is
+ * trusted beyond locating the approval.
+ */
+export interface TeamChatApprovalCard {
+  kind: 'approval_card';
+  approvalId: string;
+  batchId: string | null;
+  title: string;
+  version: string;
+}
+
 /** Who the message appears to come from when no human wrote it. */
 export interface TeamChatCardSender {
   displayName: string;
@@ -50,9 +63,14 @@ export interface TeamChatCardPostInput {
   channelId: string;
   /** Makes a retried publication land once. */
   dedupeKey: string;
+  /**
+   * AR5 — optional id derived from the key, for publishers that can race:
+   * two attempts then collide on the primary key instead of both landing.
+   */
+  messageId?: string;
   sender: TeamChatCardSender;
   body: string;
-  card: TeamChatMessageCard;
+  card: TeamChatMessageCard | TeamChatApprovalCard;
   source?: { module: string; resourceId?: string | null };
 }
 

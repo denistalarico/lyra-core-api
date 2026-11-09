@@ -26,7 +26,10 @@ import {
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
 import type { ResolvedApprovalSubject } from './subjects/approval-subject-resolver';
 import { SocialApprovalAuthorityService } from './social-approval-authority.service';
-import { SocialApprovalPiecesService } from './social-approval-pieces.service';
+import {
+  SocialApprovalPiecesService,
+  type RecordedApprovalEvent,
+} from './social-approval-pieces.service';
 import { SocialApprovalSettingsService } from './social-approval-settings.service';
 import { SocialApprovalNotificationPublisher } from './social-approval-notification.publisher';
 import type { SocialApprovalStateProjection } from './approval-state.projection';
@@ -85,6 +88,35 @@ export class SocialApprovalsService {
             }`,
           );
         }
+    // R-21: whatever surface moved it, an open channel re-reads the card.
+    const publisher = this.notifications;
+    if (typeof publisher?.announceTeamChatCardChanged !== 'function') return;
+    for (const request of requests)
+      if (request.status !== 'draft')
+        await publisher.announceTeamChatCardChanged(request);
+  }
+  /** AR5 — a decision written down where people follow it. Never throws. */
+  private async recordDecision(
+    request: SocialApprovalRequestEntity,
+    event: RecordedApprovalEvent | null,
+    decision: 'approved' | 'changes_requested' | 'agency_override',
+    stage: SocialApprovalStage,
+    surface: SocialApprovalSurface,
+  ): Promise<void> {
+    const publisher = this.notifications;
+    if (!event || typeof publisher?.publishDecisionRecord !== 'function')
+      return;
+    try {
+      await publisher.publishDecisionRecord(request, {
+        eventId: event.id,
+        decision,
+        stage,
+        actorName: event.actorName,
+        surface,
+      });
+    } catch {
+      // The publisher already logs; the decision is committed.
+    }
   }
   private scopeWhere(scope: CompanyAwareScope) {
     return approvalScopeWhere(scope);
@@ -312,6 +344,9 @@ export class SocialApprovalsService {
             Promise.resolve(),
         ),
       );
+      // R-21: the replaced request's card loses its actions now.
+      for (const request of superseded)
+        await this.announceTimeline(request, 'decision_changed');
       await this.observeTransition(...superseded, saved);
     });
     return saved;
@@ -431,6 +466,7 @@ export class SocialApprovalsService {
       id,
       afterCommit,
       options.surface,
+      options.batchId,
     );
   }
   /** Locked and in the status an edit may start from; 409 otherwise. */
@@ -732,9 +768,13 @@ export class SocialApprovalsService {
     id: string,
     afterCommit: ApprovalOperation['afterCommit'],
     surface: SocialApprovalSurface = 'agency',
+    batchId?: string | null,
   ) {
     const item = await this.lockRequest(manager, scope, id);
     this.assertStatus(item, ['draft', 'changes_requested']);
+    // D-19: resending one item is its own send. Keeping the old batch id would
+    // land on the batch's card and notification, and nobody would hear of it.
+    if (item.status === 'changes_requested' && !batchId) item.batchId = null;
     const settings = await this.settings.get(scope, manager);
     const skipInternal =
       approvalScopeKind(scope) === 'managed_client' &&
@@ -761,7 +801,7 @@ export class SocialApprovalsService {
         actor,
         surface,
       );
-    await this.pieces.recordRequestEvent(
+    const sent = await this.pieces.recordRequestEvent(
       manager,
       saved,
       'sent',
@@ -778,6 +818,12 @@ export class SocialApprovalsService {
           'awaiting_client',
           saved,
           actor.userId,
+        );
+      else if (typeof this.notifications?.publishInternalReview === 'function')
+        await this.notifications.publishInternalReview(
+          saved,
+          actor.userId,
+          sent?.id ?? null,
         );
       await this.observeTransition(saved);
     });
@@ -884,6 +930,7 @@ export class SocialApprovalsService {
     operation?: ApprovalOperation,
   ) {
     const actor = this.user(actorUserId);
+    let decided: RecordedApprovalEvent | null = null;
     const run = async (manager: EntityManager) => {
       const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(request, ['awaiting_internal_review']);
@@ -919,7 +966,7 @@ export class SocialApprovalsService {
         request.requiredClientApproverIds = required;
       }
       const updated = await manager.save(request);
-      await this.pieces.recordRequestEvent(
+      decided = await this.pieces.recordRequestEvent(
         manager,
         updated,
         'approved',
@@ -944,6 +991,13 @@ export class SocialApprovalsService {
         saved.status === 'approved' ? 'approved' : 'awaiting_client',
         saved,
         actor.userId,
+      );
+      await this.recordDecision(
+        saved,
+        decided,
+        'approved',
+        'internal',
+        surface,
       );
       await this.observeTransition(saved);
     };
@@ -989,9 +1043,12 @@ export class SocialApprovalsService {
     operation?: ApprovalOperation,
   ) {
     const actor = this.user(actorUserId);
+    let decided: RecordedApprovalEvent | null = null;
+    let decidedStage: SocialApprovalStage = 'internal';
     const run = async (manager: EntityManager) => {
       const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(request, ACTIVE);
+      decidedStage = request.currentStage;
       await this.decision(
         manager,
         request,
@@ -1004,7 +1061,7 @@ export class SocialApprovalsService {
       request.approvedAt = new Date();
       request.resolution = 'agency_override';
       const updated = await manager.save(request);
-      await this.pieces.recordRequestEvent(
+      decided = await this.pieces.recordRequestEvent(
         manager,
         updated,
         'agency_override',
@@ -1018,6 +1075,13 @@ export class SocialApprovalsService {
     const announce = async (saved: SocialApprovalRequestEntity) => {
       await this.notifications?.publish('approved', saved, actor.userId);
       await this.announceTimeline(saved, 'decision_changed');
+      await this.recordDecision(
+        saved,
+        decided,
+        'agency_override',
+        decidedStage,
+        'agency',
+      );
       await this.observeTransition(saved);
     };
     if (operation) {
@@ -1035,6 +1099,7 @@ export class SocialApprovalsService {
     id: string,
     actor: ApprovalActor,
     operation?: ApprovalOperation,
+    surface: SocialApprovalSurface = 'client_area',
   ) {
     this.validateActor(actor);
     const run = async (manager: EntityManager) => {
@@ -1061,18 +1126,25 @@ export class SocialApprovalsService {
         request.resolution = 'client_approved';
       }
       const updated = completed ? await manager.save(request) : request;
-      await this.pieces.recordRequestEvent(
+      const decided = await this.pieces.recordRequestEvent(
         manager,
         updated,
         'approved',
         actor,
-        'client_area',
+        surface,
         { stage: 'client', roundCompleted: completed },
       );
       if (completed) await this.pieces.afterTransition(manager, updated);
-      return { saved: updated, completed };
+      return { saved: updated, completed, decided };
     };
     const announce = async (outcome: Awaited<ReturnType<typeof run>>) => {
+      await this.recordDecision(
+        outcome.saved,
+        outcome.decided,
+        'approved',
+        'client',
+        surface,
+      );
       if (outcome.completed) {
         await this.notifications?.publish(
           'approved',
@@ -1170,9 +1242,18 @@ export class SocialApprovalsService {
     id: string,
     actor: ApprovalActor,
     body: string,
+    surface: SocialApprovalSurface = 'client_area',
   ) {
     this.validateActor(actor);
-    return this.requestChangesAs(scope, id, actor, body, 'client');
+    return this.requestChangesAs(
+      scope,
+      id,
+      actor,
+      body,
+      'client',
+      undefined,
+      surface,
+    );
   }
   async clientComment(
     scope: CompanyAwareScope,
@@ -1218,6 +1299,7 @@ export class SocialApprovalsService {
       ? 'client_area'
       : 'agency',
   ) {
+    let decided: RecordedApprovalEvent | null = null;
     const saved = await this.dataSource.transaction(async (manager) => {
       const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(
@@ -1262,7 +1344,7 @@ export class SocialApprovalsService {
       // D-03: under "Todos" one request for changes closes the round at once.
       request.requiredClientApproverIds = null;
       const updated = await manager.save(request);
-      await this.pieces.recordRequestEvent(
+      decided = await this.pieces.recordRequestEvent(
         manager,
         updated,
         'changes_requested',
@@ -1284,6 +1366,13 @@ export class SocialApprovalsService {
       // timeline projects. Both are read-time facts, so this is a re-read.
       await this.announceTimeline(saved, 'decision_changed');
     }
+    await this.recordDecision(
+      saved,
+      decided,
+      'changes_requested',
+      stage,
+      surface,
+    );
     await this.observeTransition(saved);
     return saved;
   }
@@ -1327,6 +1416,7 @@ export class SocialApprovalsService {
     // inventing one would be a duplicated taxonomy for no reader.
     const announce = async () => {
       await this.notifications?.publishClientOnly('cancelled', saved);
+      await this.announceTimeline(saved, 'decision_changed');
       await this.observeTransition(saved);
     };
     if (operation) operation.afterCommit.push(announce);
@@ -1358,6 +1448,7 @@ export class SocialApprovalsService {
       return updated;
     });
     await this.notifications?.publish('superseded', saved, actorUserId ?? null);
+    await this.announceTimeline(saved, 'decision_changed');
     await this.observeTransition(saved);
     return saved;
   }

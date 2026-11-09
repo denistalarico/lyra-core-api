@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
+import type { SocialApprovalSurface } from './entities';
 import { SocialApprovalsService } from './social-approvals.service';
 
 /**
@@ -24,11 +25,22 @@ export class ApprovalClientReviewService {
     return this.approvals.clientComment(scope, approvalId, actorUserId, body);
   }
 
-  approve(scope: CompanyAwareScope, approvalId: string, actorUserId: string) {
-    return this.approvals.clientApprove(scope, approvalId, {
-      type: 'user',
-      userId: actorUserId,
-    });
+  approve(
+    scope: CompanyAwareScope,
+    approvalId: string,
+    actorUserId: string,
+    surface?: SocialApprovalSurface,
+  ) {
+    const actor = { type: 'user', userId: actorUserId } as const;
+    return surface
+      ? this.approvals.clientApprove(
+          scope,
+          approvalId,
+          actor,
+          undefined,
+          surface,
+        )
+      : this.approvals.clientApprove(scope, approvalId, actor);
   }
 
   requestChanges(
@@ -36,12 +48,17 @@ export class ApprovalClientReviewService {
     approvalId: string,
     actorUserId: string,
     body: string,
+    surface?: SocialApprovalSurface,
   ) {
-    return this.approvals.clientRequestChanges(
-      scope,
-      approvalId,
-      { type: 'user', userId: actorUserId },
-      body,
-    );
+    const actor = { type: 'user', userId: actorUserId } as const;
+    return surface
+      ? this.approvals.clientRequestChanges(
+          scope,
+          approvalId,
+          actor,
+          body,
+          surface,
+        )
+      : this.approvals.clientRequestChanges(scope, approvalId, actor, body);
   }
 }

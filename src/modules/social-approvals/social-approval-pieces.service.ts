@@ -39,11 +39,14 @@ export type ApprovalEventActor = {
   userId: string | null;
 };
 
+/** AR5: what a decision record needs from the event it narrates. */
+export type RecordedApprovalEvent = { id: string; actorName: string | null };
+
 const SYSTEM_ACTOR: ApprovalEventActor = { type: 'system', userId: null };
 const RECOMPUTE_CHUNK = 500;
 
 /** Same value as `md5(text)::uuid` in the backfill migration. */
-function deterministicUuid(value: string): string {
+export function deterministicUuid(value: string): string {
   const hex = createHash('md5').update(value).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
@@ -415,16 +418,21 @@ export class SocialApprovalPiecesService {
     actor: ApprovalEventActor = SYSTEM_ACTOR,
     surface: SocialApprovalSurface = 'system',
     metadata: Record<string, unknown> = {},
-  ): Promise<void> {
-    await manager.getRepository(SocialApprovalEventEntity).insert({
-      ...target,
-      type,
-      actorType: actor.type,
-      actorUserId: actor.userId,
-      actorName: await this.actorName(manager, target.tenantId, actor),
-      surface,
-      metadata: metadata as never,
-    });
+  ): Promise<RecordedApprovalEvent | null> {
+    const actorName = await this.actorName(manager, target.tenantId, actor);
+    const result = await manager
+      .getRepository(SocialApprovalEventEntity)
+      .insert({
+        ...target,
+        type,
+        actorType: actor.type,
+        actorUserId: actor.userId,
+        actorName,
+        surface,
+        metadata: metadata as never,
+      });
+    const id = result?.identifiers?.[0]?.id as string | undefined;
+    return id ? { id, actorName } : null;
   }
 
   /** No step means a row the backfill has not reached yet: nothing to narrate. */
@@ -435,13 +443,13 @@ export class SocialApprovalPiecesService {
     actor: ApprovalEventActor,
     surface: SocialApprovalSurface,
     metadata: Record<string, unknown> = {},
-  ): Promise<void> {
-    if (!request.stepId) return;
+  ): Promise<RecordedApprovalEvent | null> {
+    if (!request.stepId) return null;
     const step = await manager
       .getRepository(SocialApprovalStepEntity)
       .findOne({ where: { id: request.stepId } });
-    if (!step) return;
-    await this.recordEvent(
+    if (!step) return null;
+    return this.recordEvent(
       manager,
       {
         tenantId: request.tenantId,

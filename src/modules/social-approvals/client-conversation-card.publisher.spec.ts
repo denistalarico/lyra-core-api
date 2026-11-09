@@ -33,6 +33,7 @@ describe('approval card publication', () => {
       publishApprovalCard: jest.fn(async (_input: CardCall) => ({
         status: 'posted' as const,
       })),
+      publishDecisionLine: jest.fn(async () => undefined),
       announceApprovalActivity: jest.fn(
         async (_input: {
           approval: unknown;
@@ -140,6 +141,7 @@ describe('approval card publication', () => {
     const registry = new ClientConversationCardRegistry();
     registry.register({
       publishApprovalCard: jest.fn(() => Promise.reject(new Error('down'))),
+      publishDecisionLine: jest.fn(async () => undefined),
       announceApprovalActivity: jest.fn(async () => undefined),
     });
 
@@ -189,6 +191,7 @@ describe('approval card publication', () => {
     const registry = new ClientConversationCardRegistry();
     registry.register({
       publishApprovalCard: jest.fn(async () => ({ status: 'posted' as const })),
+      publishDecisionLine: jest.fn(async () => undefined),
       announceApprovalActivity: jest.fn(() =>
         Promise.reject(new Error('socket down')),
       ),

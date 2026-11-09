@@ -152,15 +152,22 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
       audience: NotificationAudience.BOTH,
     },
   ),
-  ...(['changes_requested', 'approved', 'client_edited'] as const).map(
-    (event) =>
-      standard(
-        `social.approval.${event}`,
-        'approvals',
-        NotificationCategory.APPROVAL,
-        NotificationRecipientStrategy.EXPLICIT_USERS,
-        { productKey: NotificationProductKey.SOCIAL },
-      ),
+  ...(
+    [
+      'changes_requested',
+      'approved',
+      'client_edited',
+      // AR5 / D-17: the designated internal approvers.
+      'awaiting_internal_review',
+    ] as const
+  ).map((event) =>
+    standard(
+      `social.approval.${event}`,
+      'approvals',
+      NotificationCategory.APPROVAL,
+      NotificationRecipientStrategy.EXPLICIT_USERS,
+      { productKey: NotificationProductKey.SOCIAL },
+    ),
   ),
   /**
    * NTF-C1 §35/§37/§38 — the two client events that have no Agency
