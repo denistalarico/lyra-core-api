@@ -234,6 +234,7 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       pieces,
       settings,
       authority,
+      { thumbnailPaths: async () => new Map() } as never,
     );
     actions = new SocialApprovalPieceActionsService(
       db,

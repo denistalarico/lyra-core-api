@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import type { CompanyAwareScope } from '../../../common/context/company-aware-scope';
 import {
   CreativeAssetEntity,
@@ -170,6 +170,55 @@ export class ApprovalSubjectResolver {
         firstComment: revision.firstComment,
       },
     };
+  }
+
+  /**
+   * Card thumbnails in one pass, with the same paths as `getPreview`. Callers
+   * pass requests they already scoped; a request with no image is absent.
+   */
+  async thumbnailPaths(
+    requests: ReadonlyArray<{
+      id: string;
+      subjectType: string;
+      subjectId: string;
+      subjectRevisionId: string;
+    }>,
+  ): Promise<Map<string, string>> {
+    const creative = requests.filter((item) => item.subjectType === 'creative_version');
+    const snapshot = requests.filter((item) => item.subjectType === 'approval_snapshot');
+    const [versions, assets, snapshots] = await Promise.all([
+      creative.length
+        ? this.versions.find({ where: { id: In(creative.map((item) => item.subjectRevisionId)) } })
+        : ([] as CreativeAssetVersionEntity[]),
+      creative.length
+        ? this.assets.find({ where: { id: In(creative.map((item) => item.subjectId)) } })
+        : ([] as CreativeAssetEntity[]),
+      snapshot.length
+        ? this.snapshots.find({ where: { id: In(snapshot.map((item) => item.subjectRevisionId)), kind: 'media_set' } })
+        : ([] as SocialApprovalSnapshotEntity[]),
+    ]);
+    const versionById = new Map(versions.map((item) => [item.id, item]));
+    const assetById = new Map(assets.map((item) => [item.id, item]));
+    const snapshotById = new Map(snapshots.map((item) => [item.id, item]));
+    const paths = new Map<string, string>();
+    for (const request of creative) {
+      const version = versionById.get(request.subjectRevisionId);
+      const asset = assetById.get(request.subjectId);
+      if (!version || !asset) continue;
+      const base = `/social/creative-studio/assets/${asset.id}`;
+      const query = `?versionId=${encodeURIComponent(version.id)}`;
+      if (version.thumbnailMediaAssetId) paths.set(request.id, `${base}/thumbnail${query}`);
+      else if (asset.assetType === 'image') paths.set(request.id, `${base}/content${query}`);
+    }
+    for (const request of snapshot) {
+      const row = snapshotById.get(request.subjectRevisionId);
+      const first = (row?.payload as ApprovalMediaSetSnapshotPayload | undefined)?.items[0];
+      if (!row || !first) continue;
+      const base = `/social/approvals/snapshots/${row.id}/media/item-0`;
+      if (first.thumbnailMediaAssetId) paths.set(request.id, `${base}-thumb`);
+      else if (first.assetType === 'image') paths.set(request.id, base);
+    }
+    return paths;
   }
 
   private async resolveSnapshot(

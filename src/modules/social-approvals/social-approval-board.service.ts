@@ -36,6 +36,7 @@ import { SocialApprovalPieceSyncService } from './social-approval-piece-sync.ser
 import { SocialApprovalPiecesService } from './social-approval-pieces.service';
 import { SocialApprovalSettingsService } from './social-approval-settings.service';
 import { SocialApprovalsService } from './social-approvals.service';
+import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
 
 const DEFAULT_LIMIT = 30;
 const ACTIVE_STATUSES = new Set([
@@ -61,6 +62,7 @@ export function parseBoardCursor(cursor?: string): number {
 
 type RawCard = {
   planned_date: string | null;
+  content_type: string | null;
   plan_title: string | null;
   campaign_name: string | null;
 };
@@ -87,6 +89,7 @@ export class SocialApprovalBoardService {
     private readonly domain: SocialApprovalPiecesService,
     private readonly settings: SocialApprovalSettingsService,
     private readonly authority: SocialApprovalAuthorityService,
+    private readonly subjects: ApprovalSubjectResolver,
   ) {}
 
   private async contexts(
@@ -206,6 +209,7 @@ export class SocialApprovalBoardService {
         `campaign.id = CASE WHEN piece.kind = 'campaign_table' THEN piece.sourceId ELSE item.campaignInstanceId END`,
       )
       .addSelect('item.plannedDate', 'planned_date')
+      .addSelect('item.contentType', 'content_type')
       .addSelect('plan.title', 'plan_title')
       .addSelect('campaign.name', 'campaign_name')
       .where(
@@ -268,9 +272,13 @@ export class SocialApprovalBoardService {
       ? await this.requests.find({ where: { id: In(requestIds) } })
       : [];
     const requestById = new Map(requests.map((item) => [item.id, item]));
+    const thumbnails = await this.subjects.thumbnailPaths(requests);
 
     return pieces.map((piece, index) => {
       const pieceSteps = steps.filter((step) => step.pieceId === piece.id);
+      const withThumbnail = pieceSteps.find(
+        (step) => step.currentRequestId && thumbnails.has(step.currentRequestId),
+      );
       const active = pieceSteps.find((step) => step.id === piece.activeStepId);
       return {
         id: piece.id,
@@ -299,6 +307,10 @@ export class SocialApprovalBoardService {
           };
         }),
         sourceState: piece.sourceState,
+        thumbnailPath: withThumbnail
+          ? (thumbnails.get(withThumbnail.currentRequestId as string) ?? null)
+          : null,
+        contentType: raw[index]?.content_type ?? null,
         plannedDate: raw[index]?.planned_date ?? null,
         planTitle: raw[index]?.plan_title ?? null,
         campaignName: raw[index]?.campaign_name ?? null,

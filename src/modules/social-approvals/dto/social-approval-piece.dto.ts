@@ -15,10 +15,14 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import {
   SOCIAL_APPROVAL_BOARD_COLUMNS,
   SOCIAL_APPROVAL_PIECE_KINDS,
+  SOCIAL_APPROVAL_STAGE_COLORS,
+  type SocialApprovalBoardColumn,
+  type SocialApprovalStageColor,
 } from '../entities';
 
 export class SocialApprovalBoardQueryDto {
@@ -34,6 +38,24 @@ export class SocialApprovalBoardQueryDto {
   @IsOptional() @IsUUID() campaignId?: string;
   @IsOptional() @IsIn(SOCIAL_APPROVAL_PIECE_KINDS) kind?: string;
   @IsOptional() @IsString() @MaxLength(120) search?: string;
+}
+
+export class UpdateApprovalBoardStageDto {
+  @IsIn(SOCIAL_APPROVAL_BOARD_COLUMNS) column!: SocialApprovalBoardColumn;
+  @IsIn(SOCIAL_APPROVAL_STAGE_COLORS) color!: SocialApprovalStageColor;
+  @IsString() @MaxLength(280) description!: string;
+}
+
+export class UpdateApprovalBoardPreferencesDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(SOCIAL_APPROVAL_BOARD_COLUMNS.length)
+  @IsIn(SOCIAL_APPROVAL_BOARD_COLUMNS, { each: true })
+  order?: SocialApprovalBoardColumn[];
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => UpdateApprovalBoardStageDto)
+  stage?: UpdateApprovalBoardStageDto;
 }
 
 export class ClientApprovalBoardQueryDto {

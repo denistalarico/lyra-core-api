@@ -32,12 +32,14 @@ import {
   CreateStandalonePieceDto,
   FinishSocialApprovalPieceDto,
   SocialApprovalBoardQueryDto,
+  UpdateApprovalBoardPreferencesDto,
   UpdateSocialApprovalSettingsDto,
 } from './dto/social-approval-piece.dto';
 import { SocialApprovalBoardService } from './social-approval-board.service';
 import { SocialApprovalMediaService } from './social-approval-media.service';
 import { SocialApprovalPieceActionsService } from './social-approval-piece-actions.service';
 import { SocialApprovalSettingsService } from './social-approval-settings.service';
+import { SocialApprovalBoardPreferencesService } from './social-approval-board-preferences.service';
 import { SocialApprovalInboxService } from './social-approval-inbox.service';
 import { SocialApprovalsService } from './social-approvals.service';
 import {
@@ -57,6 +59,7 @@ export class SocialApprovalsController {
     private readonly settings: SocialApprovalSettingsService,
     private readonly media: SocialApprovalMediaService,
     private readonly permissions: PlatformPermissionService,
+    private readonly boardPreferences: SocialApprovalBoardPreferencesService,
   ) {}
 
   private actorUserId(ctx: RequestContext): string {
@@ -100,11 +103,32 @@ export class SocialApprovalsController {
    */
   @Get('board')
   @RequirePermission('social.approvals.review.view.assigned')
-  boardList(
+  async boardList(
     @RequestContextData() ctx: RequestContext,
     @Query() query: SocialApprovalBoardQueryDto,
   ) {
-    return this.board.board(ctx, query);
+    const [board, preferences, permissions] = await Promise.all([
+      this.board.board(ctx, query),
+      this.boardPreferences.get(resolveCompanyAwareScope(ctx)),
+      this.permissions.getEffectivePermissions(this.permissionContext(ctx)),
+    ]);
+    return {
+      ...board,
+      preferences,
+      canCustomize: permissions.has('social.approvals.settings.manage'),
+    };
+  }
+  @Patch('board/preferences')
+  @RequirePermission('social.approvals.settings.manage')
+  updateBoardPreferences(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: UpdateApprovalBoardPreferencesDto,
+  ) {
+    return this.boardPreferences.update(
+      resolveCompanyAwareScope(ctx),
+      this.actorUserId(ctx),
+      dto,
+    );
   }
   @Post('board/reconcile')
   @RequirePermission('social.approvals.settings.manage')

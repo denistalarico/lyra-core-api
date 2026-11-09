@@ -31,12 +31,14 @@ import {
   SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
   SocialApprovalSettingsEntity,
+  SocialApprovalBoardPreferencesEntity,
   SocialApprovalSnapshotEntity,
   SocialApprovalStageDecisionEntity,
   SocialApprovalStepEntity,
 } from './entities';
 import { SocialApprovalAuthorityService } from './social-approval-authority.service';
 import { SocialApprovalBoardService } from './social-approval-board.service';
+import { SocialApprovalBoardPreferencesService } from './social-approval-board-preferences.service';
 import { SocialApprovalMediaService } from './social-approval-media.service';
 import { SocialApprovalPieceActionsService } from './social-approval-piece-actions.service';
 import { SocialApprovalPieceSyncService } from './social-approval-piece-sync.service';
@@ -76,6 +78,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
         SocialApprovalSnapshotEntity,
         SocialApprovalEventEntity,
         SocialApprovalSettingsEntity,
+        SocialApprovalBoardPreferencesEntity,
         CreativeAssetEntity,
         CreativeAssetVersionEntity,
         SocialPlanEntity,
@@ -102,6 +105,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     SocialApprovalPieceSyncService,
     SocialApprovalPieceActionsService,
     SocialApprovalBoardService,
+    SocialApprovalBoardPreferencesService,
     SocialApprovalMediaService,
     // CS5 Closeout — cross-context list (reads the managed-context directory
     // re-exported by PermissionsModule).

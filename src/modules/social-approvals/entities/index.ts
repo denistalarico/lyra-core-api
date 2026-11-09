@@ -1,3 +1,4 @@
+export * from './social-approval-board-preferences.entity';
 export * from './social-approval-comment.entity';
 export * from './social-approval-event.entity';
 export * from './social-approval-piece.entity';
