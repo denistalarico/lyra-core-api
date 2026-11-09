@@ -4,8 +4,15 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, type EntityManager, In } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
-import { CreativeAssetEntity } from '../social-creative-studio/entities';
-import { SocialContentItemEntity } from '../social-planner/entities';
+import {
+  CreativeAssetEntity,
+  CreativeProductionEntity,
+} from '../social-creative-studio/entities';
+import {
+  SocialContentItemEntity,
+  SocialContentRevisionEntity,
+} from '../social-planner/entities';
+import { isTextEditableApproval } from './approval-content-snapshots';
 import { projectApprovalPiece } from './approval-piece.projection';
 import { approvalScopeWhere } from './approval-scope';
 import {
@@ -17,8 +24,10 @@ import {
   type SocialApprovalActorType,
   type ApprovalSnapshotPayload,
   type SocialApprovalEventType,
+  type ApprovalTextSnapshotPayload,
   type SocialApprovalPieceKind,
   type SocialApprovalPieceOrigin,
+  type SocialApprovalSendOrder,
   type SocialApprovalSnapshotKind,
   type SocialApprovalStepKind,
   type SocialApprovalSurface,
@@ -48,6 +57,28 @@ function canonicalJson(value: unknown): string {
       .join(',')}}`;
   return JSON.stringify(value);
 }
+
+/** The `content_hash` of a payload, also what a live table is compared with. */
+export function hashSnapshotPayload(payload: ApprovalSnapshotPayload): string {
+  return createHash('sha256').update(canonicalJson(payload)).digest('hex');
+}
+
+export type ApprovalTextVersion = {
+  approvalId: string;
+  label: string;
+  createdAt: string;
+  origin: 'agency' | 'client';
+  editedBy: string | null;
+  isCurrent: boolean;
+  fields: {
+    copy: string | null;
+    caption: string | null;
+    script: string | null;
+    cta: string | null;
+    hashtags: string[];
+    firstComment: string | null;
+  };
+};
 
 /**
  * The persistence side of Piece, Step and Snapshot. Every method takes the
@@ -120,7 +151,54 @@ export class SocialApprovalPiecesService {
       .findOneOrFail({ where: { pieceId: piece.id, kind } });
   }
 
-  private async ensureContentItemStep(
+  /** AR3: the single step of a plan or campaign table, created on demand. */
+  async ensureTableStep(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    kind: 'plan_table' | 'campaign_table',
+    sourceId: string,
+    title: string,
+  ) {
+    const piece = await this.ensurePiece(
+      manager,
+      scope,
+      kind,
+      sourceId,
+      title,
+      'social_planner',
+    );
+    return this.ensureStep(manager, piece, 'table', 0, 'Tabela');
+  }
+
+  /** D-21: only an explicit send mode changes the order of a piece. */
+  async setContentItemSendOrder(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    contentItemId: string,
+    title: string,
+    sendOrder: SocialApprovalSendOrder,
+  ): Promise<void> {
+    await this.ensureContentItemStep(
+      manager,
+      scope,
+      contentItemId,
+      title,
+      'copy',
+    );
+    const piece = await this.ensurePiece(
+      manager,
+      scope,
+      'content_item',
+      contentItemId,
+      title,
+      'social_planner',
+    );
+    if (piece.sendOrder === sendOrder) return;
+    await manager.update(SocialApprovalPieceEntity, piece.id, { sendOrder });
+    await this.recompute(manager, piece.id);
+  }
+
+  async ensureContentItemStep(
     manager: EntityManager,
     scope: CompanyAwareScope,
     contentItemId: string,
@@ -293,9 +371,7 @@ export class SocialApprovalPiecesService {
         revisionNumber: (latest?.revisionNumber ?? 0) + 1,
         kind,
         payload,
-        contentHash: createHash('sha256')
-          .update(canonicalJson(payload))
-          .digest('hex'),
+        contentHash: hashSnapshotPayload(payload),
         createdByUserId: actor.userId,
         createdBySurface: surface,
       }),
@@ -386,6 +462,28 @@ export class SocialApprovalPiecesService {
     if (step) await this.recompute(manager, step.pieceId);
   }
 
+  /**
+   * D-20: the item's revision or selected creative just changed. The caller's
+   * manager keeps the projection in its transaction; without one it runs on
+   * its own, for writes that have already committed.
+   */
+  async recomputeContentItem(
+    manager: EntityManager | undefined,
+    contentItemId: string,
+  ): Promise<void> {
+    const run = async (current: EntityManager) => {
+      const piece = await current
+        .getRepository(SocialApprovalPieceEntity)
+        .findOne({
+          where: { kind: 'content_item', sourceId: contentItemId },
+          select: { id: true },
+        });
+      if (piece) await this.recompute(current, piece.id);
+    };
+    if (manager) return run(manager);
+    return this.dataSource.transaction(run);
+  }
+
   /** Locks the piece, so concurrent transitions on its steps serialize. */
   async recompute(manager: EntityManager, pieceId: string): Promise<void> {
     const piece = await manager
@@ -447,6 +545,20 @@ export class SocialApprovalPiecesService {
       if (isStale !== step.isStale) {
         await manager.update(SocialApprovalStepEntity, step.id, { isStale });
         step.isStale = isStale;
+        if (isStale)
+          await this.recordEvent(
+            manager,
+            {
+              tenantId: step.tenantId,
+              workspaceId: step.workspaceId,
+              agencyClientId: step.agencyClientId,
+              companyContextId: step.companyContextId,
+              pieceId: step.pieceId,
+              stepId: step.id,
+              requestId: step.currentRequestId,
+            },
+            'reopened_stale',
+          );
       }
     }
 
@@ -478,9 +590,10 @@ export class SocialApprovalPiecesService {
   }
 
   /**
-   * D-20 for content items: an approved copy or creative whose revision is no
-   * longer the item's current one. Table snapshots compare `content_hash` in
-   * the AR3 hooks, because the live table has no revision to read here.
+   * D-20 for content items: an approved copy or creative that is no longer
+   * what the item carries. A selected Studio version decides for the creative
+   * (CS5: approving v1 never makes v2 approved). Hash-tracked snapshots keep
+   * the flag the sync computed, since nothing here can re-read them.
    */
   private async staleSteps(
     manager: EntityManager,
@@ -488,17 +601,22 @@ export class SocialApprovalPiecesService {
     steps: readonly SocialApprovalStepEntity[],
     requestById: ReadonlyMap<string, SocialApprovalRequestEntity>,
   ): Promise<Set<string>> {
-    const stale = new Set(
-      steps
-        .filter((step) => step.isStale && step.kind === 'table')
-        .map((step) => step.id),
-    );
     const approvedOf = (step: SocialApprovalStepEntity) => {
       const request = step.currentRequestId
         ? requestById.get(step.currentRequestId)
         : undefined;
       return request?.status === 'approved' ? request : undefined;
     };
+    const stale = new Set(
+      steps
+        .filter(
+          (step) =>
+            step.isStale &&
+            (step.kind === 'table' ||
+              approvedOf(step)?.subjectType === 'approval_snapshot'),
+        )
+        .map((step) => step.id),
+    );
 
     const itemIds = pieces
       .filter((piece) => piece.kind === 'content_item' && piece.sourceId)
@@ -511,8 +629,10 @@ export class SocialApprovalPiecesService {
     const pieceById = new Map(pieces.map((piece) => [piece.id, piece]));
     const itemById = new Map(items.map((item) => [item.id, item]));
 
-    const creativeAssetIds = steps
-      .filter((step) => step.kind === 'creative')
+    const approvedCreatives = steps.filter(
+      (step) => step.kind === 'creative' && approvedOf(step),
+    );
+    const creativeAssetIds = approvedCreatives
       .map((step) => approvedOf(step)?.subjectId)
       .filter((id): id is string => Boolean(id));
     const assets = creativeAssetIds.length
@@ -521,24 +641,139 @@ export class SocialApprovalPiecesService {
           .find({ where: { id: In(creativeAssetIds) } })
       : [];
     const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+    const productionItemIds = approvedCreatives
+      .map((step) => pieceById.get(step.pieceId))
+      .filter((piece) => piece?.kind === 'content_item')
+      .map((piece) => piece?.sourceId as string);
+    const productions = productionItemIds.length
+      ? await manager
+          .getRepository(CreativeProductionEntity)
+          .find({ where: { contentItemId: In(productionItemIds) } })
+      : [];
+    const selectedByItem = new Map(
+      productions.map((row) => [row.contentItemId, row.selectedVersionId]),
+    );
 
     for (const step of steps) {
       const approved = approvedOf(step);
       if (!approved) continue;
+      const piece = pieceById.get(step.pieceId);
       if (step.kind === 'copy') {
-        const piece = pieceById.get(step.pieceId);
         const current = piece?.sourceId
           ? itemById.get(piece.sourceId)?.currentRevisionId
           : null;
         if (current && current !== approved.subjectRevisionId)
           stale.add(step.id);
       } else if (step.kind === 'creative') {
-        const current = assetById.get(approved.subjectId)?.currentVersionId;
+        const selected =
+          piece?.kind === 'content_item' && piece.sourceId
+            ? selectedByItem.get(piece.sourceId)
+            : null;
+        const current =
+          selected ?? assetById.get(approved.subjectId)?.currentVersionId;
         if (current && current !== approved.subjectRevisionId)
           stale.add(step.id);
       }
     }
     return stale;
+  }
+
+  /**
+   * R-08: every version of the text a reader may compare, oldest first. A
+   * client only gets what was actually put in front of them, so an internal
+   * draft of the agency never shows up in their history.
+   */
+  async textVersions(
+    scope: CompanyAwareScope,
+    request: SocialApprovalRequestEntity,
+    audience: 'agency' | 'client',
+  ): Promise<{ versions: ApprovalTextVersion[] }> {
+    if (!isTextEditableApproval(request) || !request.stepId)
+      return { versions: [] };
+    const manager = this.dataSource.manager;
+    const history = await manager
+      .getRepository(SocialApprovalRequestEntity)
+      .find({
+        where: { ...approvalScopeWhere(scope), stepId: request.stepId },
+        order: { createdAt: 'ASC', id: 'ASC' },
+      });
+    const byRevision = new Map(
+      history
+        .filter(
+          (row) =>
+            isTextEditableApproval(row) &&
+            (audience === 'client'
+              ? row.sentToClientAt !== null
+              : row.status !== 'draft'),
+        )
+        .map((row) => [row.subjectRevisionId, row]),
+    );
+    const rows = [...byRevision.values()];
+    if (rows.length === 0) return { versions: [] };
+    const ids = rows.map((row) => row.subjectRevisionId);
+    const [revisions, snapshots, edits] = await Promise.all([
+      manager.getRepository(SocialContentRevisionEntity).find({
+        where: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          id: In(ids),
+        },
+      }),
+      manager.getRepository(SocialApprovalSnapshotEntity).find({
+        where: { ...approvalScopeWhere(scope), id: In(ids) },
+      }),
+      manager.getRepository(SocialApprovalEventEntity).find({
+        where: {
+          requestId: In(rows.map((row) => row.id)),
+          type: 'edited',
+        },
+      }),
+    ]);
+    const revisionById = new Map(revisions.map((row) => [row.id, row]));
+    const snapshotById = new Map(snapshots.map((row) => [row.id, row]));
+    const editByRequest = new Map(edits.map((row) => [row.requestId, row]));
+
+    const fieldsOf = (id: string): ApprovalTextVersion['fields'] | null => {
+      const revision = revisionById.get(id);
+      if (revision)
+        return {
+          copy: revision.copy,
+          caption: revision.caption,
+          script: revision.script,
+          cta: revision.cta,
+          hashtags: revision.hashtags,
+          firstComment: revision.firstComment,
+        };
+      const snapshot = snapshotById.get(id);
+      return snapshot
+        ? {
+            copy: (snapshot.payload as ApprovalTextSnapshotPayload).body,
+            caption: null,
+            script: null,
+            cta: null,
+            hashtags: [],
+            firstComment: null,
+          }
+        : null;
+    };
+    const versions = rows.flatMap((row) => {
+      const fields = fieldsOf(row.subjectRevisionId);
+      if (!fields) return [];
+      const edit = editByRequest.get(row.id);
+      return [
+        {
+          approvalId: row.id,
+          label: row.subjectVersionLabel,
+          createdAt: row.createdAt.toISOString(),
+          origin: edit ? ('client' as const) : ('agency' as const),
+          editedBy: edit ? (edit.actorName ?? 'Cliente') : null,
+          isCurrent: false,
+          fields,
+        },
+      ];
+    });
+    if (versions.length) versions[versions.length - 1].isCurrent = true;
+    return { versions };
   }
 
   /** Where the bytes of a snapshot slot live. Never returned to a caller. */

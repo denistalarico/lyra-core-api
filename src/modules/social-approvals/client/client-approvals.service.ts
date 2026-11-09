@@ -9,6 +9,7 @@ import {
   SocialApprovalRequestEntity,
   SocialApprovalStageDecisionEntity,
 } from '../entities';
+import { isTextEditableApproval } from '../approval-content-snapshots';
 import { SocialApprovalAuthorityService } from '../social-approval-authority.service';
 import { SocialApprovalSettingsService } from '../social-approval-settings.service';
 import {
@@ -35,7 +36,7 @@ const AGENCY_TEAM_LABEL = 'Equipe da agência';
 
 export type ClientApprovalReader = {
   userId: string;
-  permissions: { comment: boolean; decide: boolean };
+  permissions: { comment: boolean; decide: boolean; editText?: boolean };
 };
 
 /**
@@ -237,6 +238,10 @@ export class ClientApprovalsService {
         decide:
           reader.permissions.decide &&
           (await this.designated(scope, approval, reader.userId)),
+        editText:
+          Boolean(reader.permissions.editText) &&
+          isTextEditableApproval(approval) &&
+          (await this.settings.get(scope)).clientCanEditText,
       }),
     };
   }

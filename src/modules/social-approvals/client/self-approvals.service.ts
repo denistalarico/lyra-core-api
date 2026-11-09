@@ -9,6 +9,7 @@ import type { CompanyAwareScope } from '../../../common/context/company-aware-sc
 import { AgencyUserProfileEntity } from '../../agency/entities/agency-settings.entities';
 import type { ClientAreaSelfContext } from '../../client-area/client-area.types';
 import { approvalScopeWhere } from '../approval-scope';
+import { isTextEditableApproval } from '../approval-content-snapshots';
 import { isApprovalSnapshotMediaRef } from '../approval-snapshot-media-ref';
 import type { ClientApprovalBoardQueryDto } from '../dto/social-approval-piece.dto';
 import {
@@ -22,7 +23,10 @@ import {
 import { SocialApprovalAuthorityService } from '../social-approval-authority.service';
 import { SocialApprovalMediaService } from '../social-approval-media.service';
 import { SocialApprovalSettingsService } from '../social-approval-settings.service';
+import { SocialApprovalPiecesService } from '../social-approval-pieces.service';
 import { SocialApprovalsService } from '../social-approvals.service';
+import type { ClientApprovalEditTextDto } from './client-approval.dto';
+import { ClientApprovalTextEditService } from './client-approval-text-edit.service';
 import {
   ApprovalSubjectResolver,
   type ResolvedApprovalSubject,
@@ -53,7 +57,7 @@ const submittedSql = (alias: string) => `(
   ${alias}.status IN ('awaiting_internal_review','changes_requested')
   OR EXISTS (
     SELECT 1 FROM "social_approval_events" submitted_event
-     WHERE submitted_event.request_id = ${alias}.id AND submitted_event.type = 'sent'
+     WHERE submitted_event.request_id = ${alias}.id AND submitted_event.type IN ('sent','edited')
   )
   OR EXISTS (
     SELECT 1 FROM "social_approval_stage_decisions" submitted_decision
@@ -81,7 +85,7 @@ const SELF_COLUMNS: Record<
 export type SelfApprovalReader = {
   userId: string;
   agencyRole: 'owner' | 'admin';
-  permissions: { comment: boolean; decide: boolean };
+  permissions: { comment: boolean; decide: boolean; editText?: boolean };
 };
 
 /**
@@ -149,6 +153,8 @@ export class SelfApprovalsService {
     private readonly board: ClientApprovalBoardService,
     private readonly media: ClientApprovalMediaService,
     private readonly snapshotMedia: SocialApprovalMediaService,
+    private readonly textEdit: ClientApprovalTextEditService,
+    private readonly pieces: SocialApprovalPiecesService,
   ) {}
 
   private async findVisible(scope: CompanyAwareScope, approvalId: string) {
@@ -350,6 +356,10 @@ export class SelfApprovalsService {
             userId: reader.userId,
             role: reader.agencyRole,
           }),
+        editText:
+          Boolean(reader.permissions.editText) &&
+          isTextEditableApproval(request) &&
+          settings.clientCanEditText,
       }),
     };
   }
@@ -423,6 +433,30 @@ export class SelfApprovalsService {
       'self',
     );
     return this.detail(scope, approvalId, reader);
+  }
+
+  /** D-24: the same edit as a company's, deciding the internal stage. */
+  async editText(
+    scope: CompanyAwareScope,
+    approvalId: string,
+    reader: SelfApprovalReader,
+    input: ClientApprovalEditTextDto,
+  ) {
+    await this.findVisible(scope, approvalId);
+    const finalId = await this.textEdit.edit(scope, approvalId, input, {
+      userId: reader.userId,
+      surface: 'self',
+      role: reader.agencyRole,
+    });
+    return this.detail(scope, finalId, reader);
+  }
+
+  async textVersions(scope: CompanyAwareScope, approvalId: string) {
+    return this.pieces.textVersions(
+      scope,
+      await this.findVisible(scope, approvalId),
+      'agency',
+    );
   }
 
   /** Bytes by opaque slot, read off the approval just proved visible. */

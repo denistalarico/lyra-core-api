@@ -25,6 +25,7 @@ import {
 import { ClientApprovalBoardQueryDto } from '../dto/social-approval-piece.dto';
 import {
   ClientApprovalCommentDto,
+  ClientApprovalEditTextDto,
   ClientApprovalRequestChangesDto,
 } from './client-approval.dto';
 import {
@@ -63,6 +64,7 @@ export class SelfApprovalsController {
       permissions: {
         comment: context.permissions.has('client_area.approvals.comment'),
         decide: context.permissions.has('client_area.approvals.decide'),
+        editText: context.permissions.has('client_area.approvals.edit_text'),
       },
     };
   }
@@ -164,6 +166,30 @@ export class SelfApprovalsController {
       approvalId,
       this.reader(context),
     );
+  }
+
+  @Post(':approvalId/edit-text')
+  @RequireClientAreaPermission('client_area.approvals.edit_text')
+  editText(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+    @Body() dto: ClientApprovalEditTextDto,
+  ) {
+    return this.approvals.editText(
+      selfApprovalScope(context),
+      approvalId,
+      this.reader(context),
+      dto,
+    );
+  }
+
+  @Get(':approvalId/text-versions')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  textVersions(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+  ) {
+    return this.approvals.textVersions(selfApprovalScope(context), approvalId);
   }
 
   @Post(':approvalId/request-changes')

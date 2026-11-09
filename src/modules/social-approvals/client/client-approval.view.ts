@@ -104,6 +104,8 @@ export type ClientApprovalListItem = {
 export type ClientApprovalActions = {
   canComment: boolean;
   canDecide: boolean;
+  /** AR3: setting, permission and an editable subject, all decided here. */
+  canEditText: boolean;
 };
 
 export type ClientApprovalDetail = ClientApprovalListItem & {
@@ -136,6 +138,8 @@ export type ClientApprovalPreview = {
     thumbnailRef: string | null;
   };
   table?: {
+    /** Campaign tables only; empty for a plan. */
+    summary: Array<{ label: string; value: string }>;
     columns: Array<{ key: string; label: string }>;
     rows: Array<Record<string, string | null>>;
   };
@@ -373,6 +377,10 @@ export function buildClientApprovalPreview(
       ...base,
       format: 'table',
       table: {
+        summary: (preview.table.summary ?? []).map((entry) => ({
+          label: entry.label,
+          value: entry.value,
+        })),
         columns: preview.table.columns.map((column) => ({
           key: column.key,
           label: column.label,
@@ -452,11 +460,12 @@ export function buildClientApprovalPreview(
  */
 export function buildClientApprovalActions(
   approval: SocialApprovalRequestEntity,
-  permissions: { comment: boolean; decide: boolean },
+  permissions: { comment: boolean; decide: boolean; editText?: boolean },
 ): ClientApprovalActions {
   const open = approval.status === 'awaiting_client';
   return {
     canComment: open && permissions.comment,
     canDecide: open && permissions.decide,
+    canEditText: open && (permissions.editText ?? false),
   };
 }

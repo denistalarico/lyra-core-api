@@ -25,12 +25,15 @@ import {
 } from '../../client-area/guards/client-area.guards';
 import { ApprovalClientReviewService } from '../approval-client-review.service';
 import { ClientApprovalBoardQueryDto } from '../dto/social-approval-piece.dto';
+import { SocialApprovalPiecesService } from '../social-approval-pieces.service';
 import { ClientApprovalBoardService } from './client-approval-board.service';
 import { ClientApprovalMediaService } from './client-approval-media.service';
 import {
   ClientApprovalCommentDto,
+  ClientApprovalEditTextDto,
   ClientApprovalRequestChangesDto,
 } from './client-approval.dto';
+import { ClientApprovalTextEditService } from './client-approval-text-edit.service';
 import { ClientApprovalsService } from './client-approvals.service';
 import {
   buildClientApprovalListItem,
@@ -76,6 +79,8 @@ export class ClientAreaApprovalsController {
     private readonly media: ClientApprovalMediaService,
     private readonly files: FilesService,
     private readonly board: ClientApprovalBoardService,
+    private readonly textEdit: ClientApprovalTextEditService,
+    private readonly pieces: SocialApprovalPiecesService,
   ) {}
 
   private reader(context: ClientAreaContext) {
@@ -84,6 +89,7 @@ export class ClientAreaApprovalsController {
       permissions: {
         comment: context.permissions.has('client_area.approvals.comment'),
         decide: context.permissions.has('client_area.approvals.decide'),
+        editText: context.permissions.has('client_area.approvals.edit_text'),
       },
     };
   }
@@ -188,6 +194,41 @@ export class ClientAreaApprovalsController {
     await this.approvals.findVisible(scope, approvalId);
     await this.review.approve(scope, approvalId, context.userId);
     return this.approvals.detail(scope, approvalId, this.reader(context));
+  }
+
+  /**
+   * D-02. The answer is the detail of the request that resulted: when the text
+   * changed, its `id` is a new one and the screen moves to it.
+   */
+  @Post(':approvalId/edit-text')
+  @RequireClientAreaPermission('client_area.approvals.edit_text')
+  async editText(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+    @Body() dto: ClientApprovalEditTextDto,
+  ) {
+    const scope = toCompanyAwareScope(context);
+    await this.approvals.findVisible(scope, approvalId);
+    const finalId = await this.textEdit.edit(scope, approvalId, dto, {
+      userId: context.userId,
+      surface: 'client_area',
+    });
+    return this.approvals.detail(scope, finalId, this.reader(context));
+  }
+
+  /** R-08: only what was put in front of the client, oldest first. */
+  @Get(':approvalId/text-versions')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  async textVersions(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+  ) {
+    const scope = toCompanyAwareScope(context);
+    return this.pieces.textVersions(
+      scope,
+      await this.approvals.findVisible(scope, approvalId),
+      'client',
+    );
   }
 
   @Post(':approvalId/request-changes')

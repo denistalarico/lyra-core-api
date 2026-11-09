@@ -17,7 +17,8 @@ export type SocialApprovalNotificationType =
   | 'awaiting_client'
   | 'changes_requested'
   | 'approved'
-  | 'superseded';
+  | 'superseded'
+  | 'client_edited';
 
 /**
  * NTF-C1 §10 — the client-facing wording of each event, carried over from
@@ -73,7 +74,9 @@ const CLIENT_COPY: Record<
  */
 @Injectable()
 export class SocialApprovalNotificationPublisher {
-  private readonly logger = new Logger(SocialApprovalNotificationPublisher.name);
+  private readonly logger = new Logger(
+    SocialApprovalNotificationPublisher.name,
+  );
 
   constructor(
     private readonly notifications: NotificationEventProcessorService,
@@ -110,6 +113,22 @@ export class SocialApprovalNotificationPublisher {
     await Promise.all([
       this.publishToAgency(type, approval, actorUserId),
       this.publishToConversation(type, approval),
+    ]);
+  }
+
+  /**
+   * D-02: a client edit reaches the Agency, never the person who just made
+   * it. The card follows the request only while it still waits on someone.
+   */
+  async publishClientEdited(
+    approval: SocialApprovalRequestEntity,
+    actorUserId: string | null,
+  ): Promise<void> {
+    await Promise.all([
+      this.publishToAgency('client_edited', approval, actorUserId),
+      approval.status === 'awaiting_client'
+        ? this.publishToConversation('awaiting_client', approval)
+        : Promise.resolve(),
     ]);
   }
 
@@ -299,10 +318,12 @@ export class SocialApprovalNotificationPublisher {
         resourceType: 'social_approval_request',
         resourceId: approval.id,
         occurredAt: occurredAt.toISOString(),
-        recipients: [{
-          userId: approval.requestedByUserId,
-          interestReason: NotificationInterestReason.REQUESTER,
-        }],
+        recipients: [
+          {
+            userId: approval.requestedByUserId,
+            interestReason: NotificationInterestReason.REQUESTER,
+          },
+        ],
         /**
          * NTF-C1 §27 — the second audience of the same event, on the same
          * notification. The core resolves who that is; this only says which
@@ -351,6 +372,7 @@ export class SocialApprovalNotificationPublisher {
       changes_requested: 'Alterações solicitadas na aprovação',
       approved: 'Aprovação concluída',
       superseded: 'Aprovação substituída por nova revisão',
+      client_edited: 'Cliente editou o texto da aprovação',
     };
     return titles[type];
   }

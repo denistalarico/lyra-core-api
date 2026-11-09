@@ -309,9 +309,14 @@ describe('AR1 client board and snapshot projection contract', () => {
   });
 
   it('hides the internal columns behind "with the agency"', () => {
-    for (const boardColumn of ['preparation', 'internal_review', 'changes'] as const)
+    for (const boardColumn of [
+      'preparation',
+      'internal_review',
+      'changes',
+    ] as const)
       expect(
-        buildClientBoardCard({ ...piece, boardColumn }, [step], new Map()).column,
+        buildClientBoardCard({ ...piece, boardColumn }, [step], new Map())
+          .column,
       ).toBe('with_agency');
   });
 
@@ -421,23 +426,34 @@ describe('AP3 client status projection', () => {
 
 describe('AP4 replacement projection contract', () => {
   it('never emits replacementApprovalId unless explicitly passed', () => {
-    const replaced = { ...approval, status: 'superseded' } as unknown as SocialApprovalRequestEntity;
+    const replaced = {
+      ...approval,
+      status: 'superseded',
+    } as unknown as SocialApprovalRequestEntity;
     const withoutReplacement = buildClientApprovalListItem(replaced, []);
     expect(withoutReplacement).not.toHaveProperty('replacementApprovalId');
   });
 
   it('emits replacementApprovalId only for a replaced status, as an opaque id', () => {
-    const replaced = { ...approval, status: 'superseded' } as unknown as SocialApprovalRequestEntity;
+    const replaced = {
+      ...approval,
+      status: 'superseded',
+    } as unknown as SocialApprovalRequestEntity;
     const withReplacement = buildClientApprovalListItem(
       replaced,
       [],
       'replacement-approval-id',
     );
-    expect(withReplacement.replacementApprovalId).toBe('replacement-approval-id');
+    expect(withReplacement.replacementApprovalId).toBe(
+      'replacement-approval-id',
+    );
 
     // A non-replaced status never carries it even if a caller passed one by
     // mistake — the projection, not the caller, is the enforcement point.
-    const approved = { ...approval, status: 'approved' } as unknown as SocialApprovalRequestEntity;
+    const approved = {
+      ...approval,
+      status: 'approved',
+    } as unknown as SocialApprovalRequestEntity;
     const stillNoReplacement = buildClientApprovalListItem(
       approved,
       [],
@@ -453,13 +469,21 @@ describe('AP3 client actions availability', () => {
       comment: true,
       decide: true,
     });
-    expect(open).toEqual({ canComment: true, canDecide: true });
+    expect(open).toEqual({
+      canComment: true,
+      canDecide: true,
+      canEditText: false,
+    });
 
     const viewer = buildClientApprovalActions(approval, {
       comment: true,
       decide: false,
     });
-    expect(viewer).toEqual({ canComment: true, canDecide: false });
+    expect(viewer).toEqual({
+      canComment: true,
+      canDecide: false,
+      canEditText: false,
+    });
 
     for (const status of [
       'approved',
@@ -469,9 +493,13 @@ describe('AP3 client actions availability', () => {
     ] as const) {
       const closed = buildClientApprovalActions(
         { ...approval, status } as SocialApprovalRequestEntity,
-        { comment: true, decide: true },
+        { comment: true, decide: true, editText: true },
       );
-      expect(closed).toEqual({ canComment: false, canDecide: false });
+      expect(closed).toEqual({
+        canComment: false,
+        canDecide: false,
+        canEditText: false,
+      });
     }
   });
 });

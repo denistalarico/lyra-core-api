@@ -173,7 +173,8 @@ export class SocialApprovalPieceActionsService {
     return this.mediaAssets.resolve({ ...scope, mediaAssetId });
   }
 
-  private async mediaSet(
+  /** Also the media_set of a Planner direct upload (D-23). */
+  async mediaSet(
     scope: CompanyAwareScope,
     mediaAssetIds: readonly string[],
   ): Promise<ApprovalMediaSetSnapshotPayload> {

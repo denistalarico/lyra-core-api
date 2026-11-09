@@ -1,4 +1,12 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 /** A client comment independent of any decision (§37). */
 export class ClientApprovalCommentDto {
@@ -11,4 +19,24 @@ export class ClientApprovalCommentDto {
  */
 export class ClientApprovalRequestChangesDto {
   @IsString() @MinLength(1) @MaxLength(8000) body!: string;
+}
+
+/**
+ * D-02: only the text fields; `source` and the author come from the server.
+ * An absent field keeps its current value and `null` clears it.
+ */
+export class ClientApprovalEditTextDto {
+  @IsOptional() @IsString() @MaxLength(20000) copy?: string | null;
+  @IsOptional() @IsString() @MaxLength(20000) caption?: string | null;
+  @IsOptional() @IsString() @MaxLength(20000) script?: string | null;
+  @IsOptional() @IsString() @MaxLength(2000) cta?: string | null;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @MaxLength(120, { each: true })
+  hashtags?: string[];
+  @IsOptional() @IsString() @MaxLength(5000) firstComment?: string | null;
+  /** "Salvar e aprovar": the decision commits with the edit, or neither does. */
+  @IsOptional() @IsBoolean() approve?: boolean;
 }

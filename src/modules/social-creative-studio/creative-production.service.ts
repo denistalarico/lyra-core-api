@@ -3,10 +3,12 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { SocialApprovalPiecesService } from '../social-approvals/social-approval-pieces.service';
 import {
   DataSource,
   type EntityManager,
@@ -248,7 +250,22 @@ export class CreativeProductionService {
     private readonly assetOwner: CreativeAssetService,
     /** CS6-B: late binding of AI costs to the linked task/project. */
     @Optional() private readonly costs?: CreativeCostMaterializer,
+    /** D-20: another selected version reopens an approved creative. */
+    @Optional() private readonly approvalPieces?: SocialApprovalPiecesService,
   ) {}
+
+  /** After commit, so a projection problem never undoes a selection. */
+  private async reprojectApprovalPiece(contentItemId: string): Promise<void> {
+    try {
+      await this.approvalPieces?.recomputeContentItem(undefined, contentItemId);
+    } catch (error) {
+      new Logger(CreativeProductionService.name).warn(
+        `approval piece projection skipped for ${contentItemId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
 
   // ── View ────────────────────────────────────────────────────────────────
 
@@ -394,7 +411,10 @@ export class CreativeProductionService {
         return true;
       }),
     );
-    if (changed) await this.readiness.reflectPlanner(scope, item.id, actor);
+    if (changed) {
+      await this.readiness.reflectPlanner(scope, item.id, actor);
+      await this.reprojectApprovalPiece(item.id);
+    }
     return { changed, production: await this.view(ctx, scope, item.id) };
   }
 
@@ -435,6 +455,7 @@ export class CreativeProductionService {
       );
       return true;
     });
+    if (changed) await this.reprojectApprovalPiece(item.id);
     return { changed, production: await this.view(ctx, scope, item.id) };
   }
 
@@ -516,6 +537,7 @@ export class CreativeProductionService {
       return { creativeAssetId: asset.id, versionId: asset.currentVersionId! };
     });
     await this.readiness.reflectPlanner(scope, item.id, actor);
+    await this.reprojectApprovalPiece(item.id);
     return {
       changed: true,
       ...created,

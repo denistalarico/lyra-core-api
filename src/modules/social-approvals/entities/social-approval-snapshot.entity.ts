@@ -19,6 +19,8 @@ export type SocialApprovalSnapshotKind =
 export type ApprovalTableSnapshotPayload = {
   columns: Array<{ key: string; label: string }>;
   rows: Array<Record<string, string | null>>;
+  /** AR3: what a campaign table says about the campaign itself. */
+  summary?: Array<{ label: string; value: string }>;
 };
 export type ApprovalTextSnapshotPayload = { body: string };
 export type ApprovalLinkSnapshotPayload = { url: string; label: string | null };

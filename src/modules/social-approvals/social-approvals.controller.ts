@@ -211,6 +211,14 @@ export class SocialApprovalsController {
   ) {
     return this.approvals.preview(resolveCompanyAwareScope(ctx), id);
   }
+  @Get(':id/text-versions')
+  @RequirePermission('social.approvals.review.view.assigned')
+  textVersions(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.approvals.textVersions(resolveCompanyAwareScope(ctx), id);
+  }
   @Post(':id/view')
   @RequirePermission('social.approvals.review.view.assigned')
   view(

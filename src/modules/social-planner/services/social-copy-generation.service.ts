@@ -1,8 +1,10 @@
+import { SocialApprovalPiecesService } from '../../social-approvals/social-approval-pieces.service';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -155,6 +157,8 @@ export class SocialCopyGenerationService {
     private readonly settingsService: SocialPlannerSettingsService,
     private readonly config: SocialCopyGenerationConfigService,
     private readonly stateMachine: SocialCopyGenerationStateMachine,
+    /** D-20: accepting a proposal is a new revision like any other. */
+    @Optional() private readonly approvalPieces?: SocialApprovalPiecesService,
   ) {}
 
   /**
@@ -666,6 +670,7 @@ export class SocialCopyGenerationService {
       item.updatedById = actorUserId;
 
       const savedContent = await contentRepository.save(item);
+      await this.approvalPieces?.recomputeContentItem(manager, item.id);
 
       const decidedAt = new Date();
       await proposalsRepository.update(

@@ -129,6 +129,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     SocialApprovalSettingsService,
     SocialApprovalPiecesService,
     SocialApprovalPieceSyncService,
+    SocialApprovalPieceActionsService,
     SocialApprovalMediaService,
     ApprovalClientReviewService,
     ApprovalSubjectResolver,

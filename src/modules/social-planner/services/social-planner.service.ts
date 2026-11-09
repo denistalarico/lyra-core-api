@@ -2,9 +2,17 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Not, type FindOptionsWhere, Repository } from 'typeorm';
+import {
+  type EntityManager,
+  In,
+  IsNull,
+  Not,
+  type FindOptionsWhere,
+  Repository,
+} from 'typeorm';
 import {
   CreateSocialContentItemDto,
   CreateSocialPlanDto,
@@ -24,6 +32,7 @@ import {
   toSocialPlanView,
   toSocialContentRevisionView,
 } from '../views/social-planner.view';
+import { SocialApprovalPiecesService } from '../../social-approvals/social-approval-pieces.service';
 import { SocialCampaignService } from './social-campaign.service';
 
 export interface SocialPlannerScope {
@@ -54,6 +63,9 @@ export class SocialPlannerService {
      * service knows nothing about plans, content or revisions.
      */
     private readonly campaignService: SocialCampaignService,
+
+    /** D-20: a new revision reopens an approved copy in the same transaction. */
+    @Optional() private readonly approvalPieces?: SocialApprovalPiecesService,
   ) {}
 
   async listPlans(scope: SocialPlannerScope) {
@@ -492,109 +504,127 @@ export class SocialPlannerService {
     actorUserId: string | null,
     dto: CreateSocialContentRevisionDto,
   ) {
-    return this.contentRepository.manager.transaction(async (manager) => {
-      const contentRepository = manager.getRepository(SocialContentItemEntity);
-      const revisionsRepository = manager.getRepository(
-        SocialContentRevisionEntity,
-      );
+    return this.contentRepository.manager.transaction((manager) =>
+      this.createRevisionInTransaction(
+        manager,
+        scope,
+        contentId,
+        actorUserId,
+        dto,
+      ),
+    );
+  }
 
-      const item = await contentRepository.findOne({
-        where: {
-          id: contentId,
-          ...this.contentScopeWhere(scope),
-        },
-        lock: {
-          mode: 'pessimistic_write',
-        },
-      });
+  /** The body of `createRevision`, for a caller with its own transaction. */
+  async createRevisionInTransaction(
+    manager: EntityManager,
+    scope: SocialPlannerScope,
+    contentId: string,
+    actorUserId: string | null,
+    dto: CreateSocialContentRevisionDto,
+  ) {
+    const contentRepository = manager.getRepository(SocialContentItemEntity);
+    const revisionsRepository = manager.getRepository(
+      SocialContentRevisionEntity,
+    );
 
-      if (!item) {
-        throw new NotFoundException('Social content item not found.');
-      }
-      await this.requirePlan(scope, item.planId);
-
-      const latestRevision = await revisionsRepository.findOne({
-        where: {
-          ...this.revisionScopeWhere(scope),
-          contentItemId: item.id,
-        },
-        order: {
-          revisionNumber: 'DESC',
-        },
-      });
-
-      const revisionNumber = (latestRevision?.revisionNumber ?? 0) + 1;
-
-      const copy =
-        dto.copy !== undefined ? this.normalizeNullable(dto.copy) : item.copy;
-
-      const caption =
-        dto.caption !== undefined
-          ? this.normalizeNullable(dto.caption)
-          : item.caption;
-
-      const script =
-        dto.script !== undefined
-          ? this.normalizeNullable(dto.script)
-          : item.script;
-
-      const cta =
-        dto.cta !== undefined ? this.normalizeNullable(dto.cta) : item.cta;
-
-      const firstComment =
-        dto.firstComment !== undefined
-          ? this.normalizeNullable(dto.firstComment)
-          : item.firstComment;
-
-      const hashtags =
-        dto.hashtags !== undefined
-          ? this.normalizeHashtags(dto.hashtags)
-          : item.hashtags;
-
-      const revision = revisionsRepository.create({
-        tenantId: scope.tenantId,
-        workspaceId: scope.workspaceId,
-        agencyClientId: scope.agencyClientId,
-
-        contentItemId: item.id,
-        revisionNumber,
-
-        copy,
-        caption,
-        script,
-        cta,
-        hashtags,
-        firstComment,
-
-        briefSnapshot: item.brief,
-
-        source: dto.source ?? 'human',
-
-        parentRevisionId: item.currentRevisionId,
-        generationRunId: dto.generationRunId ?? null,
-
-        createdById: actorUserId,
-      });
-
-      const savedRevision = await revisionsRepository.save(revision);
-
-      item.copy = savedRevision.copy;
-      item.caption = savedRevision.caption;
-      item.script = savedRevision.script;
-      item.cta = savedRevision.cta;
-      item.hashtags = savedRevision.hashtags;
-      item.firstComment = savedRevision.firstComment;
-
-      item.currentRevisionId = savedRevision.id;
-      item.updatedById = actorUserId;
-
-      const savedContent = await contentRepository.save(item);
-
-      return {
-        content: toSocialContentItemView(savedContent),
-        revision: toSocialContentRevisionView(savedRevision),
-      };
+    const item = await contentRepository.findOne({
+      where: {
+        id: contentId,
+        ...this.contentScopeWhere(scope),
+      },
+      lock: {
+        mode: 'pessimistic_write',
+      },
     });
+
+    if (!item) {
+      throw new NotFoundException('Social content item not found.');
+    }
+    await this.requirePlan(scope, item.planId);
+
+    const latestRevision = await revisionsRepository.findOne({
+      where: {
+        ...this.revisionScopeWhere(scope),
+        contentItemId: item.id,
+      },
+      order: {
+        revisionNumber: 'DESC',
+      },
+    });
+
+    const revisionNumber = (latestRevision?.revisionNumber ?? 0) + 1;
+
+    const copy =
+      dto.copy !== undefined ? this.normalizeNullable(dto.copy) : item.copy;
+
+    const caption =
+      dto.caption !== undefined
+        ? this.normalizeNullable(dto.caption)
+        : item.caption;
+
+    const script =
+      dto.script !== undefined
+        ? this.normalizeNullable(dto.script)
+        : item.script;
+
+    const cta =
+      dto.cta !== undefined ? this.normalizeNullable(dto.cta) : item.cta;
+
+    const firstComment =
+      dto.firstComment !== undefined
+        ? this.normalizeNullable(dto.firstComment)
+        : item.firstComment;
+
+    const hashtags =
+      dto.hashtags !== undefined
+        ? this.normalizeHashtags(dto.hashtags)
+        : item.hashtags;
+
+    const revision = revisionsRepository.create({
+      tenantId: scope.tenantId,
+      workspaceId: scope.workspaceId,
+      agencyClientId: scope.agencyClientId,
+
+      contentItemId: item.id,
+      revisionNumber,
+
+      copy,
+      caption,
+      script,
+      cta,
+      hashtags,
+      firstComment,
+
+      briefSnapshot: item.brief,
+
+      source: dto.source ?? 'human',
+
+      parentRevisionId: item.currentRevisionId,
+      generationRunId: dto.generationRunId ?? null,
+
+      createdById: actorUserId,
+    });
+
+    const savedRevision = await revisionsRepository.save(revision);
+
+    item.copy = savedRevision.copy;
+    item.caption = savedRevision.caption;
+    item.script = savedRevision.script;
+    item.cta = savedRevision.cta;
+    item.hashtags = savedRevision.hashtags;
+    item.firstComment = savedRevision.firstComment;
+
+    item.currentRevisionId = savedRevision.id;
+    item.updatedById = actorUserId;
+
+    const savedContent = await contentRepository.save(item);
+    await this.approvalPieces?.recomputeContentItem(manager, item.id);
+
+    return {
+      content: toSocialContentItemView(savedContent),
+      revision: toSocialContentRevisionView(savedRevision),
+    };
   }
 
   async restoreRevision(
@@ -690,6 +720,7 @@ export class SocialPlannerService {
       item.updatedById = actorUserId;
 
       const savedContent = await contentRepository.save(item);
+      await this.approvalPieces?.recomputeContentItem(manager, item.id);
 
       return {
         content: toSocialContentItemView(savedContent),

@@ -121,6 +121,17 @@ const PRODUCTION_REFLECTION: Record<
 };
 
 /**
+ * D-22 — "Tudo junto" sends the copy with the creative, so CS2B.4's prerequisite
+ * for entering the creative segment is met at the send. The later states are
+ * absent: this only ever walks an item forward to `copy_ready`.
+ */
+const COPY_HANDOFF_FROM: readonly SocialContentPlanningStatus[] = [
+  'idea',
+  'planned',
+  'copy_in_progress',
+];
+
+/**
  * How another module reports creative production on a Planner content item.
  *
  * The Planner owns `planningStatus`; callers never touch the content
@@ -216,6 +227,23 @@ export class SocialContentProductionStatusService {
       input.contentItemId,
       'creative_in_progress',
       REVISION_FROM,
+      input.actorUserId,
+      manager,
+    );
+    return moved !== null;
+  }
+
+  /** D-22: same scope, no-op and compare-and-set contract as the others. */
+  async reflectCopyHandoff(
+    scope: SocialPlannerScope,
+    input: { contentItemId: string; actorUserId: string | null },
+    manager?: EntityManager,
+  ): Promise<boolean> {
+    const moved = await this.move(
+      scope,
+      input.contentItemId,
+      'copy_ready',
+      COPY_HANDOFF_FROM,
       input.actorUserId,
       manager,
     );

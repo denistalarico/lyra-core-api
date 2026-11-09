@@ -174,5 +174,7 @@ import {
     CreativeVideoAvatarCatalogService,
     CreativeVideoCallbackService,
   ],
+  // AR3: the Planner's approval send reaches the Studio through a join module.
+  exports: [CreativeProductionService, CreativeProductionReadinessService],
 })
 export class SocialCreativeStudioModule {}

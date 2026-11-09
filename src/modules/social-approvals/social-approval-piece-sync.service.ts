@@ -1,7 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { SocialApprovalPiecesService } from './social-approval-pieces.service';
+import {
+  buildTablePayloads,
+  destinationMediaIds,
+} from './approval-content-snapshots';
+import {
+  SocialApprovalStepEntity,
+  type ApprovalMediaSetSnapshotPayload,
+} from './entities';
+import {
+  hashSnapshotPayload,
+  SocialApprovalPiecesService,
+} from './social-approval-pieces.service';
 
 export type ApprovalBoardContext = {
   clientId: string | null;
@@ -131,6 +142,36 @@ const UPDATE_SOURCE_STATE = `UPDATE "social_approval_pieces" piece
 
 const UNPROJECTED = `SELECT piece.id FROM (${PIECES_IN_CONTEXT}) piece WHERE piece.active_step_id IS NULL`;
 
+/** Approved snapshots whose source can still change under them (D-20). */
+const APPROVED_SNAPSHOT_STEPS = `
+  SELECT step.id AS step_id, step.is_stale, step.piece_id, step.current_request_id,
+         step.tenant_id, step.workspace_id, step.agency_client_id, step.company_context_id,
+         piece.kind AS piece_kind, piece.source_id,
+         snapshot.kind AS snapshot_kind, snapshot.payload, snapshot.content_hash
+    FROM (${PIECES_IN_CONTEXT}) piece
+    JOIN "social_approval_steps" step ON step.piece_id = piece.id
+    JOIN "social_approval_requests" request ON request.id = step.current_request_id
+    JOIN "social_approval_snapshots" snapshot ON snapshot.id = request.subject_revision_id
+   WHERE piece.source_id IS NOT NULL AND piece.source_state = 'active' AND piece.finished_at IS NULL
+     AND request.status = 'approved' AND request.subject_type = 'approval_snapshot'
+     AND snapshot.kind IN ('table','media_set')`;
+
+type ApprovedSnapshotRow = {
+  step_id: string;
+  is_stale: boolean;
+  piece_id: string;
+  current_request_id: string;
+  tenant_id: string;
+  workspace_id: string;
+  agency_client_id: string | null;
+  company_context_id: string | null;
+  piece_kind: 'plan_table' | 'campaign_table' | 'content_item';
+  source_id: string;
+  snapshot_kind: 'table' | 'media_set';
+  payload: unknown;
+  content_hash: string;
+};
+
 /**
  * D-31 — Planner pieces are born here, before a board is read, instead of
  * from a hook in each of the Planner's creation paths. Single idempotent
@@ -149,12 +190,7 @@ export class SocialApprovalPieceSyncService {
     contexts: readonly ApprovalBoardContext[],
   ): Promise<void> {
     if (contexts.length === 0) return;
-    const parameters = [
-      scope.tenantId,
-      scope.workspaceId,
-      contexts.map((context) => context.clientId),
-      contexts.map((context) => context.companyContextId),
-    ];
+    const parameters = this.parameters(scope, contexts);
     for (const statement of [
       INSERT_ITEM_PIECES,
       INSERT_PLAN_PIECES,
@@ -171,7 +207,94 @@ export class SocialApprovalPieceSyncService {
       parameters,
     );
     await this.pieces.recomputeMany([
-      ...new Set([...changed, ...unprojected].map((row) => row.id)),
+      ...new Set([
+        ...changed.map((row) => row.id),
+        ...unprojected.map((row) => row.id),
+        ...(await this.refreshSnapshotStaleness(parameters)),
+      ]),
     ]);
+  }
+
+  /** D-20 for one context, without the rest of the sync (the send screens). */
+  async refreshStaleness(
+    scope: { tenantId: string; workspaceId: string },
+    contexts: readonly ApprovalBoardContext[],
+  ): Promise<void> {
+    await this.pieces.recomputeMany(
+      await this.refreshSnapshotStaleness(this.parameters(scope, contexts)),
+    );
+  }
+
+  private parameters(
+    scope: { tenantId: string; workspaceId: string },
+    contexts: readonly ApprovalBoardContext[],
+  ) {
+    return [
+      scope.tenantId,
+      scope.workspaceId,
+      contexts.map((context) => context.clientId),
+      contexts.map((context) => context.companyContextId),
+    ];
+  }
+
+  /**
+   * The Planner has many write paths for items (the reason for D-31 itself),
+   * so tables and direct uploads are compared with their approved snapshot
+   * when read, not hooked on each path. Returns the pieces that flipped.
+   */
+  private async refreshSnapshotStaleness(
+    parameters: unknown[],
+  ): Promise<string[]> {
+    const rows = await this.dataSource.query<ApprovedSnapshotRow[]>(
+      APPROVED_SNAPSHOT_STEPS,
+      parameters,
+    );
+    if (rows.length === 0) return [];
+    const manager = this.dataSource.manager;
+    const tableRows = rows.filter((row) => row.snapshot_kind === 'table');
+    const [tables, media] = await Promise.all([
+      buildTablePayloads(
+        manager,
+        tableRows.map((row) => ({
+          key: row.step_id,
+          kind: row.piece_kind as 'plan_table' | 'campaign_table',
+          sourceId: row.source_id,
+        })),
+      ),
+      destinationMediaIds(
+        manager,
+        rows
+          .filter((row) => row.snapshot_kind === 'media_set')
+          .map((row) => row.source_id),
+      ),
+    ]);
+    const flipped: string[] = [];
+    for (const row of rows) {
+      const isStale =
+        row.snapshot_kind === 'table'
+          ? hashSnapshotPayload(tables.get(row.step_id)!) !== row.content_hash
+          : (media.get(row.source_id) ?? []).join() !==
+            (row.payload as ApprovalMediaSetSnapshotPayload).items
+              .map((item) => item.mediaAssetId)
+              .join();
+      if (isStale === row.is_stale) continue;
+      await manager.update(SocialApprovalStepEntity, row.step_id, { isStale });
+      if (isStale)
+        await this.pieces.recordEvent(
+          manager,
+          {
+            tenantId: row.tenant_id,
+            workspaceId: row.workspace_id,
+            agencyClientId: row.agency_client_id,
+            companyContextId: row.company_context_id,
+            pieceId: row.piece_id,
+            stepId: row.step_id,
+            requestId: row.current_request_id,
+          },
+          'reopened_stale',
+        );
+      flipped.push(row.piece_id);
+    }
+    return flipped;
   }
 }

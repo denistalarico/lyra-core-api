@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import {
   SocialApprovalCommentEntity,
@@ -222,13 +222,7 @@ export class SocialApprovalsService {
     afterCommit: ApprovalOperation['afterCommit'],
   ) {
     const requests = manager.getRepository(SocialApprovalRequestEntity);
-    // PostgreSQL serializes replacement workflows per logical subject root.
-    // It prevents concurrent submissions of r2/r3 from both surviving active.
-    if ('query' in manager && typeof manager.query === 'function') {
-      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-        `social-approval:${scope.tenantId}:${scope.workspaceId}:${scope.agencyClientId}:${scope.companyContextId}:${subject.subjectType}:${subject.subjectId}`,
-      ]);
-    }
+    await this.lockSubject(manager, scope, subject);
     const previous = await requests.find({
       where: {
         ...this.scopeWhere(scope),
@@ -256,6 +250,32 @@ export class SocialApprovalsService {
       );
     }
     const step = await this.pieces.resolveStep(manager, scope, subject);
+    // A step shows one attempt: a different subject taking the slot (Studio
+    // version over a direct upload, or the reverse) closes the one it replaces.
+    const replaced = step.currentRequestId
+      ? await requests.findOne({
+          where: { id: step.currentRequestId },
+          lock: { mode: 'pessimistic_write' },
+        })
+      : null;
+    if (
+      replaced &&
+      ACTIVE.includes(replaced.status as (typeof ACTIVE)[number]) &&
+      (replaced.subjectType !== subject.subjectType ||
+        replaced.subjectId !== subject.subjectId)
+    ) {
+      replaced.status = 'superseded';
+      replaced.supersededAt = supersededAt;
+      await requests.save(replaced);
+      await this.pieces.recordRequestEvent(
+        manager,
+        replaced,
+        'superseded',
+        actor,
+        'agency',
+      );
+      superseded.push(replaced);
+    }
     const saved = await requests.save(
       requests.create({
         tenantId: scope.tenantId,
@@ -295,6 +315,219 @@ export class SocialApprovalsService {
       await this.observeTransition(...superseded, saved);
     });
     return saved;
+  }
+  /**
+   * PostgreSQL serializes replacement workflows per logical subject root. It
+   * prevents concurrent submissions of r2/r3 from both surviving active.
+   */
+  private async lockSubject(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    subject: Pick<ResolvedApprovalSubject, 'subjectType' | 'subjectId'>,
+  ) {
+    if ('query' in manager && typeof manager.query === 'function')
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `social-approval:${scope.tenantId}:${scope.workspaceId}:${scope.agencyClientId}:${scope.companyContextId}:${subject.subjectType}:${subject.subjectId}`,
+      ]);
+  }
+  /**
+   * AR3 — create and submit as one step, so the Planner's send never leaves a
+   * draft behind (F-08). Repeating it for a revision already under review is
+   * a no-op, which is what makes a retried send safe.
+   */
+  async sendInTransaction(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    actor: ApprovalActor,
+    subject: ResolvedApprovalSubject,
+    afterCommit: ApprovalOperation['afterCommit'],
+    options: { batchId?: string | null; surface?: SocialApprovalSurface } = {},
+  ): Promise<{ request: SocialApprovalRequestEntity; changed: boolean }> {
+    await this.lockSubject(manager, scope, subject);
+    const requests = manager.getRepository(SocialApprovalRequestEntity);
+    const current = await requests.findOne({
+      where: {
+        ...this.scopeWhere(scope),
+        subjectType: subject.subjectType,
+        subjectId: subject.subjectId,
+        subjectRevisionId: subject.subjectRevisionId,
+        status: In([...ACTIVE]),
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (
+      current?.status === 'awaiting_internal_review' ||
+      current?.status === 'awaiting_client'
+    )
+      return { request: current, changed: false };
+    const request =
+      current ??
+      (await this.createInTransaction(
+        manager,
+        scope,
+        actor,
+        subject,
+        afterCommit,
+      ));
+    return {
+      request: await this.submitWithBatch(
+        manager,
+        scope,
+        actor,
+        request.id,
+        afterCommit,
+        options,
+      ),
+      changed: true,
+    };
+  }
+  /**
+   * AR3 — the Studio's send creates a draft in its own transaction, so the
+   * Planner hands it over here. Anything past `draft` is left as it is.
+   */
+  async submitExisting(
+    scope: CompanyAwareScope,
+    id: string,
+    actorUserId: string | null | undefined,
+    options: { batchId?: string | null; surface?: SocialApprovalSurface } = {},
+  ): Promise<{ request: SocialApprovalRequestEntity; changed: boolean }> {
+    const actor = this.user(actorUserId);
+    const afterCommit: ApprovalOperation['afterCommit'] = [];
+    const outcome = await this.dataSource.transaction(async (manager) => {
+      const request = await this.lockRequest(manager, scope, id);
+      if (request.status !== 'draft') return { request, changed: false };
+      return {
+        request: await this.submitWithBatch(
+          manager,
+          scope,
+          actor,
+          id,
+          afterCommit,
+          options,
+        ),
+        changed: true,
+      };
+    });
+    for (const run of afterCommit) await run();
+    return outcome;
+  }
+  /** The batch is on the row before the transition is announced (D-19). */
+  private async submitWithBatch(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    actor: ApprovalActor,
+    id: string,
+    afterCommit: ApprovalOperation['afterCommit'],
+    options: { batchId?: string | null; surface?: SocialApprovalSurface },
+  ) {
+    if (options.batchId)
+      await manager
+        .getRepository(SocialApprovalRequestEntity)
+        .update({ id }, { batchId: options.batchId });
+    return this.submitInTransaction(
+      manager,
+      scope,
+      actor,
+      id,
+      afterCommit,
+      options.surface,
+    );
+  }
+  /** Locked and in the status an edit may start from; 409 otherwise. */
+  async lockForEdit(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    id: string,
+    status: SocialApprovalStatus,
+  ) {
+    const request = await this.lockRequest(manager, scope, id);
+    this.assertStatus(request, [status]);
+    return request;
+  }
+  /**
+   * D-02/D-03 — the edited text becomes a new revision and a new request in
+   * the same stage, with no decision carried over, which is what restarts a
+   * "Todos" round. `now()` is the transaction's own clock: a decision made in
+   * this same transaction ("Salvar e aprovar") is stamped with it, and it has
+   * to count as inside the round it opens.
+   */
+  async reissueAfterEditInTransaction(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    actor: ApprovalActor,
+    previous: SocialApprovalRequestEntity,
+    subject: ResolvedApprovalSubject,
+    afterCommit: ApprovalOperation['afterCommit'],
+    surface: SocialApprovalSurface,
+    requiredClientApproverIds: string[] | null,
+  ) {
+    const requests = manager.getRepository(SocialApprovalRequestEntity);
+    const [{ now }] = await manager.query<Array<{ now: Date }>>(
+      'SELECT now() AS now',
+    );
+    const status = previous.status;
+    const toClient = status === 'awaiting_client';
+    previous.status = 'superseded';
+    previous.supersededAt = now;
+    await requests.save(previous);
+    await this.pieces.recordRequestEvent(
+      manager,
+      previous,
+      'superseded',
+      actor,
+      surface,
+    );
+    const step = await this.pieces.resolveStep(manager, scope, subject);
+    const saved = await requests.save(
+      requests.create({
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
+        ...subject,
+        status,
+        currentStage: previous.currentStage,
+        // The Agency person who sent it: they are who D-02 notifies.
+        requestedByUserId: previous.requestedByUserId,
+        requestedAt: now,
+        sentToClientAt: toClient ? now : null,
+        clientFirstViewedAt: null,
+        clientLastViewedAt: null,
+        internalFirstViewedAt: null,
+        internalLastViewedAt: null,
+        internalViewedByUserId: null,
+        clientViewedByUserId: null,
+        approvedAt: null,
+        cancelledAt: null,
+        supersededAt: null,
+        stepId: step.id,
+        batchId: null,
+        resolution: null,
+        requiredClientApproverIds,
+      }),
+    );
+    await this.pieces.attachRequest(manager, step, saved);
+    await this.pieces.recordRequestEvent(
+      manager,
+      saved,
+      'edited',
+      actor,
+      surface,
+      {
+        previousRequestId: previous.id,
+        previousRevisionId: previous.subjectRevisionId,
+      },
+    );
+    afterCommit.push(() => this.observeTransition(previous, saved));
+    return saved;
+  }
+  /** Runs last, on the row as the operation left it. */
+  async announceClientEdit(
+    approval: SocialApprovalRequestEntity,
+    actorUserId: string | null,
+  ): Promise<void> {
+    await this.notifications?.publishClientEdited(approval, actorUserId);
+    await this.announceTimeline(approval, 'decision_changed');
   }
   async list(
     scope: CompanyAwareScope,
@@ -405,6 +638,14 @@ export class SocialApprovalsService {
     ]);
     return { ...request, comments, decisions };
   }
+  /** R-08: agency view of the text history of this approval's step. */
+  async textVersions(scope: CompanyAwareScope, id: string) {
+    return this.pieces.textVersions(
+      scope,
+      await this.find(scope, id),
+      'agency',
+    );
+  }
   async preview(scope: CompanyAwareScope, id: string) {
     const request = await this.find(scope, id);
     return this.subjects.getPreview(scope, {
@@ -490,6 +731,7 @@ export class SocialApprovalsService {
     actor: ApprovalActor,
     id: string,
     afterCommit: ApprovalOperation['afterCommit'],
+    surface: SocialApprovalSurface = 'agency',
   ) {
     const item = await this.lockRequest(manager, scope, id);
     this.assertStatus(item, ['draft', 'changes_requested']);
@@ -517,14 +759,14 @@ export class SocialApprovalsService {
         saved,
         'internal_skipped',
         actor,
-        'agency',
+        surface,
       );
     await this.pieces.recordRequestEvent(
       manager,
       saved,
       'sent',
       actor,
-      'agency',
+      surface,
       {
         to: skipInternal ? 'client' : 'internal',
       },
@@ -639,9 +881,10 @@ export class SocialApprovalsService {
     actorUserId: string | null | undefined,
     role?: string | null,
     surface: SocialApprovalSurface = 'agency',
+    operation?: ApprovalOperation,
   ) {
     const actor = this.user(actorUserId);
-    const saved = await this.dataSource.transaction(async (manager) => {
+    const run = async (manager: EntityManager) => {
       const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(request, ['awaiting_internal_review']);
       const settings = await this.settings.get(scope, manager);
@@ -695,13 +938,22 @@ export class SocialApprovalsService {
         );
       await this.pieces.afterTransition(manager, updated);
       return updated;
-    });
-    await this.notifications?.publish(
-      saved.status === 'approved' ? 'approved' : 'awaiting_client',
-      saved,
-      actor.userId,
-    );
-    await this.observeTransition(saved);
+    };
+    const announce = async (saved: SocialApprovalRequestEntity) => {
+      await this.notifications?.publish(
+        saved.status === 'approved' ? 'approved' : 'awaiting_client',
+        saved,
+        actor.userId,
+      );
+      await this.observeTransition(saved);
+    };
+    if (operation) {
+      const saved = await run(operation.manager);
+      operation.afterCommit.push(() => announce(saved));
+      return saved;
+    }
+    const saved = await this.dataSource.transaction(run);
+    await announce(saved);
     return saved;
   }
   /** The Agency boundary can decide only the internal stage. */
@@ -782,9 +1034,10 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actor: ApprovalActor,
+    operation?: ApprovalOperation,
   ) {
     this.validateActor(actor);
-    const outcome = await this.dataSource.transaction(async (manager) => {
+    const run = async (manager: EntityManager) => {
       const request = await this.lockRequest(manager, scope, id);
       this.assertStatus(request, ['awaiting_client']);
       const settings = await this.settings.get(scope, manager);
@@ -818,21 +1071,30 @@ export class SocialApprovalsService {
       );
       if (completed) await this.pieces.afterTransition(manager, updated);
       return { saved: updated, completed };
-    });
-    if (outcome.completed) {
-      await this.notifications?.publish(
-        'approved',
-        outcome.saved,
-        actor.userId,
-      );
-      // CCOM2 §45 — the card's status is resolved on read, never persisted, so
-      // a decision only needs the timeline to re-read. No second card is created.
-      await this.announceTimeline(outcome.saved, 'decision_changed');
-      await this.observeTransition(outcome.saved);
-    } else {
-      // D-03: the person who just decided loses the actions; the rest keep them.
-      await this.announceTimeline(outcome.saved, 'decision_changed');
+    };
+    const announce = async (outcome: Awaited<ReturnType<typeof run>>) => {
+      if (outcome.completed) {
+        await this.notifications?.publish(
+          'approved',
+          outcome.saved,
+          actor.userId,
+        );
+        // CCOM2 §45 — the card's status is resolved on read, never persisted, so
+        // a decision only needs the timeline to re-read. No second card is created.
+        await this.announceTimeline(outcome.saved, 'decision_changed');
+        await this.observeTransition(outcome.saved);
+      } else {
+        // D-03: the person who just decided loses the actions; the rest keep them.
+        await this.announceTimeline(outcome.saved, 'decision_changed');
+      }
+    };
+    if (operation) {
+      const outcome = await run(operation.manager);
+      operation.afterCommit.push(() => announce(outcome));
+      return outcome.saved;
     }
+    const outcome = await this.dataSource.transaction(run);
+    await announce(outcome);
     return outcome.saved;
   }
   /**

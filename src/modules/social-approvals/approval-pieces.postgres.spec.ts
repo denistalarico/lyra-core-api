@@ -21,6 +21,7 @@ import {
   CreativeAssetEntity,
   CreativeAssetVersionEntity,
   CreativeFolderEntity,
+  CreativeProductionEntity,
 } from '../social-creative-studio/entities';
 import {
   SocialCampaignInstanceEntity,
@@ -105,6 +106,7 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
     CreativeFolderEntity,
     CreativeAssetEntity,
     CreativeAssetVersionEntity,
+    CreativeProductionEntity,
     ClientAreaMembershipEntity,
     ClientAreaMemberModuleAccessEntity,
     AgencyUserProfileEntity,
@@ -271,6 +273,8 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       clientBoard,
       {} as never,
       {} as never,
+      {} as never,
+      pieces,
     );
 
     const members = db.getRepository(ClientAreaMembershipEntity);

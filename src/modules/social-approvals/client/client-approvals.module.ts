@@ -29,8 +29,10 @@ import {
 import { ApprovalClientReviewService } from '../approval-client-review.service';
 import { ClientApprovalNotifierRegistry } from '../client-approval-notifier.port';
 import { SocialApprovalsModule } from '../social-approvals.module';
+import { SocialPlannerModule } from '../../social-planner/social-planner.module';
 import { ApprovalSubjectResolver } from '../subjects/approval-subject-resolver';
 import { ClientApprovalBoardService } from './client-approval-board.service';
+import { ClientApprovalTextEditService } from './client-approval-text-edit.service';
 import { ClientApprovalMediaService } from './client-approval-media.service';
 import { ClientApprovalNotificationService } from './client-approval-notification.service';
 import { ClientAreaApprovalNotificationEntity } from './client-approval-notification.entity';
@@ -60,6 +62,8 @@ import { SelfApprovalsService } from './self-approvals.service';
 @Module({
   imports: [
     SocialApprovalsModule,
+    // AR3: the client's text edit is a Planner revision, written by the Planner.
+    SocialPlannerModule,
     ClientAreaModule,
     // The Agency preview controller sits behind the Agency permission stack.
     PermissionsModule,
@@ -113,6 +117,7 @@ import { SelfApprovalsService } from './self-approvals.service';
   providers: [
     ClientApprovalsService,
     ClientApprovalBoardService,
+    ClientApprovalTextEditService,
     SelfApprovalsService,
     ClientApprovalMediaService,
     ClientApprovalNotificationService,
