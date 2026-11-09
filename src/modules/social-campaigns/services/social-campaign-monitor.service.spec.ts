@@ -28,6 +28,8 @@ function buildService() {
   const metrics = { createQueryBuilder: jest.fn() };
   return {
     alerts,
+    entities,
+    metrics,
     service: new SocialCampaignMonitorService(
       policies as unknown as Repository<SocialCampaignMonitorPolicyEntity>,
       alerts as unknown as Repository<SocialCampaignAlertEntity>,
@@ -147,5 +149,55 @@ describe('SocialCampaignMonitorService alert lifecycle', () => {
 
     expect(existing.status).toBe('resolved');
     expect(existing.resolvedAt?.toISOString()).toBe('2026-09-15T10:15:00.000Z');
+  });
+});
+
+describe('SocialCampaignMonitorService snapshot', () => {
+  it('returns monthly Boost spend from observed campaign metrics', async () => {
+    const { entities, metrics, service } = buildService();
+    const query = {
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      setParameters: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({
+        daily_spend_minor: '1200',
+        daily_rows: '1',
+        monthly_spend_minor: '9000',
+        monthly_rows: '3',
+        monthly_boost_spend_minor: '3456',
+        monthly_boost_rows: '2',
+      }),
+    };
+    metrics.createQueryBuilder.mockReturnValue(query);
+    entities.findOne.mockResolvedValue(null);
+
+    const snapshot = await (
+      service as unknown as {
+        readSnapshot: (
+          scope: {
+            tenantId: string;
+            workspaceId: string;
+            agencyClientId: string | null;
+          },
+          connection: { id: string; timezone: string },
+          now: Date,
+        ) => Promise<{ monthlyBoostSpendMinor: string | null }>;
+      }
+    ).readSnapshot(
+      {
+        tenantId: 'tenant-a',
+        workspaceId: 'workspace-a',
+        agencyClientId: null,
+      },
+      { id: 'connection-a', timezone: 'America/Sao_Paulo' },
+      new Date('2026-11-09T12:00:00.000Z'),
+    );
+
+    expect(snapshot.monthlyBoostSpendMinor).toBe('3456');
+    expect(query.addSelect.mock.calls.flat().join(' ')).toContain(
+      'social_boost_requests',
+    );
   });
 });

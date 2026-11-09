@@ -31,6 +31,8 @@ type SpendRow = {
   daily_rows: string;
   monthly_spend_minor: string | null;
   monthly_rows: string;
+  monthly_boost_spend_minor: string | null;
+  monthly_boost_rows: string;
 };
 
 @Injectable()
@@ -346,20 +348,54 @@ export class SocialCampaignMonitorService {
     const spend = await this.metrics
       .createQueryBuilder('metric')
       .select(
-        `ROUND(COALESCE(SUM(metric.spend) FILTER (WHERE metric.metric_date = :day), 0) * 100)::bigint`,
+        `ROUND(COALESCE(SUM(metric.spend) FILTER (WHERE metric.entity_level = 'account' AND metric.metric_date = :day), 0) * 100)::bigint`,
         'daily_spend_minor',
       )
       .addSelect(
-        `COUNT(*) FILTER (WHERE metric.metric_date = :day)::text`,
+        `COUNT(*) FILTER (WHERE metric.entity_level = 'account' AND metric.metric_date = :day)::text`,
         'daily_rows',
       )
       .addSelect(
-        `ROUND(COALESCE(SUM(metric.spend) FILTER (WHERE metric.metric_date BETWEEN :monthStart AND :day), 0) * 100)::bigint`,
+        `ROUND(COALESCE(SUM(metric.spend) FILTER (WHERE metric.entity_level = 'account' AND metric.metric_date BETWEEN :monthStart AND :day), 0) * 100)::bigint`,
         'monthly_spend_minor',
       )
       .addSelect(
-        `COUNT(*) FILTER (WHERE metric.metric_date BETWEEN :monthStart AND :day)::text`,
+        `COUNT(*) FILTER (WHERE metric.entity_level = 'account' AND metric.metric_date BETWEEN :monthStart AND :day)::text`,
         'monthly_rows',
+      )
+      .addSelect(
+        `ROUND(COALESCE(SUM(metric.spend) FILTER (
+          WHERE metric.entity_level = 'campaign'
+            AND metric.metric_date BETWEEN :monthStart AND :day
+            AND metric.entity_external_id IN (
+              SELECT boost.provider_result #>> '{created,campaign}'
+              FROM social_boost_requests boost
+              WHERE boost.tenant_id = :tenantId
+                AND boost.workspace_id = :workspaceId
+                AND boost.agency_client_id IS NOT DISTINCT FROM :agencyClientId
+                AND boost.connection_id = :connectionId
+                AND boost.status IN ('created_active', 'created_paused')
+                AND boost.provider_result #>> '{created,campaign}' IS NOT NULL
+            )
+        ), 0) * 100)::bigint`,
+        'monthly_boost_spend_minor',
+      )
+      .addSelect(
+        `COUNT(*) FILTER (
+          WHERE metric.entity_level = 'campaign'
+            AND metric.metric_date BETWEEN :monthStart AND :day
+            AND metric.entity_external_id IN (
+              SELECT boost.provider_result #>> '{created,campaign}'
+              FROM social_boost_requests boost
+              WHERE boost.tenant_id = :tenantId
+                AND boost.workspace_id = :workspaceId
+                AND boost.agency_client_id IS NOT DISTINCT FROM :agencyClientId
+                AND boost.connection_id = :connectionId
+                AND boost.status IN ('created_active', 'created_paused')
+                AND boost.provider_result #>> '{created,campaign}' IS NOT NULL
+            )
+        )::text`,
+        'monthly_boost_rows',
       )
       .where('metric.tenant_id = :tenantId', { tenantId: scope.tenantId })
       .andWhere('metric.workspace_id = :workspaceId', {
@@ -375,7 +411,6 @@ export class SocialCampaignMonitorService {
         connectionId: connection.id,
       })
       .andWhere('metric.provider = :provider', { provider: META_PROVIDER })
-      .andWhere('metric.entity_level = :level', { level: 'account' })
       .andWhere('metric.source = :source', { source: 'paid' })
       .andWhere('metric.attribution_setting = :attribution', {
         attribution: 'account_default',
@@ -404,6 +439,10 @@ export class SocialCampaignMonitorService {
       monthlySpendMinor:
         Number(spend?.monthly_rows ?? 0) > 0
           ? spend!.monthly_spend_minor
+          : null,
+      monthlyBoostSpendMinor:
+        Number(spend?.monthly_boost_rows ?? 0) > 0
+          ? spend!.monthly_boost_spend_minor
           : null,
       balanceMinor: account?.budgetRemainingMinor ?? null,
     };

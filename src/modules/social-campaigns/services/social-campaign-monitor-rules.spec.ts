@@ -13,6 +13,7 @@ describe('evaluateSocialCampaignMonitorRules', () => {
         month: '2026-09',
         dailySpendMinor: '10000',
         monthlySpendMinor: '50001',
+        monthlyBoostSpendMinor: null,
         balanceMinor: '2000',
       },
     );
@@ -41,6 +42,7 @@ describe('evaluateSocialCampaignMonitorRules', () => {
         month: '2026-09',
         dailySpendMinor: null,
         monthlySpendMinor: null,
+        monthlyBoostSpendMinor: null,
         balanceMinor: null,
       },
     );
@@ -60,6 +62,7 @@ describe('evaluateSocialCampaignMonitorRules', () => {
         month: '2026-09',
         dailySpendMinor: '9999',
         monthlySpendMinor: '49999',
+        monthlyBoostSpendMinor: null,
         balanceMinor: '2001',
       },
     );

@@ -5,6 +5,7 @@ export type SocialCampaignMonitorSnapshot = {
   month: string;
   dailySpendMinor: string | null;
   monthlySpendMinor: string | null;
+  monthlyBoostSpendMinor: string | null;
   balanceMinor: string | null;
 };
 
