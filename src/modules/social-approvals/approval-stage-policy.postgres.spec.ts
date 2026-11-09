@@ -154,7 +154,8 @@ run('CS5 Closeout approval stage policy (real PostgreSQL)', () => {
       ADD COLUMN step_id uuid,
       ADD COLUMN batch_id uuid,
       ADD COLUMN resolution varchar(24),
-      ADD COLUMN required_client_approver_ids jsonb`);
+      ADD COLUMN required_client_approver_ids jsonb,
+      ADD COLUMN changes_kind varchar(16)`);
     // A company request that exists BEFORE the CS5 Closeout migration.
     await runner.query(
       `INSERT INTO social_approval_requests

@@ -116,7 +116,10 @@ export class ApprovalSubjectResolver {
 
   async getPreview(
     scope: CompanyAwareScope,
-    input: Pick<ResolvedApprovalSubject, 'subjectType' | 'subjectId' | 'subjectRevisionId'> & {
+    input: Pick<
+      ResolvedApprovalSubject,
+      'subjectType' | 'subjectId' | 'subjectRevisionId'
+    > & {
       title?: string;
       subjectVersionLabel?: string;
     },
@@ -183,40 +186,65 @@ export class ApprovalSubjectResolver {
       subjectId: string;
       subjectRevisionId: string;
     }>,
-  ): Promise<Map<string, string>> {
-    const creative = requests.filter((item) => item.subjectType === 'creative_version');
-    const snapshot = requests.filter((item) => item.subjectType === 'approval_snapshot');
+  ): Promise<Map<string, { path: string; ref: string }>> {
+    const creative = requests.filter(
+      (item) => item.subjectType === 'creative_version',
+    );
+    const snapshot = requests.filter(
+      (item) => item.subjectType === 'approval_snapshot',
+    );
     const [versions, assets, snapshots] = await Promise.all([
       creative.length
-        ? this.versions.find({ where: { id: In(creative.map((item) => item.subjectRevisionId)) } })
+        ? this.versions.find({
+            where: { id: In(creative.map((item) => item.subjectRevisionId)) },
+          })
         : ([] as CreativeAssetVersionEntity[]),
       creative.length
-        ? this.assets.find({ where: { id: In(creative.map((item) => item.subjectId)) } })
+        ? this.assets.find({
+            where: { id: In(creative.map((item) => item.subjectId)) },
+          })
         : ([] as CreativeAssetEntity[]),
       snapshot.length
-        ? this.snapshots.find({ where: { id: In(snapshot.map((item) => item.subjectRevisionId)), kind: 'media_set' } })
+        ? this.snapshots.find({
+            where: {
+              id: In(snapshot.map((item) => item.subjectRevisionId)),
+              kind: 'media_set',
+            },
+          })
         : ([] as SocialApprovalSnapshotEntity[]),
     ]);
     const versionById = new Map(versions.map((item) => [item.id, item]));
     const assetById = new Map(assets.map((item) => [item.id, item]));
     const snapshotById = new Map(snapshots.map((item) => [item.id, item]));
-    const paths = new Map<string, string>();
+    const paths = new Map<string, { path: string; ref: string }>();
     for (const request of creative) {
       const version = versionById.get(request.subjectRevisionId);
       const asset = assetById.get(request.subjectId);
       if (!version || !asset) continue;
       const base = `/social/creative-studio/assets/${asset.id}`;
       const query = `?versionId=${encodeURIComponent(version.id)}`;
-      if (version.thumbnailMediaAssetId) paths.set(request.id, `${base}/thumbnail${query}`);
-      else if (asset.assetType === 'image') paths.set(request.id, `${base}/content${query}`);
+      if (version.thumbnailMediaAssetId)
+        paths.set(request.id, {
+          path: `${base}/thumbnail${query}`,
+          ref: 'thumbnail',
+        });
+      else if (asset.assetType === 'image')
+        paths.set(request.id, {
+          path: `${base}/content${query}`,
+          ref: 'content',
+        });
     }
     for (const request of snapshot) {
       const row = snapshotById.get(request.subjectRevisionId);
-      const first = (row?.payload as ApprovalMediaSetSnapshotPayload | undefined)?.items[0];
+      const first = (
+        row?.payload as ApprovalMediaSetSnapshotPayload | undefined
+      )?.items[0];
       if (!row || !first) continue;
       const base = `/social/approvals/snapshots/${row.id}/media/item-0`;
-      if (first.thumbnailMediaAssetId) paths.set(request.id, `${base}-thumb`);
-      else if (first.assetType === 'image') paths.set(request.id, base);
+      if (first.thumbnailMediaAssetId)
+        paths.set(request.id, { path: `${base}-thumb`, ref: 'item-0-thumb' });
+      else if (first.assetType === 'image')
+        paths.set(request.id, { path: base, ref: 'item-0' });
     }
     return paths;
   }
@@ -368,7 +396,9 @@ export class ApprovalSubjectResolver {
       },
     });
     if (!item)
-      throw new NotFoundException('Conteúdo do Planner não encontrado no contexto atual.');
+      throw new NotFoundException(
+        'Conteúdo do Planner não encontrado no contexto atual.',
+      );
     const plan = await this.plans.findOne({
       where: {
         id: item.planId,
@@ -376,7 +406,9 @@ export class ApprovalSubjectResolver {
       },
     });
     if (!plan)
-      throw new NotFoundException('Conteúdo do Planner não encontrado no contexto atual.');
+      throw new NotFoundException(
+        'Conteúdo do Planner não encontrado no contexto atual.',
+      );
     const revision = await this.contentRevisions.findOne({
       where: {
         id: input.subjectRevisionId,

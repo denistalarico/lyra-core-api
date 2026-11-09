@@ -123,7 +123,8 @@ describePostgresIntegration()(
         ADD COLUMN IF NOT EXISTS step_id uuid,
         ADD COLUMN IF NOT EXISTS batch_id uuid,
         ADD COLUMN IF NOT EXISTS resolution varchar(24),
-        ADD COLUMN IF NOT EXISTS required_client_approver_ids jsonb`);
+        ADD COLUMN IF NOT EXISTS required_client_approver_ids jsonb,
+        ADD COLUMN IF NOT EXISTS changes_kind varchar(16)`);
       db = await new DataSource({
         ...options,
         name: 'ca6',

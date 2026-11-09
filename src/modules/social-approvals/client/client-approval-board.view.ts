@@ -66,10 +66,20 @@ export type ClientBoardStep = {
   approvalId: string | null;
 };
 
+export type ClientBoardSource =
+  | 'standalone'
+  | 'planning'
+  | 'project'
+  | 'campaign';
+
 export type ClientBoardCard = {
   id: string;
   kind: SocialApprovalPieceKind;
   title: string;
+  /** The card's tag, derived here so the internal `origin` stays internal. */
+  source: ClientBoardSource;
+  /** Opaque slot on an approval the reader can already see. */
+  thumbnail: { approvalId: string; ref: string } | null;
   column: ClientBoardColumn;
   needsYou: boolean;
   activeStep: { kind: SocialApprovalStepKind; title: string } | null;
@@ -108,6 +118,10 @@ export function buildClientBoardCard(
   piece: SocialApprovalPieceEntity,
   steps: readonly SocialApprovalStepEntity[],
   latestSentByStep: ReadonlyMap<string, SocialApprovalRequestEntity>,
+  extras: {
+    inCampaign?: boolean;
+    thumbnail?: ClientBoardCard['thumbnail'];
+  } = {},
 ): ClientBoardCard {
   const column = toClientBoardColumn(piece.boardColumn);
   const active = steps.find((step) => step.id === piece.activeStepId);
@@ -115,6 +129,15 @@ export function buildClientBoardCard(
     id: piece.id,
     kind: piece.kind,
     title: piece.title,
+    source:
+      piece.origin === 'projects'
+        ? 'project'
+        : piece.kind === 'standalone'
+          ? 'standalone'
+          : piece.kind === 'campaign_table' || extras.inCampaign
+            ? 'campaign'
+            : 'planning',
+    thumbnail: extras.thumbnail ?? null,
     column,
     needsYou: column === 'awaiting_you',
     activeStep: active ? { kind: active.kind, title: active.title } : null,

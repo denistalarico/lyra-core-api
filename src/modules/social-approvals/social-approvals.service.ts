@@ -15,6 +15,7 @@ import {
   type SocialApprovalActorType,
   type SocialApprovalCommentVisibility,
   type SocialApprovalStage,
+  type SocialApprovalChangesKind,
   type SocialApprovalStatus,
   type SocialApprovalSurface,
 } from './entities';
@@ -1018,6 +1019,7 @@ export class SocialApprovalsService {
     body: string,
     role?: string | null,
     surface: SocialApprovalSurface = 'agency',
+    kind: SocialApprovalChangesKind = 'revise',
   ) {
     const actor = this.user(actorUserId);
     return this.requestChangesAs(
@@ -1028,6 +1030,7 @@ export class SocialApprovalsService {
       'internal',
       role,
       surface,
+      kind,
     );
   }
   /**
@@ -1243,6 +1246,7 @@ export class SocialApprovalsService {
     actor: ApprovalActor,
     body: string,
     surface: SocialApprovalSurface = 'client_area',
+    kind: SocialApprovalChangesKind = 'revise',
   ) {
     this.validateActor(actor);
     return this.requestChangesAs(
@@ -1253,6 +1257,7 @@ export class SocialApprovalsService {
       'client',
       undefined,
       surface,
+      kind,
     );
   }
   async clientComment(
@@ -1298,6 +1303,7 @@ export class SocialApprovalsService {
     surface: SocialApprovalSurface = stage === 'client'
       ? 'client_area'
       : 'agency',
+    kind: SocialApprovalChangesKind = 'revise',
   ) {
     let decided: RecordedApprovalEvent | null = null;
     const saved = await this.dataSource.transaction(async (manager) => {
@@ -1340,6 +1346,7 @@ export class SocialApprovalsService {
         comment.id,
       );
       request.status = 'changes_requested';
+      request.changesKind = kind;
       request.currentStage = 'internal';
       // D-03: under "Todos" one request for changes closes the round at once.
       request.requiredClientApproverIds = null;
@@ -1350,7 +1357,7 @@ export class SocialApprovalsService {
         'changes_requested',
         actor,
         surface,
-        { stage, commentId: comment.id },
+        { stage, commentId: comment.id, changesKind: kind },
       );
       await this.pieces.afterTransition(manager, updated);
       return updated;

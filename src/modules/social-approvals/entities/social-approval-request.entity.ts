@@ -19,6 +19,7 @@ export const SOCIAL_APPROVAL_STATUSES = [
 ] as const;
 export type SocialApprovalStatus = (typeof SOCIAL_APPROVAL_STATUSES)[number];
 export type SocialApprovalStage = 'internal' | 'client';
+export type SocialApprovalChangesKind = 'revise' | 'reject';
 export type SocialApprovalResolution =
   | 'internal_final'
   | 'client_approved'
@@ -84,6 +85,9 @@ export class SocialApprovalRequestEntity {
     default: 'internal',
   })
   currentStage!: SocialApprovalStage;
+  /** Only meaningful while `status` is `changes_requested`. */
+  @Column({ name: 'changes_kind', type: 'varchar', length: 16, nullable: true })
+  changesKind!: SocialApprovalChangesKind | null;
   @Column({ name: 'requested_by_user_id', type: 'uuid' })
   requestedByUserId!: string;
   @Column({ name: 'requested_at', type: 'timestamptz' }) requestedAt!: Date;

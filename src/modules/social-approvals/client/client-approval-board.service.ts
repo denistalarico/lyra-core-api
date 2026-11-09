@@ -9,6 +9,8 @@ import {
   SocialApprovalStepEntity,
   type SocialApprovalBoardColumn,
 } from '../entities';
+import { SocialContentItemEntity } from '../../social-planner/entities';
+import { ApprovalSubjectResolver } from '../subjects/approval-subject-resolver';
 import { approvalScopeWhere } from '../approval-scope';
 import { SocialApprovalPieceSyncService } from '../social-approval-piece-sync.service';
 import { parseBoardCursor } from '../social-approval-board.service';
@@ -34,6 +36,7 @@ const SENT_TO_CLIENT = `EXISTS (
   SELECT 1 FROM "social_approval_requests" sent
     JOIN "social_approval_steps" sent_step ON sent_step.id = sent.step_id
    WHERE sent_step.piece_id = piece.id AND sent.sent_to_client_at IS NOT NULL
+     AND sent_step.current_request_id IS NOT NULL
 )`;
 
 /**
@@ -73,6 +76,7 @@ export class ClientApprovalBoardService {
     private readonly requests: Repository<SocialApprovalRequestEntity>,
     private readonly approvals: ClientApprovalsService,
     private readonly sync: SocialApprovalPieceSyncService,
+    private readonly subjects: ApprovalSubjectResolver,
   ) {}
 
   private companySource(
@@ -106,11 +110,13 @@ export class ClientApprovalBoardService {
     steps: readonly SocialApprovalStepEntity[],
   ) {
     const latest = new Map<string, SocialApprovalRequestEntity>();
-    if (steps.length === 0) return latest;
+    // A withdrawn step has no current request and shows nothing to the client.
+    const attached = steps.filter((step) => step.currentRequestId);
+    if (attached.length === 0) return latest;
     const requests = await this.requests.find({
       where: {
         ...approvalScopeWhere(scope),
-        stepId: In(steps.map((step) => step.id)),
+        stepId: In(attached.map((step) => step.id)),
         sentToClientAt: Not(IsNull()),
       },
       order: { sentToClientAt: 'ASC' },
@@ -168,14 +174,45 @@ export class ClientApprovalBoardService {
             })
           : [];
         const latest = await source.latestVisible(steps);
+        const thumbnails = await this.subjects.thumbnailPaths([
+          ...latest.values(),
+        ]);
+        const itemIds = pieces
+          .filter((piece) => piece.kind === 'content_item' && piece.sourceId)
+          .map((piece) => piece.sourceId as string);
+        const inCampaign = new Set(
+          itemIds.length
+            ? (
+                await this.pieces.manager.find(SocialContentItemEntity, {
+                  where: {
+                    id: In(itemIds),
+                    campaignInstanceId: Not(IsNull()),
+                  },
+                  select: { id: true },
+                })
+              ).map((item) => item.id)
+            : [],
+        );
         result[column] = {
-          items: pieces.map((piece) =>
-            buildClientBoardCard(
-              present(piece),
-              steps.filter((step) => step.pieceId === piece.id),
-              latest,
-            ),
-          ),
+          items: pieces.map((piece) => {
+            const pieceSteps = steps.filter(
+              (step) => step.pieceId === piece.id,
+            );
+            const request = pieceSteps
+              .map((step) => latest.get(step.id))
+              .find((item) => item && thumbnails.has(item.id));
+            return buildClientBoardCard(present(piece), pieceSteps, latest, {
+              inCampaign: Boolean(
+                piece.sourceId && inCampaign.has(piece.sourceId),
+              ),
+              thumbnail: request
+                ? {
+                    approvalId: request.id,
+                    ref: thumbnails.get(request.id)!.ref,
+                  }
+                : null,
+            });
+          }),
           total,
           nextCursor:
             offset + pieces.length < total

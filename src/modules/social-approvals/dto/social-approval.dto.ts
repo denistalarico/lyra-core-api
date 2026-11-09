@@ -28,6 +28,10 @@ export class AddSocialApprovalCommentDto {
    */
   @IsOptional() @IsIn(['internal', 'client']) visibility?: 'internal' | 'client';
 }
+export class RequestSocialApprovalChangesDto extends AddSocialApprovalCommentDto {
+  /** `reject` is the "não aprovado (refazer)" of the card; same status (D-12). */
+  @IsOptional() @IsIn(['revise', 'reject']) kind?: 'revise' | 'reject';
+}
 export class ListSocialApprovalsDto {
   @IsOptional() @IsString() status?: string;
   @IsOptional() @IsIn(['internal', 'client']) stage?: string;

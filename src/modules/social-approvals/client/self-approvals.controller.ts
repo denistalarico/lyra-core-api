@@ -214,6 +214,7 @@ export class SelfApprovalsController {
       approvalId,
       this.reader(context),
       dto.body,
+      dto.kind,
     );
   }
 

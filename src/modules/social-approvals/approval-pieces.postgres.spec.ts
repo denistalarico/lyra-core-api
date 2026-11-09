@@ -11,6 +11,7 @@ import { AddSocialApprovalCommentVisibility1797400000000 } from '../../database/
 import { AllowOwnScopeSocialApprovals1798800000000 } from '../../database/migrations/1798800000000-allow-own-scope-social-approvals';
 import { CreateSocialApprovalPieces1802900000000 } from '../../database/migrations/1802900000000-create-social-approval-pieces';
 import { BackfillSocialApprovalPieces1802900100000 } from '../../database/migrations/1802900100000-backfill-social-approval-pieces';
+import { AddSocialApprovalCardCustomization1803300000000 } from '../../database/migrations/1803300000000-add-social-approval-card-customization';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
 import { ClientAreaMemberModuleAccessEntity } from '../client-area/entities/client-area-member-module-access.entity';
@@ -188,6 +189,7 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
     await new AddSocialApprovalCommentVisibility1797400000000().up(runner);
     await new AllowOwnScopeSocialApprovals1798800000000().up(runner);
     await new CreateSocialApprovalPieces1802900000000().up(runner);
+    await new AddSocialApprovalCardCustomization1803300000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 
@@ -260,6 +262,7 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       db.getRepository(SocialApprovalRequestEntity),
       clientApprovals,
       sync,
+      { thumbnailPaths: async () => new Map() } as never,
     );
     selfApprovals = new SelfApprovalsService(
       db.getRepository(SocialApprovalRequestEntity),
@@ -982,6 +985,130 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
         'storagePath',
       ])
         expect(serialized).not.toContain(key);
+    });
+
+    describe('withdrawing a piece', () => {
+      const boardIds = async () => {
+        const result = (await clientBoard.board(scopeA, { limit: 100 })) as {
+          columns: Record<string, { items: Array<{ id: string }> }>;
+        };
+        return Object.values(result.columns)
+          .flatMap((column) => column.items)
+          .map((card) => card.id);
+      };
+
+      it('a Planner piece returns to preparation, leaves the client, and can be sent again', async () => {
+        const { item, revision, request } = await awaitingClient(scopeA);
+        const before = await pieceOf(item.id);
+        expect(await boardIds()).toContain(before.id);
+
+        await actions.withdraw(scopeA, before.id, operator, false);
+
+        const after = await pieceOf(item.id);
+        expect(after.boardColumn).toBe('preparation');
+        const row = await db
+          .getRepository(SocialApprovalRequestEntity)
+          .findOneByOrFail({ id: request.id });
+        expect(row.status).toBe('cancelled');
+        expect(await boardIds()).not.toContain(before.id);
+        await expect(
+          db.getRepository(SocialContentItemEntity).findOneByOrFail({
+            id: item.id,
+          }),
+        ).resolves.toMatchObject({ deletedAt: null });
+
+        const again = await approvals.create(scopeA, operator, {
+          subjectType: 'planner_content_revision',
+          subjectId: item.id,
+          subjectRevisionId: revision.id,
+        });
+        expect(again.id).not.toBe(request.id);
+      });
+
+      it('an approved send is detached, keeps its record and frees the card', async () => {
+        const { item, request } = await awaitingClient(scopeA);
+        await approvals.clientApprove(
+          scopeA,
+          request.id,
+          clientUser(clientOwner),
+        );
+        const piece = await pieceOf(item.id);
+        await actions.withdraw(scopeA, piece.id, ownerUser, true);
+        expect((await pieceOf(item.id)).boardColumn).toBe('preparation');
+        const row = await db
+          .getRepository(SocialApprovalRequestEntity)
+          .findOneByOrFail({ id: request.id });
+        expect(row.status).toBe('approved');
+      });
+
+      it('only the sender or an override may withdraw', async () => {
+        const { item } = await awaitingClient(scopeA);
+        const piece = await pieceOf(item.id);
+        await expect(
+          actions.withdraw(scopeA, piece.id, randomUUID(), false),
+        ).rejects.toMatchObject({ status: 403 });
+      });
+
+      it('a piece never sent has nothing to withdraw', async () => {
+        const { item } = await contentRevision(scopeA);
+        await sync.syncContexts(scopeA, [
+          { clientId: clientA, companyContextId: companyA },
+        ]);
+        const piece = await pieceOf(item.id);
+        await expect(
+          actions.withdraw(scopeA, piece.id, ownerUser, true),
+        ).rejects.toMatchObject({ status: 409 });
+      });
+
+      it('an avulsa leaves the board and answers 404 afterwards', async () => {
+        const created = await actions.createStandalone(scopeA, operator, {
+          title: 'Avulsa',
+          stepKind: 'text',
+          text: 'conteúdo',
+        });
+        await actions.withdraw(scopeA, created.id, operator, false);
+        await expect(
+          actions.updateCard(scopeA, created.id, { cardColor: 'blue' }),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          board.pieceDetail(scopeA, created.id, {
+            userId: ownerUser,
+            role: 'owner',
+            permissions: new Set(),
+          }),
+        ).rejects.toMatchObject({ status: 404 });
+      });
+
+      it('restyling a card keeps its place in the column', async () => {
+        const { item } = await awaitingClient(scopeA);
+        const before = await pieceOf(item.id);
+        await actions.updateCard(scopeA, before.id, {
+          cardColor: 'rose',
+          tags: [' Urgente ', 'urgente', 'Natal'],
+          display: { thumbnail: false },
+        });
+        const after = await pieceOf(item.id);
+        expect(after.updatedAt).toEqual(before.updatedAt);
+        expect(after.cardColor).toBe('rose');
+        expect(after.tags).toEqual(['Urgente', 'Natal']);
+        expect(after.cardDisplay).toEqual({ thumbnail: false });
+      });
+
+      it('marks a rejection without a new status (D-12)', async () => {
+        const { request } = await draftRequest(scopeA);
+        await approvals.submit(scopeA, request.id, operator);
+        const saved = await approvals.requestChanges(
+          scopeA,
+          request.id,
+          ownerUser,
+          'refazer',
+          'owner',
+          'agency',
+          'reject',
+        );
+        expect(saved.status).toBe('changes_requested');
+        expect(saved.changesKind).toBe('reject');
+      });
     });
   });
 

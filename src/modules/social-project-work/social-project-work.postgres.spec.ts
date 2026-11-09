@@ -10,6 +10,7 @@ import { AddSocialApprovalViewedAudit1795800000000 } from '../../database/migrat
 import { AddSocialApprovalCommentVisibility1797400000000 } from '../../database/migrations/1797400000000-add-social-approval-comment-visibility';
 import { AllowOwnScopeSocialApprovals1798800000000 } from '../../database/migrations/1798800000000-allow-own-scope-social-approvals';
 import { CreateSocialApprovalPieces1802900000000 } from '../../database/migrations/1802900000000-create-social-approval-pieces';
+import { AddSocialApprovalCardCustomization1803300000000 } from '../../database/migrations/1803300000000-add-social-approval-card-customization';
 import { CreateSocialWorkLinks1803100000000 } from '../../database/migrations/1803100000000-create-social-work-links';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
@@ -234,6 +235,7 @@ run('AR4 Planner, Approvals and Projects (real PostgreSQL)', () => {
     await new AddSocialApprovalCommentVisibility1797400000000().up(runner);
     await new AllowOwnScopeSocialApprovals1798800000000().up(runner);
     await new CreateSocialApprovalPieces1802900000000().up(runner);
+    await new AddSocialApprovalCardCustomization1803300000000().up(runner);
     await new CreateSocialWorkLinks1803100000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
@@ -398,6 +400,7 @@ run('AR4 Planner, Approvals and Projects (real PostgreSQL)', () => {
       db.getRepository(SocialApprovalRequestEntity),
       {} as never,
       { syncContexts: async () => undefined } as never,
+      { thumbnailPaths: async () => new Map() } as never,
     );
 
     await db.getRepository(ClientAreaMembershipEntity).save(
@@ -1087,7 +1090,9 @@ run('AR4 Planner, Approvals and Projects (real PostgreSQL)', () => {
           'kind',
           'lastActivityAt',
           'needsYou',
+          'source',
           'steps',
+          'thumbnail',
           'title',
           'column',
         ].sort(),

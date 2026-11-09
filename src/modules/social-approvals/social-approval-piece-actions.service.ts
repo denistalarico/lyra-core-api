@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,7 +12,7 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, In } from 'typeorm';
+import { DataSource, In, type EntityManager } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import { FilesService } from '../../common/files/files.service';
 import {
@@ -20,7 +21,10 @@ import {
 } from '../../common/media-assets/media-asset-resolver.service';
 import { approvalScopeWhere, assertApprovalScope } from './approval-scope';
 import { SocialApprovalTransitionRegistry } from './approval-transition.port';
-import type { CreateStandalonePieceDto } from './dto/social-approval-piece.dto';
+import type {
+  CreateStandalonePieceDto,
+  UpdateApprovalPieceCardDto,
+} from './dto/social-approval-piece.dto';
 import {
   SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
@@ -53,6 +57,20 @@ export type StandalonePieceOptions = {
   /** A task attachment: stored in the public bucket, unlike a media asset. */
   attachment?: { assetPath: string; fileName: string; mimeType: string };
 };
+
+/** Trims, drops empties and repeats (ignoring case), keeps the first spelling. */
+export function normalizeCardTags(tags: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const raw of tags) {
+    const tag = raw.trim();
+    const key = tag.toLocaleLowerCase('pt-BR');
+    if (!tag || seen.has(key)) continue;
+    seen.add(key);
+    kept.push(tag);
+  }
+  return kept.slice(0, 10);
+}
 
 async function readAll(stream: Readable): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -394,6 +412,128 @@ export class SocialApprovalPieceActionsService {
       id: finished.id,
       finishedAt: finished.finishedAt?.toISOString() ?? null,
     };
+  }
+
+  /** Presentation only: keeps `updated_at`, so restyling never reorders a column. */
+  async updateCard(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    input: UpdateApprovalPieceCardDto,
+  ) {
+    const pieces = this.dataSource.getRepository(SocialApprovalPieceEntity);
+    const piece = await this.pieceInScope(scope, pieceId);
+    const title = input.title?.trim();
+    if (input.title !== undefined && (!title || piece.kind !== 'standalone'))
+      throw new BadRequestException(
+        'Só o título de uma peça avulsa pode ser editado aqui.',
+      );
+    await pieces
+      .createQueryBuilder()
+      .update()
+      .set({
+        ...(title ? { title } : {}),
+        ...(input.cardColor ? { cardColor: input.cardColor } : {}),
+        ...(input.tags ? { tags: normalizeCardTags(input.tags) } : {}),
+        ...(input.display
+          ? { cardDisplay: { ...piece.cardDisplay, ...input.display } }
+          : {}),
+        updatedAt: () => '"updated_at"',
+      })
+      .where('id = :id', { id: piece.id })
+      .execute();
+    return { id: piece.id };
+  }
+
+  /**
+   * Removes the send, never the work. An avulsa exists only as this send, so
+   * it leaves the board. A Planner piece would be recreated by the sync
+   * (D-31), so its card stays and returns to Em preparação, with no current
+   * request. Requests, decisions and the trail are kept. Same lock order as
+   * `finish`: requests before the piece.
+   */
+  async withdraw(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    actorUserId: string,
+    canOverride: boolean,
+  ) {
+    const afterCommit: ApprovalOperation['afterCommit'] = [];
+    const result = await this.dataSource.transaction(async (manager) => {
+      const pieces = manager.getRepository(SocialApprovalPieceEntity);
+      const stepRepository = manager.getRepository(SocialApprovalStepEntity);
+      const probe = await this.pieceInScope(scope, pieceId, manager);
+      const steps = await stepRepository.find({ where: { pieceId } });
+      const requestIds = steps
+        .map((step) => step.currentRequestId)
+        .filter((id): id is string => Boolean(id));
+      const requests = requestIds.length
+        ? await manager
+            .getRepository(SocialApprovalRequestEntity)
+            .find({ where: { id: In(requestIds) } })
+        : [];
+      if (
+        !canOverride &&
+        !requests.some((item) => item.requestedByUserId === actorUserId)
+      )
+        throw new ForbiddenException(
+          'Só quem enviou, um Admin ou o Owner pode excluir esta peça.',
+        );
+      const standalone = probe.kind === 'standalone';
+      if (!standalone && requests.length === 0)
+        throw new ConflictException('Esta peça ainda não foi enviada.');
+      if (!standalone && (probe.finishedAt || probe.sourceState === 'posted'))
+        throw new ConflictException('Esta peça já foi finalizada.');
+
+      for (const request of requests)
+        if (OPEN_STATUSES.has(request.status))
+          await this.approvals.cancel(scope, request.id, actorUserId, {
+            manager,
+            afterCommit,
+          });
+
+      const piece = await pieces.findOneOrFail({
+        where: { ...approvalScopeWhere(scope), id: pieceId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (standalone) {
+        piece.sourceState = 'hidden';
+        await pieces.save(piece);
+      } else if (steps.length) {
+        await stepRepository.update(
+          { id: In(steps.map((step) => step.id)) },
+          { currentRequestId: null, isStale: false },
+        );
+      }
+      await this.pieces.recordEvent(
+        manager,
+        { ...scope, pieceId, stepId: null, requestId: null },
+        'withdrawn',
+        { type: 'user', userId: actorUserId },
+        'agency',
+        { requests: requests.length },
+      );
+      await this.pieces.recompute(manager, pieceId);
+      return { id: piece.id, removed: standalone };
+    });
+    for (const run of afterCommit) await run();
+    return result;
+  }
+
+  /** A removed avulsa answers like one that never existed. */
+  private async pieceInScope(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    manager: EntityManager = this.dataSource.manager,
+  ) {
+    const piece = await manager
+      .getRepository(SocialApprovalPieceEntity)
+      .findOne({ where: { ...approvalScopeWhere(scope), id: pieceId } });
+    if (
+      !piece ||
+      (piece.kind === 'standalone' && piece.sourceState === 'hidden')
+    )
+      throw new NotFoundException('Peça não encontrada no contexto atual.');
+    return piece;
   }
 
   /** After commit, like every observer: a finish never fails because of one. */

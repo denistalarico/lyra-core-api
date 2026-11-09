@@ -7,6 +7,7 @@ import {
   IsString,
   MaxLength,
   MinLength,
+  IsIn,
 } from 'class-validator';
 
 /** A client comment independent of any decision (§37). */
@@ -20,6 +21,7 @@ export class ClientApprovalCommentDto {
  */
 export class ClientApprovalRequestChangesDto {
   @IsString() @MinLength(1) @MaxLength(8000) body!: string;
+  @IsOptional() @IsIn(['revise', 'reject']) kind?: 'revise' | 'reject';
 }
 
 /**

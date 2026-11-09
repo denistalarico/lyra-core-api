@@ -58,6 +58,30 @@ export class UpdateApprovalBoardPreferencesDto {
   stage?: UpdateApprovalBoardStageDto;
 }
 
+export class ApprovalCardDisplayDto {
+  @IsOptional() @IsBoolean() thumbnail?: boolean;
+  @IsOptional() @IsBoolean() client?: boolean;
+  @IsOptional() @IsBoolean() origin?: boolean;
+  @IsOptional() @IsBoolean() tags?: boolean;
+}
+
+export class UpdateApprovalPieceCardDto {
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(255) title?: string;
+  @IsOptional()
+  @IsIn(SOCIAL_APPROVAL_STAGE_COLORS)
+  cardColor?: SocialApprovalStageColor;
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  tags?: string[];
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ApprovalCardDisplayDto)
+  display?: ApprovalCardDisplayDto;
+}
+
 export class ClientApprovalBoardQueryDto {
   @IsOptional()
   @IsIn(['awaiting_you', 'with_agency', 'approved', 'finished'])

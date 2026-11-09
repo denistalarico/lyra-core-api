@@ -297,6 +297,8 @@ export class ClientAreaApprovalsController {
       approvalId,
       context.userId,
       dto.body,
+      undefined,
+      dto.kind,
     );
     return this.approvals.detail(scope, approvalId, this.reader(context));
   }

@@ -71,6 +71,7 @@ const PIECE_SUBMITTED = `EXISTS (
   SELECT 1 FROM "social_approval_requests" sent
     JOIN "social_approval_steps" sent_step ON sent_step.id = sent.step_id
    WHERE sent_step.piece_id = piece.id AND ${submittedSql('sent')}
+     AND sent_step.current_request_id IS NOT NULL
 )`;
 
 const SELF_COLUMNS: Record<
@@ -213,12 +214,14 @@ export class SelfApprovalsService {
     steps: readonly SocialApprovalStepEntity[],
   ) {
     const latest = new Map<string, SocialApprovalRequestEntity>();
-    if (steps.length === 0) return latest;
+    // A withdrawn step has no current request and shows nothing here.
+    const attached = steps.filter((step) => step.currentRequestId);
+    if (attached.length === 0) return latest;
     const requests = await this.requests
       .createQueryBuilder('request')
       .where({
         ...approvalScopeWhere(scope),
-        stepId: In(steps.map((step) => step.id)),
+        stepId: In(attached.map((step) => step.id)),
       })
       .andWhere(submittedSql('request'))
       .orderBy('request.createdAt', 'ASC')
@@ -427,6 +430,7 @@ export class SelfApprovalsService {
     approvalId: string,
     reader: SelfApprovalReader,
     body: string,
+    kind?: 'revise' | 'reject',
   ) {
     await this.findVisible(scope, approvalId);
     await this.approvals.requestChanges(
@@ -436,6 +440,7 @@ export class SelfApprovalsService {
       body,
       reader.agencyRole,
       'self',
+      kind,
     );
     return this.detail(scope, approvalId, reader);
   }

@@ -6,6 +6,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { SocialApprovalStageColor } from './social-approval-board-preferences.entity';
 
 export const SOCIAL_APPROVAL_PIECE_KINDS = [
   'plan_table',
@@ -21,6 +22,15 @@ export type SocialApprovalPieceOrigin =
   | 'approvals';
 export type SocialApprovalSendOrder = 'sequential' | 'together';
 export type SocialApprovalPieceSourceState = 'active' | 'hidden' | 'posted';
+export const SOCIAL_APPROVAL_CARD_ATTRIBUTES = [
+  'thumbnail',
+  'client',
+  'origin',
+  'tags',
+] as const;
+export type SocialApprovalCardDisplay = Partial<
+  Record<(typeof SOCIAL_APPROVAL_CARD_ATTRIBUTES)[number], boolean>
+>;
 
 export const SOCIAL_APPROVAL_BOARD_COLUMNS = [
   'preparation',
@@ -93,6 +103,11 @@ export class SocialApprovalPieceEntity {
   finishedByUserId!: string | null;
   @Column({ name: 'finish_reason', type: 'text', nullable: true })
   finishReason!: string | null;
+  @Column({ name: 'card_color', type: 'varchar', length: 16, default: 'none' })
+  cardColor!: SocialApprovalStageColor;
+  @Column({ type: 'jsonb', default: () => `'[]'` }) tags!: string[];
+  @Column({ name: 'card_display', type: 'jsonb', default: () => `'{}'` })
+  cardDisplay!: SocialApprovalCardDisplay;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })

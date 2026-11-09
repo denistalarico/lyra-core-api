@@ -10,6 +10,7 @@ import {
   Query,
   Res,
   UseGuards,
+  Delete,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
@@ -24,6 +25,7 @@ import {
 } from '../permissions';
 import {
   AddSocialApprovalCommentDto,
+  RequestSocialApprovalChangesDto,
   CreateSocialApprovalDto,
   ListSocialApprovalInboxDto,
   ListSocialApprovalsDto,
@@ -33,6 +35,7 @@ import {
   FinishSocialApprovalPieceDto,
   SocialApprovalBoardQueryDto,
   UpdateApprovalBoardPreferencesDto,
+  UpdateApprovalPieceCardDto,
   UpdateSocialApprovalSettingsDto,
 } from './dto/social-approval-piece.dto';
 import { SocialApprovalBoardService } from './social-approval-board.service';
@@ -107,10 +110,16 @@ export class SocialApprovalsController {
     @RequestContextData() ctx: RequestContext,
     @Query() query: SocialApprovalBoardQueryDto,
   ) {
-    const [board, preferences, permissions] = await Promise.all([
-      this.board.board(ctx, query),
+    const permissions = await this.permissions.getEffectivePermissions(
+      this.permissionContext(ctx),
+    );
+    const [board, preferences] = await Promise.all([
+      this.board.board(ctx, query, {
+        userId: this.actorUserId(ctx),
+        role: ctx.role,
+        permissions,
+      }),
       this.boardPreferences.get(resolveCompanyAwareScope(ctx)),
-      this.permissions.getEffectivePermissions(this.permissionContext(ctx)),
     ]);
     return {
       ...board,
@@ -162,6 +171,38 @@ export class SocialApprovalsController {
       resolveCompanyAwareScope(ctx),
       this.actorUserId(ctx),
       dto,
+    );
+  }
+  @Patch('pieces/:pieceId/card')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  updateCard(
+    @RequestContextData() ctx: RequestContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+    @Body() dto: UpdateApprovalPieceCardDto,
+  ) {
+    return this.pieceActions.updateCard(
+      resolveCompanyAwareScope(ctx),
+      pieceId,
+      dto,
+    );
+  }
+  /** Whoever sent it, or Owner/Admin; the service checks the sender. */
+  @Delete('pieces/:pieceId')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  async withdrawPiece(
+    @RequestContextData() ctx: RequestContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+  ) {
+    const permissions = await this.permissions.getEffectivePermissions(
+      this.permissionContext(ctx),
+    );
+    return this.pieceActions.withdraw(
+      resolveCompanyAwareScope(ctx),
+      pieceId,
+      this.actorUserId(ctx),
+      permissions.has(
+        'social.approvals.review.override.owner_or_admin_explicit',
+      ),
     );
   }
   @Get('pieces/:pieceId')
@@ -325,7 +366,7 @@ export class SocialApprovalsController {
   requestChanges(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AddSocialApprovalCommentDto,
+    @Body() dto: RequestSocialApprovalChangesDto,
   ) {
     return this.approvals.requestChanges(
       resolveCompanyAwareScope(ctx),
@@ -333,6 +374,8 @@ export class SocialApprovalsController {
       ctx.userId,
       dto.body,
       ctx.role,
+      'agency',
+      dto.kind,
     );
   }
   @Post(':id/cancel')

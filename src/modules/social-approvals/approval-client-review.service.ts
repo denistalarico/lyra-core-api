@@ -49,15 +49,17 @@ export class ApprovalClientReviewService {
     actorUserId: string,
     body: string,
     surface?: SocialApprovalSurface,
+    kind?: 'revise' | 'reject',
   ) {
     const actor = { type: 'user', userId: actorUserId } as const;
-    return surface
+    return surface || kind
       ? this.approvals.clientRequestChanges(
           scope,
           approvalId,
           actor,
           body,
           surface,
+          kind,
         )
       : this.approvals.clientRequestChanges(scope, approvalId, actor, body);
   }

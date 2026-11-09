@@ -229,6 +229,8 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
         'user-a',
         'ajuste',
         context.role,
+        'agency',
+        undefined,
       );
       expect(approvals.cancel).toHaveBeenCalledWith(scope, id, 'user-a');
     });

@@ -20,6 +20,7 @@ export const SOCIAL_APPROVAL_EVENT_TYPES = [
   'cancelled',
   'finished',
   'reopened_stale',
+  'withdrawn',
 ] as const;
 export type SocialApprovalEventType =
   (typeof SOCIAL_APPROVAL_EVENT_TYPES)[number];

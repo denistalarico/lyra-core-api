@@ -60,6 +60,8 @@ export function parseBoardCursor(cursor?: string): number {
   return offset;
 }
 
+type ContextSettings = ReturnType<SocialApprovalSettingsService['get']>;
+
 type RawCard = {
   planned_date: string | null;
   content_type: string | null;
@@ -110,7 +112,11 @@ export class SocialApprovalBoardService {
     return { includeOwn, companies };
   }
 
-  async board(ctx: RequestContext, query: SocialApprovalBoardQueryDto) {
+  async board(
+    ctx: RequestContext,
+    query: SocialApprovalBoardQueryDto,
+    reader?: ApprovalBoardReader,
+  ) {
     const scope = resolveCompanyAwareScope(ctx);
     const { includeOwn, companies } = await this.contexts(ctx, scope, query);
     const columns = (
@@ -154,6 +160,7 @@ export class SocialApprovalBoardService {
       ]),
     );
     const result: Record<string, unknown> = {};
+    const settingsByContext = new Map<string, ContextSettings>();
     await Promise.all(
       columns.map(async (column) => {
         const qb = base
@@ -172,7 +179,13 @@ export class SocialApprovalBoardService {
           .getRawAndEntities();
         const total = totals.get(column) ?? 0;
         result[column] = {
-          items: await this.cards(entities, raw as RawCard[], byPair),
+          items: await this.cards(
+            entities,
+            raw as RawCard[],
+            byPair,
+            reader,
+            settingsByContext,
+          ),
           total,
           nextCursor:
             offset + entities.length < total
@@ -259,6 +272,8 @@ export class SocialApprovalBoardService {
     pieces: SocialApprovalPieceEntity[],
     raw: RawCard[],
     byPair: ReadonlyMap<string, SocialApprovalInboxContext>,
+    reader: ApprovalBoardReader | undefined,
+    settingsByContext: Map<string, ContextSettings>,
   ) {
     if (pieces.length === 0) return [];
     const steps = await this.steps.find({
@@ -274,56 +289,125 @@ export class SocialApprovalBoardService {
     const requestById = new Map(requests.map((item) => [item.id, item]));
     const thumbnails = await this.subjects.thumbnailPaths(requests);
 
-    return pieces.map((piece, index) => {
-      const pieceSteps = steps.filter((step) => step.pieceId === piece.id);
-      const withThumbnail = pieceSteps.find(
-        (step) => step.currentRequestId && thumbnails.has(step.currentRequestId),
-      );
-      const active = pieceSteps.find((step) => step.id === piece.activeStepId);
-      return {
-        id: piece.id,
-        kind: piece.kind,
-        origin: piece.origin,
-        title: piece.title,
-        sendOrder: piece.sendOrder,
-        boardColumn: piece.boardColumn,
-        activeStep: active
-          ? { id: active.id, kind: active.kind, title: active.title }
-          : null,
-        steps: pieceSteps.map((step) => {
-          const request = step.currentRequestId
-            ? requestById.get(step.currentRequestId)
-            : undefined;
-          return {
-            id: step.id,
-            kind: step.kind,
-            title: step.title,
-            position: step.position,
-            isStale: step.isStale,
-            phase: approvalStepPhase(request?.status ?? null, step.isStale),
-            approvalId: request?.id ?? null,
-            status: request?.status ?? null,
-            resolution: request?.resolution ?? null,
-          };
-        }),
-        sourceState: piece.sourceState,
-        thumbnailPath: withThumbnail
-          ? (thumbnails.get(withThumbnail.currentRequestId as string) ?? null)
-          : null,
-        contentType: raw[index]?.content_type ?? null,
-        plannedDate: raw[index]?.planned_date ?? null,
-        planTitle: raw[index]?.plan_title ?? null,
-        campaignName: raw[index]?.campaign_name ?? null,
-        finishedAt: piece.finishedAt?.toISOString() ?? null,
-        lastActivityAt: piece.updatedAt.toISOString(),
-        context:
-          piece.agencyClientId === null
-            ? ({ kind: 'own' } as const)
-            : (byPair.get(
-                `${piece.agencyClientId}:${piece.companyContextId}`,
-              ) as SocialApprovalInboxContext),
-      };
-    });
+    const has = (key: string) => reader?.permissions.has(key) ?? false;
+    const settingsOf = (piece: SocialApprovalPieceEntity) => {
+      const key = `${piece.agencyClientId}:${piece.companyContextId}`;
+      let found = settingsByContext.get(key);
+      if (!found) {
+        found = this.settings.get({
+          tenantId: piece.tenantId,
+          workspaceId: piece.workspaceId,
+          agencyClientId: piece.agencyClientId,
+          companyContextId: piece.companyContextId,
+        });
+        settingsByContext.set(key, found);
+      }
+      return found;
+    };
+
+    return Promise.all(
+      pieces.map(async (piece, index) => {
+        const pieceSteps = steps.filter((step) => step.pieceId === piece.id);
+        const current = pieceSteps
+          .map((step) =>
+            step.currentRequestId
+              ? requestById.get(step.currentRequestId)
+              : undefined,
+          )
+          .filter((item): item is SocialApprovalRequestEntity => Boolean(item));
+        const awaitingInternal = current.some(
+          (item) => item.status === 'awaiting_internal_review',
+        );
+        const designated =
+          awaitingInternal && reader
+            ? this.authority.canDecideInternal(await settingsOf(piece), {
+                userId: reader.userId,
+                role: reader.role,
+              })
+            : false;
+        const standalone = piece.kind === 'standalone';
+        const closedSource =
+          !standalone && (piece.finishedAt || piece.sourceState === 'posted');
+        const withThumbnail = pieceSteps.find(
+          (step) =>
+            step.currentRequestId && thumbnails.has(step.currentRequestId),
+        );
+        const active = pieceSteps.find(
+          (step) => step.id === piece.activeStepId,
+        );
+        return {
+          id: piece.id,
+          kind: piece.kind,
+          origin: piece.origin,
+          title: piece.title,
+          sendOrder: piece.sendOrder,
+          boardColumn: piece.boardColumn,
+          activeStep: active
+            ? { id: active.id, kind: active.kind, title: active.title }
+            : null,
+          steps: pieceSteps.map((step) => {
+            const request = step.currentRequestId
+              ? requestById.get(step.currentRequestId)
+              : undefined;
+            return {
+              id: step.id,
+              kind: step.kind,
+              title: step.title,
+              position: step.position,
+              isStale: step.isStale,
+              phase: approvalStepPhase(request?.status ?? null, step.isStale),
+              approvalId: request?.id ?? null,
+              status: request?.status ?? null,
+              resolution: request?.resolution ?? null,
+              changesKind:
+                request?.status === 'changes_requested'
+                  ? request.changesKind
+                  : null,
+            };
+          }),
+          sourceState: piece.sourceState,
+          thumbnailPath: withThumbnail
+            ? (thumbnails.get(withThumbnail.currentRequestId as string)?.path ??
+              null)
+            : null,
+          sourceId: piece.sourceId,
+          cardColor: piece.cardColor,
+          tags: piece.tags,
+          display: piece.cardDisplay,
+          actions: {
+            canApprove:
+              designated &&
+              has('social.approvals.review.approve_internal.manager'),
+            canRequestChanges:
+              designated &&
+              has('social.approvals.review.request_changes.manager'),
+            canEdit: has('social.approvals.review.comment.assigned'),
+            canDelete:
+              has('social.approvals.review.comment.assigned') &&
+              (has(
+                'social.approvals.review.override.owner_or_admin_explicit',
+              ) ||
+                current.some(
+                  (item) => item.requestedByUserId === reader?.userId,
+                )) &&
+              (standalone || current.length > 0) &&
+              !closedSource,
+          },
+          contentType: raw[index]?.content_type ?? null,
+          plannedDate: raw[index]?.planned_date ?? null,
+          planTitle: raw[index]?.plan_title ?? null,
+          campaignName: raw[index]?.campaign_name ?? null,
+          finishedAt: piece.finishedAt?.toISOString() ?? null,
+          lastActivityAt: piece.updatedAt.toISOString(),
+          context:
+            piece.agencyClientId === null
+              ? ({ kind: 'own' } as const)
+              : (byPair.get(
+                  `${piece.agencyClientId}:${piece.companyContextId}`,
+                ) as SocialApprovalInboxContext),
+        };
+      }),
+    );
   }
 
   /** One context: the caller opens a card with that row's own context. */
@@ -335,7 +419,10 @@ export class SocialApprovalBoardService {
     const piece = await this.pieces.findOne({
       where: { ...approvalScopeWhere(scope), id: pieceId },
     });
-    if (!piece)
+    if (
+      !piece ||
+      (piece.kind === 'standalone' && piece.sourceState === 'hidden')
+    )
       throw new NotFoundException('Peça não encontrada no contexto atual.');
     const [steps, events, settings] = await Promise.all([
       this.steps.find({
