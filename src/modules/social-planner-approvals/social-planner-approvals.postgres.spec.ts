@@ -1,3 +1,4 @@
+import { AddSocialApprovalCommentRichContent1803500000000 } from '../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
 import { randomUUID } from 'node:crypto';
 import { DataSource, type DataSourceOptions } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
@@ -166,6 +167,7 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
     await new CreateSocialApprovalPieces1802900000000().up(runner);
     await new AddSocialApprovalCardCustomization1803300000000().up(runner);
     await new AddSocialApprovalPieceDescription1803400000000().up(runner);
+    await new AddSocialApprovalCommentRichContent1803500000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 

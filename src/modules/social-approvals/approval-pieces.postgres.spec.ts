@@ -1,3 +1,6 @@
+import { SocialApprovalFeedbackService } from './social-approval-feedback.service';
+import { buildClientApprovalHistory } from './client/client-approval.view';
+import { AddSocialApprovalCommentRichContent1803500000000 } from '../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { DataSource, type DataSourceOptions } from 'typeorm';
@@ -192,6 +195,7 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
     await new CreateSocialApprovalPieces1802900000000().up(runner);
     await new AddSocialApprovalCardCustomization1803300000000().up(runner);
     await new AddSocialApprovalPieceDescription1803400000000().up(runner);
+    await new AddSocialApprovalCommentRichContent1803500000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 
@@ -281,6 +285,7 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       {} as never,
       {} as never,
       pieces,
+      {} as never,
     );
 
     const members = db.getRepository(ClientAreaMembershipEntity);
@@ -468,6 +473,89 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
         sentToClientAt: null,
       });
       expect((await pieceOf(item.id)).boardColumn).toBe('preparation');
+    });
+  });
+
+  describe('approved with notes', () => {
+    const notes = {
+      body: 'Trocar a cor do botão',
+      richBody: '<p>Trocar a cor do botão</p>',
+      attachments: [],
+      feedbackId: '99999999-9999-4999-8999-999999999999',
+    };
+
+    it('internal: stays approved, keeps the note internal and links it to the decision', async () => {
+      const { request } = await draftRequest(scopeA);
+      await approvals.submit(scopeA, request.id, operator);
+      const saved = await approvals.approveInternal(
+        scopeA,
+        request.id,
+        ownerUser,
+        'owner',
+        'agency',
+        undefined,
+        notes,
+      );
+      expect(saved.status).toBe('awaiting_client');
+      const detail = await approvals.detail(scopeA, request.id);
+      expect(detail.comments[0]).toMatchObject({
+        visibility: 'internal',
+        richBody: notes.richBody,
+        feedbackId: notes.feedbackId,
+      });
+      expect(detail.decisions[0].commentId).toBe(detail.comments[0].id);
+    });
+
+    it('client: approves, keeps a client-visible note and names it in the history', async () => {
+      const { request } = await awaitingClient(scopeA);
+      const saved = await approvals.clientApprove(
+        scopeA,
+        request.id,
+        clientUser(clientOwner),
+        undefined,
+        undefined,
+        notes,
+      );
+      expect(saved.status).toBe('approved');
+      const detail = await approvals.detail(scopeA, request.id);
+      const note = detail.comments.at(-1)!;
+      expect(note.visibility).toBe('client');
+      const decision = detail.decisions.at(-1)!;
+      expect(decision).toMatchObject({ decision: 'approved', commentId: note.id });
+      expect(
+        buildClientApprovalHistory(saved, [decision], [], () => null).map(
+          (entry) => entry.kind,
+        ),
+      ).toContain('approved_with_notes');
+    });
+
+    it('attachments stay behind their comment visibility and never expose the path', async () => {
+      const { request } = await awaitingClient(scopeA);
+      const attachment = {
+        id: '88888888-8888-4888-8888-888888888888',
+        kind: 'file' as const,
+        fileName: 'nota.pdf',
+        mimeType: 'application/pdf',
+        byteSize: '4',
+        storagePath: 'social-approvals/secret/nota.pdf',
+      };
+      await approvals.comment(scopeA, request.id, operator, {
+        body: 'Nota interna',
+        attachments: [attachment],
+      });
+      const detail = await approvals.detail(scopeA, request.id);
+      expect(JSON.stringify(detail.comments)).not.toContain('secret');
+      const opened = jest.fn(() => Promise.resolve({ body: 'x' }));
+      const feedback = new SocialApprovalFeedbackService(
+        db.getRepository(SocialApprovalCommentEntity),
+        { getPrivateAsset: opened } as never,
+      );
+      await expect(
+        feedback.openAttachment(request.id, attachment.id, 'client'),
+      ).rejects.toThrow('Anexo não encontrado');
+      await expect(
+        feedback.openAttachment(request.id, attachment.id),
+      ).resolves.toMatchObject({ mimeType: 'application/pdf' });
     });
   });
 

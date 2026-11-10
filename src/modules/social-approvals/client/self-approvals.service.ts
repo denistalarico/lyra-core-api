@@ -1,3 +1,5 @@
+import type { ApprovalCommentContent } from '../approval-comment-content';
+import { SocialApprovalFeedbackService } from '../social-approval-feedback.service';
 import {
   ConflictException,
   Injectable,
@@ -157,6 +159,7 @@ export class SelfApprovalsService {
     private readonly snapshotMedia: SocialApprovalMediaService,
     private readonly textEdit: ClientApprovalTextEditService,
     private readonly pieces: SocialApprovalPiecesService,
+    private readonly feedback: SocialApprovalFeedbackService,
   ) {}
 
   private async findVisible(scope: CompanyAwareScope, approvalId: string) {
@@ -391,7 +394,7 @@ export class SelfApprovalsService {
     scope: CompanyAwareScope,
     approvalId: string,
     reader: SelfApprovalReader,
-    body: string,
+    body: ApprovalCommentContent,
   ) {
     const request = await this.findVisible(scope, approvalId);
     if (request.status !== 'awaiting_internal_review')
@@ -413,6 +416,7 @@ export class SelfApprovalsService {
     scope: CompanyAwareScope,
     approvalId: string,
     reader: SelfApprovalReader,
+    notes?: ApprovalCommentContent,
   ) {
     await this.findVisible(scope, approvalId);
     await this.approvals.approveInternal(
@@ -421,6 +425,8 @@ export class SelfApprovalsService {
       reader.userId,
       reader.agencyRole,
       'self',
+      undefined,
+      notes,
     );
     return this.detail(scope, approvalId, reader);
   }
@@ -429,7 +435,7 @@ export class SelfApprovalsService {
     scope: CompanyAwareScope,
     approvalId: string,
     reader: SelfApprovalReader,
-    body: string,
+    body: ApprovalCommentContent,
     kind?: 'revise' | 'reject',
   ) {
     await this.findVisible(scope, approvalId);
@@ -443,6 +449,16 @@ export class SelfApprovalsService {
       kind,
     );
     return this.detail(scope, approvalId, reader);
+  }
+
+  /** Proves the request is visible here; every note in this area is the agency's. */
+  async attachment(
+    scope: CompanyAwareScope,
+    approvalId: string,
+    attachmentId: string,
+  ) {
+    await this.findVisible(scope, approvalId);
+    return this.feedback.openAttachment(approvalId, attachmentId);
   }
 
   /** D-24: the same edit as a company's, deciding the internal stage. */

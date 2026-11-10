@@ -1,3 +1,4 @@
+import { AddSocialApprovalCommentRichContent1803500000000 } from '../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -240,6 +241,7 @@ run('AR4 Planner, Approvals and Projects (real PostgreSQL)', () => {
     await new CreateSocialApprovalPieces1802900000000().up(runner);
     await new AddSocialApprovalCardCustomization1803300000000().up(runner);
     await new AddSocialApprovalPieceDescription1803400000000().up(runner);
+    await new AddSocialApprovalCommentRichContent1803500000000().up(runner);
     await new CreateSocialWorkLinks1803100000000().up(runner);
     await runner.release();
     await bootstrap.destroy();

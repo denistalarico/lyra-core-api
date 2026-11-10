@@ -1,3 +1,4 @@
+import type { ApprovalPiecePost } from '../approval-piece-post';
 import type {
   SocialApprovalBoardColumn,
   SocialApprovalPieceEntity,
@@ -90,6 +91,7 @@ export type ClientBoardCard = {
 
 export type ClientPieceDetail = ClientBoardCard & {
   description: string | null;
+  post: ApprovalPiecePost | null;
   steps: Array<ClientBoardStep & { approval: ClientApprovalDetail | null }>;
 };
 
@@ -148,4 +150,15 @@ export function buildClientBoardCard(
     lastActivityAt: piece.updatedAt.toISOString(),
     finishedAt: piece.finishedAt?.toISOString() ?? null,
   };
+}
+
+/** Requests this reader can act on, read off the projection they were given. */
+export function clientFeedbackTargets(piece: ClientPieceDetail) {
+  const decide: string[] = [];
+  const comment: string[] = [];
+  for (const step of piece.steps) {
+    if (step.approval?.actions.canDecide) decide.push(step.approval.id);
+    if (step.approval?.actions.canComment) comment.push(step.approval.id);
+  }
+  return { decide, comment };
 }

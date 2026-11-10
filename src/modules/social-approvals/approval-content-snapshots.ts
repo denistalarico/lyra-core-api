@@ -211,6 +211,33 @@ export async function destinationMediaIds(
   return result;
 }
 
+/** The formats each file of the item serves, for the tabs of the approval. */
+export async function destinationMediaPlacements(
+  manager: EntityManager,
+  contentItemId: string,
+): Promise<Map<string, string[]>> {
+  const [creatives, destinations] = await Promise.all([
+    manager
+      .getRepository(SocialDestinationCreativeEntity)
+      .find({ where: { contentItemId } }),
+    manager
+      .getRepository(SocialContentDestinationEntity)
+      .find({ where: { contentItemId } }),
+  ]);
+  const placementOf = new Map(
+    destinations.map((row) => [row.id, row.placement]),
+  );
+  const result = new Map<string, string[]>();
+  for (const creative of creatives) {
+    const placement = placementOf.get(creative.destinationId);
+    if (!placement) continue;
+    const placements = result.get(creative.mediaAssetId) ?? [];
+    if (!placements.includes(placement)) placements.push(placement);
+    result.set(creative.mediaAssetId, placements);
+  }
+  return result;
+}
+
 /** Only free text is client-editable (D-02); tables, links and files are not. */
 export function isTextEditableApproval(
   approval: Pick<SocialApprovalRequestEntity, 'subjectType' | 'displayType'>,

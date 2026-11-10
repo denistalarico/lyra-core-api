@@ -72,6 +72,7 @@ export type ApprovalSubjectPreview = {
       assetType: 'image' | 'video';
       contentPath: string;
       thumbnailPath: string | null;
+      placements?: string[];
     }>;
   };
 };
@@ -337,6 +338,7 @@ export class ApprovalSubjectResolver {
               thumbnailPath: item.thumbnailMediaAssetId
                 ? path(`item-${index}-thumb`)
                 : null,
+              placements: item.placements ?? [],
             })),
           },
         };

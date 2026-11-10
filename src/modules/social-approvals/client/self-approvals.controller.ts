@@ -1,3 +1,12 @@
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { ApprovalFeedbackDto } from '../dto/social-approval.dto';
+import {
+  APPROVAL_FEEDBACK_MAX_FILES,
+  APPROVAL_FEEDBACK_UPLOAD,
+  SocialApprovalFeedbackService,
+  type ApprovalFeedbackFile,
+} from '../social-approval-feedback.service';
+import { clientFeedbackTargets } from './client-approval-board.view';
 import {
   Body,
   Controller,
@@ -7,6 +16,8 @@ import {
   Post,
   Query,
   Res,
+  UploadedFiles,
+  UseInterceptors,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -56,6 +67,7 @@ export class SelfApprovalsController {
   constructor(
     private readonly approvals: SelfApprovalsService,
     private readonly files: FilesService,
+    private readonly feedback: SocialApprovalFeedbackService,
   ) {}
 
   private reader(context: ClientAreaSelfContext): SelfApprovalReader {
@@ -106,6 +118,61 @@ export class SelfApprovalsController {
       pieceId,
       this.reader(context),
     );
+  }
+
+  /** One decision over the piece; `canDecide`/`canComment` pick the requests. */
+  @Post('pieces/:pieceId/feedback')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  @UseInterceptors(
+    FilesInterceptor(
+      'files',
+      APPROVAL_FEEDBACK_MAX_FILES,
+      APPROVAL_FEEDBACK_UPLOAD,
+    ),
+  )
+  async pieceFeedback(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+    @Body() dto: ApprovalFeedbackDto,
+    @UploadedFiles() files: ApprovalFeedbackFile[] = [],
+  ) {
+    const scope = selfApprovalScope(context);
+    const reader = this.reader(context);
+    await this.feedback.submit(
+      scope,
+      dto,
+      files,
+      clientFeedbackTargets(await this.approvals.piece(scope, pieceId, reader)),
+      {
+        approve: (id, notes) =>
+          this.approvals.approve(scope, id, reader, notes),
+        changes: (id, content, kind) =>
+          this.approvals.requestChanges(scope, id, reader, content, kind),
+        comment: (id, content) =>
+          this.approvals.comment(scope, id, reader, content),
+      },
+    );
+    return this.approvals.piece(scope, pieceId, reader);
+  }
+
+  @Get(':approvalId/attachments/:attachmentId')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  async attachment(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+    @Res() response: Response,
+  ) {
+    const { file, mimeType } = await this.approvals.attachment(
+      selfApprovalScope(context),
+      approvalId,
+      attachmentId,
+    );
+    response.setHeader('Content-Type', mimeType);
+    response.setHeader('Content-Disposition', 'attachment');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    file.body.pipe(response);
   }
 
   @Get(':approvalId')

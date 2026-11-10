@@ -25,6 +25,7 @@ import { CreativeProductionService } from '../social-creative-studio/creative-pr
 import {
   buildTablePayloads,
   destinationMediaIds,
+  destinationMediaPlacements,
   tableWarnings,
   type ApprovalTableSource,
 } from '../social-approvals/approval-content-snapshots';
@@ -799,7 +800,16 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
       );
     const { item } = facts;
     // Resolved first: scope and media checks run outside the transaction.
-    const payload = await this.pieceActions.mediaSet(scope, facts.media);
+    const [media, placements] = await Promise.all([
+      this.pieceActions.mediaSet(scope, facts.media),
+      destinationMediaPlacements(this.dataSource.manager, item.id),
+    ]);
+    const payload = {
+      items: media.items.map((entry) => ({
+        ...entry,
+        placements: placements.get(entry.mediaAssetId) ?? [],
+      })),
+    };
     const afterCommit: ApprovalOperation['afterCommit'] = [];
     const outcome = await this.dataSource.transaction(async (manager) => {
       const step = await this.pieces.ensureContentItemStep(

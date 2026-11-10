@@ -15,6 +15,7 @@ import {
   SocialContentItemEntity,
   SocialPlanEntity,
 } from '../social-planner/entities';
+import { approvalPiecePost } from './approval-piece-post';
 import { approvalStepPhase } from './approval-piece.projection';
 import { approvalScopeWhere } from './approval-scope';
 import { approvalScopeKind } from './approval-stage.policy';
@@ -502,9 +503,20 @@ export class SocialApprovalBoardService {
       sourceState: piece.sourceState,
       finishedAt: piece.finishedAt?.toISOString() ?? null,
       finishReason: piece.finishReason,
+      post: await approvalPiecePost(this.pieces.manager, piece),
       steps: detailed,
       events,
       actions: {
+        canDelete:
+          has('social.approvals.review.comment.assigned') &&
+          (has('social.approvals.review.override.owner_or_admin_explicit') ||
+            detailed.some(
+              (step) => step.approval?.requestedByUserId === reader.userId,
+            )) &&
+          (piece.kind === 'standalone' ||
+            detailed.some((step) => step.approval)) &&
+          (piece.kind === 'standalone' ||
+            (!piece.finishedAt && piece.sourceState !== 'posted')),
         canFinish:
           open &&
           has(
@@ -514,6 +526,49 @@ export class SocialApprovalBoardService {
           ),
         finishRequiresOverride: anyPending,
       },
+    };
+  }
+
+  /** Which requests one decision over the piece reaches, in step order. */
+  async feedbackTargets(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    visibility?: 'internal' | 'client',
+  ) {
+    const piece = await this.pieces.findOne({
+      where: { ...approvalScopeWhere(scope), id: pieceId },
+    });
+    if (
+      !piece ||
+      (piece.kind === 'standalone' && piece.sourceState === 'hidden')
+    )
+      throw new NotFoundException('Peça não encontrada no contexto atual.');
+    const steps = await this.steps.find({
+      where: { pieceId: piece.id },
+      order: { position: 'ASC' },
+    });
+    const ids = steps
+      .map((step) => step.currentRequestId)
+      .filter((id): id is string => Boolean(id));
+    const found = ids.length
+      ? await this.requests.find({ where: { id: In(ids) } })
+      : [];
+    const ordered = ids
+      .map((id) => found.find((request) => request.id === id))
+      .filter((request): request is SocialApprovalRequestEntity =>
+        Boolean(request),
+      );
+    return {
+      decide: ordered
+        .filter((request) => request.status === 'awaiting_internal_review')
+        .map((request) => request.id),
+      comment: ordered
+        .filter(
+          (request) =>
+            ACTIVE_STATUSES.has(request.status) &&
+            (visibility !== 'client' || request.sentToClientAt),
+        )
+        .map((request) => request.id),
     };
   }
 

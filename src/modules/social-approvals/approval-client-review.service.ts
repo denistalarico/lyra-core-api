@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import type { SocialApprovalSurface } from './entities';
+import type { ApprovalCommentContent } from './approval-comment-content';
 import { SocialApprovalsService } from './social-approvals.service';
 
 /**
@@ -20,7 +21,7 @@ export class ApprovalClientReviewService {
     scope: CompanyAwareScope,
     approvalId: string,
     actorUserId: string,
-    body: string,
+    body: ApprovalCommentContent,
   ) {
     return this.approvals.clientComment(scope, approvalId, actorUserId, body);
   }
@@ -30,15 +31,17 @@ export class ApprovalClientReviewService {
     approvalId: string,
     actorUserId: string,
     surface?: SocialApprovalSurface,
+    notes?: ApprovalCommentContent,
   ) {
     const actor = { type: 'user', userId: actorUserId } as const;
-    return surface
+    return surface || notes
       ? this.approvals.clientApprove(
           scope,
           approvalId,
           actor,
           undefined,
           surface,
+          notes,
         )
       : this.approvals.clientApprove(scope, approvalId, actor);
   }
@@ -47,7 +50,7 @@ export class ApprovalClientReviewService {
     scope: CompanyAwareScope,
     approvalId: string,
     actorUserId: string,
-    body: string,
+    body: ApprovalCommentContent,
     surface?: SocialApprovalSurface,
     kind?: 'revise' | 'reject',
   ) {

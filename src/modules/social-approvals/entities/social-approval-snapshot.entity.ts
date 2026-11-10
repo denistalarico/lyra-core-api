@@ -37,6 +37,8 @@ export type ApprovalMediaSetSnapshotPayload = {
     assetType: 'image' | 'video';
     mimeType: string;
     thumbnailMediaAssetId: string | null;
+    /** Formats this file serves; absent on snapshots older than the tabs. */
+    placements?: string[];
   }>;
 };
 export type ApprovalSnapshotPayload =

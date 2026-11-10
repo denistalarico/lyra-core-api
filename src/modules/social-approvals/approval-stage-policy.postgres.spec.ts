@@ -1,3 +1,4 @@
+import { AddSocialApprovalCommentRichContent1803500000000 } from '../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { DataSource, type DataSourceOptions, type Repository } from 'typeorm';
@@ -149,6 +150,7 @@ run('CS5 Closeout approval stage policy (real PostgreSQL)', () => {
     await new CreateSocialApprovals1795100000000().up(runner);
     await new AddSocialApprovalViewedAudit1795800000000().up(runner);
     await new AddSocialApprovalCommentVisibility1797400000000().up(runner);
+    await new AddSocialApprovalCommentRichContent1803500000000().up(runner);
     // AR1 columns only: this suite's workflow stubs use steps that do not exist.
     await runner.query(`ALTER TABLE social_approval_requests
       ADD COLUMN step_id uuid,

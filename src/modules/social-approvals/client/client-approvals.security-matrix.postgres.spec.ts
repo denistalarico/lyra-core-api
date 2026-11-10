@@ -1,3 +1,4 @@
+import { AddSocialApprovalCommentRichContent1803500000000 } from '../../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
 import { Module, ValidationPipe, type INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
@@ -390,6 +391,7 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
       );
       // AP3 — the comment audience column and the client notification ledger.
       await new AddSocialApprovalCommentVisibility1797400000000().up(runner);
+      await new AddSocialApprovalCommentRichContent1803500000000().up(runner);
     } finally {
       await runner.release();
     }

@@ -1,3 +1,4 @@
+import { approvalPiecePost } from '../approval-piece-post';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository } from 'typeorm';
@@ -291,6 +292,7 @@ export class ClientApprovalBoardService {
     return {
       ...buildClientBoardCard(present(piece), steps, latest),
       description: piece.description,
+      post: await approvalPiecePost(this.pieces.manager, piece),
       steps: await Promise.all(
         steps.map(async (step) => {
           const request = latest.get(step.id);

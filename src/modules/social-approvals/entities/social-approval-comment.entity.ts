@@ -16,6 +16,16 @@ export const SOCIAL_APPROVAL_COMMENT_VISIBILITIES = [
 export type SocialApprovalCommentVisibility =
   (typeof SOCIAL_APPROVAL_COMMENT_VISIBILITIES)[number];
 
+/** A reference sent with a comment; `storagePath` never leaves the server. */
+export type SocialApprovalCommentAttachment = {
+  id: string;
+  kind: 'image' | 'video' | 'audio' | 'file';
+  fileName: string;
+  mimeType: string;
+  byteSize: string;
+  storagePath: string;
+};
+
 @Entity('social_approval_comments')
 @Index('IDX_social_approval_comments_request_created', [
   'approvalRequestId',
@@ -53,7 +63,16 @@ export class SocialApprovalCommentEntity {
   actorType!: SocialApprovalActorType;
   @Column({ name: 'actor_user_id', type: 'uuid', nullable: true })
   actorUserId!: string | null;
+  /** Always plain text, also when the comment was written with formatting. */
   @Column({ type: 'text' }) body!: string;
+  /** Sanitized on write; null for plain comments. */
+  @Column({ name: 'rich_body', type: 'text', nullable: true })
+  richBody!: string | null;
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  attachments!: SocialApprovalCommentAttachment[];
+  /** Shared by the comments one decision wrote across a piece's steps. */
+  @Column({ name: 'feedback_id', type: 'uuid', nullable: true })
+  feedbackId!: string | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

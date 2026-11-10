@@ -9,9 +9,12 @@ import {
   Post,
   Query,
   Res,
+  UploadedFiles,
   UseGuards,
+  UseInterceptors,
   Delete,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
 import { RequestContextData } from '../../common/context/request-context.decorator';
@@ -25,6 +28,8 @@ import {
 } from '../permissions';
 import {
   AddSocialApprovalCommentDto,
+  ApprovalFeedbackDto,
+  type ApprovalFeedbackDecision,
   RequestSocialApprovalChangesDto,
   CreateSocialApprovalDto,
   ListSocialApprovalInboxDto,
@@ -48,9 +53,23 @@ import { SocialApprovalBoardPreferencesService } from './social-approval-board-p
 import { SocialApprovalInboxService } from './social-approval-inbox.service';
 import { SocialApprovalsService } from './social-approvals.service';
 import {
+  APPROVAL_FEEDBACK_MAX_FILES,
+  APPROVAL_FEEDBACK_UPLOAD,
+  SocialApprovalFeedbackService,
+  type ApprovalFeedbackFile,
+} from './social-approval-feedback.service';
+import {
   APPROVAL_SUBJECT_OWNER_ACTIONS,
   ApprovalOwnerActionRequiredException,
 } from './approval-owner-actions';
+
+const FEEDBACK_PERMISSION: Record<ApprovalFeedbackDecision, string> = {
+  approve: 'social.approvals.review.approve_internal.manager',
+  approve_with_notes: 'social.approvals.review.approve_internal.manager',
+  revise: 'social.approvals.review.request_changes.manager',
+  reject: 'social.approvals.review.request_changes.manager',
+  comment: 'social.approvals.review.comment.assigned',
+};
 
 @Controller('social/approvals')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -66,6 +85,7 @@ export class SocialApprovalsController {
     private readonly permissions: PlatformPermissionService,
     private readonly boardPreferences: SocialApprovalBoardPreferencesService,
     private readonly pieceSources: SocialApprovalPieceSourcesService,
+    private readonly feedback: SocialApprovalFeedbackService,
   ) {}
 
   private actorUserId(ctx: RequestContext): string {
@@ -280,6 +300,89 @@ export class SocialApprovalsController {
           'social.approvals.review.agency_override.owner',
         ),
     );
+  }
+  /** One decision over the piece; the permission depends on the decision. */
+  @Post('pieces/:pieceId/feedback')
+  @RequirePermission('social.approvals.review.view.assigned')
+  @UseInterceptors(
+    FilesInterceptor(
+      'files',
+      APPROVAL_FEEDBACK_MAX_FILES,
+      APPROVAL_FEEDBACK_UPLOAD,
+    ),
+  )
+  async pieceFeedback(
+    @RequestContextData() ctx: RequestContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+    @Body() dto: ApprovalFeedbackDto,
+    @UploadedFiles() files: ApprovalFeedbackFile[] = [],
+  ) {
+    const context = this.permissionContext(ctx);
+    await this.permissions.assertCan(
+      context,
+      FEEDBACK_PERMISSION[dto.decision],
+    );
+    const scope = resolveCompanyAwareScope(ctx);
+    await this.feedback.submit(
+      scope,
+      dto,
+      files,
+      await this.board.feedbackTargets(scope, pieceId, dto.visibility),
+      {
+        approve: (id, notes) =>
+          this.approvals.approveInternal(
+            scope,
+            id,
+            ctx.userId,
+            ctx.role,
+            'agency',
+            undefined,
+            notes,
+          ),
+        changes: (id, content, kind) =>
+          this.approvals.requestChanges(
+            scope,
+            id,
+            ctx.userId,
+            content,
+            ctx.role,
+            'agency',
+            kind,
+          ),
+        comment: (id, content) =>
+          this.approvals.comment(
+            scope,
+            id,
+            ctx.userId,
+            content,
+            dto.visibility,
+          ),
+      },
+    );
+    return this.board.pieceDetail(scope, pieceId, {
+      userId: context.userId,
+      role: ctx.role,
+      permissions: await this.permissions.getEffectivePermissions(context),
+    });
+  }
+  @Get(':id/attachments/:attachmentId')
+  @RequirePermission('social.approvals.review.view.assigned')
+  async attachment(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+    @Res() response: Response,
+  ) {
+    await this.approvals.detail(resolveCompanyAwareScope(ctx), id);
+    const { file, mimeType } = await this.feedback.openAttachment(
+      id,
+      attachmentId,
+    );
+    response.setHeader('Content-Type', mimeType);
+    response.setHeader('Content-Disposition', 'attachment');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    file.body.pipe(response);
   }
   /** Agency-side bytes of a snapshot, by opaque slot (D-29). */
   @Get('snapshots/:snapshotId/media/:mediaRef')

@@ -1,4 +1,8 @@
 import {
+  publicApprovalAttachments,
+  type ApprovalCommentContent,
+} from './approval-comment-content';
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -183,11 +187,13 @@ export class SocialApprovalsService {
     manager: DataSource['manager'],
     request: SocialApprovalRequestEntity,
     actor: ApprovalActor,
-    body: string,
+    body: ApprovalCommentContent,
     stage: SocialApprovalStage | null,
     visibility: SocialApprovalCommentVisibility,
   ) {
-    const normalized = typeof body === 'string' ? body.trim() : '';
+    const content = typeof body === 'object' && body ? body : { body };
+    const normalized =
+      typeof content.body === 'string' ? content.body.trim() : '';
     if (!normalized)
       throw new BadRequestException('O comentário não pode estar vazio.');
     return manager.getRepository(SocialApprovalCommentEntity).save({
@@ -197,6 +203,13 @@ export class SocialApprovalsService {
       actorUserId: actor.userId,
       body: normalized,
       visibility,
+      ...('attachments' in content
+        ? {
+            richBody: content.richBody ?? null,
+            attachments: content.attachments ?? [],
+            feedbackId: content.feedbackId ?? null,
+          }
+        : {}),
     });
   }
   private async decision(
@@ -673,7 +686,14 @@ export class SocialApprovalsService {
         order: { createdAt: 'ASC' },
       }),
     ]);
-    return { ...request, comments, decisions };
+    return {
+      ...request,
+      comments: comments.map((comment) => ({
+        ...comment,
+        attachments: publicApprovalAttachments(comment.attachments),
+      })),
+      decisions,
+    };
   }
   /** R-08: agency view of the text history of this approval's step. */
   async textVersions(scope: CompanyAwareScope, id: string) {
@@ -840,7 +860,7 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actorUserId: string | null | undefined,
-    body: string,
+    body: ApprovalCommentContent,
     visibility: SocialApprovalCommentVisibility = 'internal',
     surface: SocialApprovalSurface = 'agency',
   ) {
@@ -929,6 +949,7 @@ export class SocialApprovalsService {
     role?: string | null,
     surface: SocialApprovalSurface = 'agency',
     operation?: ApprovalOperation,
+    notes?: ApprovalCommentContent,
   ) {
     const actor = this.user(actorUserId);
     let decided: RecordedApprovalEvent | null = null;
@@ -948,13 +969,23 @@ export class SocialApprovalsService {
             scope,
             settings,
           );
+      const note = notes
+        ? await this.addCommentEntity(
+            manager,
+            request,
+            actor,
+            notes,
+            'internal',
+            'internal',
+          )
+        : null;
       await this.decision(
         manager,
         request,
         'internal',
         'approved',
         actor,
-        null,
+        note?.id ?? null,
       );
       if (final) {
         request.status = 'approved';
@@ -973,7 +1004,10 @@ export class SocialApprovalsService {
         'approved',
         actor,
         surface,
-        { stage: 'internal' },
+        {
+          stage: 'internal',
+          ...(note ? { withNotes: true, commentId: note.id } : {}),
+        },
       );
       if (!final)
         await this.pieces.recordRequestEvent(
@@ -1016,7 +1050,7 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actorUserId: string | null | undefined,
-    body: string,
+    body: ApprovalCommentContent,
     role?: string | null,
     surface: SocialApprovalSurface = 'agency',
     kind: SocialApprovalChangesKind = 'revise',
@@ -1103,6 +1137,7 @@ export class SocialApprovalsService {
     actor: ApprovalActor,
     operation?: ApprovalOperation,
     surface: SocialApprovalSurface = 'client_area',
+    notes?: ApprovalCommentContent,
   ) {
     this.validateActor(actor);
     const run = async (manager: EntityManager) => {
@@ -1116,7 +1151,24 @@ export class SocialApprovalsService {
         settings,
         actor.userId,
       );
-      await this.decision(manager, request, 'client', 'approved', actor, null);
+      const note = notes
+        ? await this.addCommentEntity(
+            manager,
+            request,
+            actor,
+            notes,
+            'client',
+            'client',
+          )
+        : null;
+      await this.decision(
+        manager,
+        request,
+        'client',
+        'approved',
+        actor,
+        note?.id ?? null,
+      );
       const completed = await this.roundIsComplete(
         manager,
         scope,
@@ -1135,7 +1187,11 @@ export class SocialApprovalsService {
         'approved',
         actor,
         surface,
-        { stage: 'client', roundCompleted: completed },
+        {
+          stage: 'client',
+          roundCompleted: completed,
+          ...(note ? { withNotes: true, commentId: note.id } : {}),
+        },
       );
       if (completed) await this.pieces.afterTransition(manager, updated);
       return { saved: updated, completed, decided };
@@ -1244,7 +1300,7 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actor: ApprovalActor,
-    body: string,
+    body: ApprovalCommentContent,
     surface: SocialApprovalSurface = 'client_area',
     kind: SocialApprovalChangesKind = 'revise',
   ) {
@@ -1264,7 +1320,7 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actorUserId: string | null | undefined,
-    body: string,
+    body: ApprovalCommentContent,
   ) {
     const actor = this.user(actorUserId);
     const request = await this.find(scope, id);
@@ -1297,7 +1353,7 @@ export class SocialApprovalsService {
     scope: CompanyAwareScope,
     id: string,
     actor: ApprovalActor,
-    body: string,
+    body: ApprovalCommentContent,
     stage: SocialApprovalStage,
     role?: string | null,
     surface: SocialApprovalSurface = stage === 'client'

@@ -148,6 +148,29 @@ describe('AP3 client approval projection contract', () => {
     }
   });
 
+  it('never emits a storage path from a comment attachment', () => {
+    const comment = buildClientApprovalComment(
+      {
+        ...clientComment,
+        attachments: [
+          {
+            id: 'attachment-1',
+            kind: 'audio',
+            fileName: 'audio.webm',
+            mimeType: 'audio/webm',
+            byteSize: '4',
+            storagePath: 'social-approvals/secret/audio.webm',
+          },
+        ],
+      } as unknown as SocialApprovalCommentEntity,
+      { name: 'Cliente', side: 'client' },
+      'client-user-1',
+    );
+    expect(comment.attachments).toHaveLength(1);
+    expect(deepKeys(comment).has('storagePath')).toBe(false);
+    expect(JSON.stringify(comment)).not.toContain('secret');
+  });
+
   it('never emits internal identifier values anywhere in a full detail shape', () => {
     const detail = {
       ...buildClientApprovalListItem(approval, [clientComment]),
@@ -364,6 +387,7 @@ describe('AR1 client board and snapshot projection contract', () => {
       assetType: 'image',
       contentRef: 'item-0',
       thumbnailRef: 'item-0-thumb',
+      placements: [],
     });
     for (const projected of [file, media]) {
       const keys = deepKeys(projected);

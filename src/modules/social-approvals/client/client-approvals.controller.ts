@@ -1,3 +1,12 @@
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { ApprovalFeedbackDto } from '../dto/social-approval.dto';
+import {
+  APPROVAL_FEEDBACK_MAX_FILES,
+  APPROVAL_FEEDBACK_UPLOAD,
+  SocialApprovalFeedbackService,
+  type ApprovalFeedbackFile,
+} from '../social-approval-feedback.service';
+import { clientFeedbackTargets } from './client-approval-board.view';
 import {
   Body,
   Controller,
@@ -7,6 +16,8 @@ import {
   Post,
   Query,
   Res,
+  UploadedFiles,
+  UseInterceptors,
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -82,6 +93,7 @@ export class ClientAreaApprovalsController {
     private readonly board: ClientApprovalBoardService,
     private readonly textEdit: ClientApprovalTextEditService,
     private readonly pieces: SocialApprovalPiecesService,
+    private readonly feedback: SocialApprovalFeedbackService,
   ) {}
 
   private reader(context: ClientAreaContext) {
@@ -132,6 +144,74 @@ export class ClientAreaApprovalsController {
       pieceId,
       this.reader(context),
     );
+  }
+
+  /**
+   * One decision over the piece. The route needs only `view`: the actions on
+   * the projection already combine permission, phase and D-17, and an empty
+   * target list refuses the request.
+   */
+  @Post('pieces/:pieceId/feedback')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  @UseInterceptors(
+    FilesInterceptor(
+      'files',
+      APPROVAL_FEEDBACK_MAX_FILES,
+      APPROVAL_FEEDBACK_UPLOAD,
+    ),
+  )
+  async pieceFeedback(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+    @Body() dto: ApprovalFeedbackDto,
+    @UploadedFiles() files: ApprovalFeedbackFile[] = [],
+  ) {
+    const scope = toCompanyAwareScope(context);
+    const reader = this.reader(context);
+    await this.feedback.submit(
+      scope,
+      dto,
+      files,
+      clientFeedbackTargets(await this.board.piece(scope, pieceId, reader)),
+      {
+        approve: (id, notes) =>
+          this.review.approve(scope, id, context.userId, undefined, notes),
+        changes: (id, content, kind) =>
+          this.review.requestChanges(
+            scope,
+            id,
+            context.userId,
+            content,
+            undefined,
+            kind,
+          ),
+        comment: (id, content) =>
+          this.review.comment(scope, id, context.userId, content),
+      },
+    );
+    return this.board.piece(scope, pieceId, reader);
+  }
+
+  /** Only attachments of comments the client can read; anything else is 404. */
+  @Get(':approvalId/attachments/:attachmentId')
+  @RequireClientAreaPermission('client_area.approvals.view')
+  async attachment(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('approvalId', ParseUUIDPipe) approvalId: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+    @Res() response: Response,
+  ) {
+    await this.approvals.findVisible(toCompanyAwareScope(context), approvalId);
+    const { file, mimeType } = await this.feedback.openAttachment(
+      approvalId,
+      attachmentId,
+      'client',
+    );
+    response.setHeader('Content-Type', mimeType);
+    response.setHeader('Content-Disposition', 'attachment');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    file.body.pipe(response);
   }
 
   @Get(':approvalId')

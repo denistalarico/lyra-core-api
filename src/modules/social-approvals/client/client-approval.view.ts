@@ -1,3 +1,4 @@
+import { publicApprovalAttachments } from '../approval-comment-content';
 import type { ApprovalSubjectPreview } from '../subjects/approval-subject-resolver';
 import { isApprovalSnapshotMediaRef } from '../approval-snapshot-media-ref';
 import type {
@@ -54,6 +55,10 @@ export type ClientApprovalComment = {
   author: ClientApprovalAuthor;
   /** True when the reader themself wrote it, so the UI can align the bubble. */
   mine: boolean;
+  richBody: string | null;
+  attachments: ReturnType<typeof publicApprovalAttachments>;
+  /** Same value on the comments of one decision across a piece's steps. */
+  feedbackId: string;
 };
 
 export type ClientApprovalHistoryEntry = {
@@ -64,6 +69,7 @@ export type ClientApprovalHistoryEntry = {
     | 'commented'
     | 'changes_requested'
     | 'approved'
+    | 'approved_with_notes'
     | 'approved_by_agency'
     | 'replaced'
     | 'withdrawn';
@@ -155,6 +161,7 @@ export type ClientApprovalPreview = {
       assetType: 'image' | 'video';
       contentRef: string;
       thumbnailRef: string | null;
+      placements: string[];
     }>;
   };
 };
@@ -274,6 +281,9 @@ export function buildClientApprovalComment(
     createdAt: iso(comment.createdAt)!,
     author,
     mine: comment.actorUserId === readerUserId,
+    richBody: comment.richBody ?? null,
+    attachments: publicApprovalAttachments(comment.attachments),
+    feedbackId: comment.feedbackId ?? comment.id,
   };
 }
 
@@ -333,7 +343,9 @@ export function buildClientApprovalHistory(
         decision.decision === 'agency_override'
           ? 'approved_by_agency'
           : decision.decision === 'approved'
-            ? 'approved'
+            ? decision.commentId
+              ? 'approved_with_notes'
+              : 'approved'
             : 'changes_requested',
       at: iso(decision.createdAt)!,
       actorName: nameFor(decision.actorUserId),
@@ -421,6 +433,7 @@ export function buildClientApprovalPreview(
           assetType: item.assetType,
           contentRef: `item-${index}`,
           thumbnailRef: item.thumbnailPath ? `item-${index}-thumb` : null,
+          placements: item.placements ?? [],
         })),
       },
     };
