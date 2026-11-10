@@ -53,7 +53,11 @@ const OPEN_STATUSES = new Set([
 /** AR4: how an avulsa sent from Projects differs from one sent here. */
 export type StandalonePieceOptions = {
   origin?: SocialApprovalPieceOrigin;
-  work?: { projectId: string | null; taskId: string; subtaskId: string };
+  work?: {
+    projectId: string | null;
+    taskId: string | null;
+    subtaskId: string | null;
+  };
   /** A task attachment: stored in the public bucket, unlike a media asset. */
   attachment?: { assetPath: string; fileName: string; mimeType: string };
 };
@@ -117,6 +121,7 @@ export class SocialApprovalPieceActionsService {
         title,
         stepKind: input.stepKind,
         origin: options.origin ?? 'approvals',
+        description: input.description?.trim() || null,
         work: options.work,
       });
       const snapshot = await this.pieces.createSnapshot(

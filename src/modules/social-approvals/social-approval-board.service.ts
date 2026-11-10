@@ -495,6 +495,7 @@ export class SocialApprovalBoardService {
       kind: piece.kind,
       origin: piece.origin,
       title: piece.title,
+      description: piece.description,
       sendOrder: piece.sendOrder,
       boardColumn: piece.boardColumn,
       activeStepId: piece.activeStepId,

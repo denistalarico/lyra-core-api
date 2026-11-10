@@ -315,11 +315,12 @@ export class SocialApprovalPiecesService {
       title: string;
       stepKind: SocialApprovalStepKind;
       origin: SocialApprovalPieceOrigin;
-      /** AR4: the subtask that sent it (R-18). */
+      description?: string | null;
+      /** AR4: the subtask that sent it (R-18), or what the sender linked. */
       work?: {
         projectId: string | null;
-        taskId: string;
-        subtaskId: string;
+        taskId: string | null;
+        subtaskId: string | null;
       };
     },
   ) {
@@ -335,6 +336,7 @@ export class SocialApprovalPiecesService {
         sourceId: null,
         origin: input.origin,
         title: input.title,
+        description: input.description ?? null,
       }),
     );
     const step = await steps.save(

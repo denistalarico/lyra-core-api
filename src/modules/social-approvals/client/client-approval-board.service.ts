@@ -290,6 +290,7 @@ export class ClientApprovalBoardService {
     const present = source.presentPiece ?? ((item) => item);
     return {
       ...buildClientBoardCard(present(piece), steps, latest),
+      description: piece.description,
       steps: await Promise.all(
         steps.map(async (step) => {
           const request = latest.get(step.id);

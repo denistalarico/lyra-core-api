@@ -89,6 +89,7 @@ export type ClientBoardCard = {
 };
 
 export type ClientPieceDetail = ClientBoardCard & {
+  description: string | null;
   steps: Array<ClientBoardStep & { approval: ClientApprovalDetail | null }>;
 };
 

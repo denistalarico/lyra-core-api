@@ -9,6 +9,7 @@ import { AddSocialApprovalViewedAudit1795800000000 } from '../../database/migrat
 import { AddSocialApprovalCommentVisibility1797400000000 } from '../../database/migrations/1797400000000-add-social-approval-comment-visibility';
 import { AllowOwnScopeSocialApprovals1798800000000 } from '../../database/migrations/1798800000000-allow-own-scope-social-approvals';
 import { CreateSocialApprovalPieces1802900000000 } from '../../database/migrations/1802900000000-create-social-approval-pieces';
+import { AddSocialApprovalPieceDescription1803400000000 } from '../../database/migrations/1803400000000-add-social-approval-piece-description';
 import { AddSocialApprovalCardCustomization1803300000000 } from '../../database/migrations/1803300000000-add-social-approval-card-customization';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyUserProfileEntity } from '../agency/entities/agency-settings.entities';
@@ -164,6 +165,7 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
     await new AllowOwnScopeSocialApprovals1798800000000().up(runner);
     await new CreateSocialApprovalPieces1802900000000().up(runner);
     await new AddSocialApprovalCardCustomization1803300000000().up(runner);
+    await new AddSocialApprovalPieceDescription1803400000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 

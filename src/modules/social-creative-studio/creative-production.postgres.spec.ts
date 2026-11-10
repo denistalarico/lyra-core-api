@@ -45,6 +45,7 @@ import { SocialContentProductionStatusService } from '../social-planner/services
 import { CreativeAssetService } from './creative-asset.service';
 import { CreativeProductionReadinessService } from './creative-production-readiness.service';
 import { CreativeProductionService } from './creative-production.service';
+import { SocialApprovalPieceSourcesService } from '../social-approvals/social-approval-piece-sources.service';
 import type { CreativeStudioScope } from './creative-studio.scope';
 import { CreativeVersionApprovalService } from './creative-version-approval.service';
 import {
@@ -102,6 +103,8 @@ run('CS5-B creative production (real PostgreSQL)', () => {
     userId,
     role: 'member',
   });
+  /** Projects narrows a Member to their own tasks and followed projects. */
+  const adminCtx = (): RequestContext => ({ ...ctx(), role: 'admin' });
 
   let db: DataSource;
   let items: Repository<SocialContentItemEntity>;
@@ -1107,11 +1110,11 @@ run('CS5-B creative production (real PostgreSQL)', () => {
     it('creates one task through the Agency owner, explicit and idempotent under a double click', async () => {
       const item = await seedItem(scopeA);
       const [a, b] = await Promise.all([
-        production.createTask(ctx(), scopeA, item.id, {
+        production.createTask(adminCtx(), scopeA, item.id, {
           dueDate: '2026-10-15T12:00:00.000Z',
           assigneeId: teamMemberId,
         }),
-        production.createTask(ctx(), scopeA, item.id, {
+        production.createTask(adminCtx(), scopeA, item.id, {
           dueDate: '2026-10-15T12:00:00.000Z',
           assigneeId: teamMemberId,
         }),
@@ -1178,6 +1181,25 @@ run('CS5-B creative production (real PostgreSQL)', () => {
   });
 
   // ── CS5 Closeout: the production 404 on task link ──────────────────────
+
+  it('resolves library creatives to their current version, only inside the scope', async () => {
+    const sources = new SocialApprovalPieceSourcesService(db);
+    const first = await produce(scopeA);
+    const second = await produce(scopeA);
+    const foreign = await produce(scopeB);
+    const mediaOf = async (id: string) =>
+      (await versions.findOneByOrFail({ id })).mediaAssetId;
+    await expect(
+      sources.creativeMediaIds(scopeA, [
+        second.asset.id,
+        first.asset.id,
+        second.asset.id,
+      ]),
+    ).resolves.toEqual([await mediaOf(second.v1), await mediaOf(first.v1)]);
+    await expect(
+      sources.creativeMediaIds(scopeA, [foreign.asset.id]),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
 
   describe('task 404 (CS5 Closeout validation)', () => {
     /**
@@ -1317,7 +1339,7 @@ run('CS5-B creative production (real PostgreSQL)', () => {
         }),
       ).rejects.toBeInstanceOf(NotFoundException);
       await expect(
-        production.createTask(ctx(), agency, ownItem.id, {
+        production.createTask(adminCtx(), agency, ownItem.id, {
           projectId: w.ownProject.id,
         }),
       ).resolves.toMatchObject({ changed: true });

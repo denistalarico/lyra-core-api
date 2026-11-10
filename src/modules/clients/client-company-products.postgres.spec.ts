@@ -125,6 +125,9 @@ describePostgresIntegration()(
         ADD COLUMN IF NOT EXISTS resolution varchar(24),
         ADD COLUMN IF NOT EXISTS required_client_approver_ids jsonb,
         ADD COLUMN IF NOT EXISTS changes_kind varchar(16)`);
+      await admin.query(
+        `ALTER TABLE "${schema}"."leadflow_agents" ADD COLUMN IF NOT EXISTS paused_until timestamptz`,
+      );
       db = await new DataSource({
         ...options,
         name: 'ca6',

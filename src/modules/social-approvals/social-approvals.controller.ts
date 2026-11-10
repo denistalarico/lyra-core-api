@@ -31,6 +31,7 @@ import {
   ListSocialApprovalsDto,
 } from './dto/social-approval.dto';
 import {
+  ApprovalWorkTasksQueryDto,
   CreateStandalonePieceDto,
   FinishSocialApprovalPieceDto,
   SocialApprovalBoardQueryDto,
@@ -41,6 +42,7 @@ import {
 import { SocialApprovalBoardService } from './social-approval-board.service';
 import { SocialApprovalMediaService } from './social-approval-media.service';
 import { SocialApprovalPieceActionsService } from './social-approval-piece-actions.service';
+import { SocialApprovalPieceSourcesService } from './social-approval-piece-sources.service';
 import { SocialApprovalSettingsService } from './social-approval-settings.service';
 import { SocialApprovalBoardPreferencesService } from './social-approval-board-preferences.service';
 import { SocialApprovalInboxService } from './social-approval-inbox.service';
@@ -63,6 +65,7 @@ export class SocialApprovalsController {
     private readonly media: SocialApprovalMediaService,
     private readonly permissions: PlatformPermissionService,
     private readonly boardPreferences: SocialApprovalBoardPreferencesService,
+    private readonly pieceSources: SocialApprovalPieceSourcesService,
   ) {}
 
   private actorUserId(ctx: RequestContext): string {
@@ -163,14 +166,51 @@ export class SocialApprovalsController {
   }
   @Post('pieces/standalone')
   @RequirePermission('social.approvals.review.comment.assigned')
-  createStandalone(
+  async createStandalone(
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateStandalonePieceDto,
   ) {
+    const scope = resolveCompanyAwareScope(ctx);
+    const actor = this.actorUserId(ctx);
+    const work = await this.pieceSources.resolveWork(scope, actor, dto);
+    const mediaAssetIds =
+      dto.stepKind === 'media' && dto.creativeAssetIds?.length
+        ? await this.pieceSources.creativeMediaIds(scope, dto.creativeAssetIds)
+        : dto.mediaAssetIds;
     return this.pieceActions.createStandalone(
+      scope,
+      actor,
+      { ...dto, mediaAssetIds },
+      work ? { work } : {},
+    );
+  }
+  @Get('work-options/projects')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  workProjects(@RequestContextData() ctx: RequestContext) {
+    return this.pieceSources.projects(resolveCompanyAwareScope(ctx));
+  }
+  @Get('work-options/tasks')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  workTasks(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: ApprovalWorkTasksQueryDto,
+  ) {
+    return this.pieceSources.tasks(
       resolveCompanyAwareScope(ctx),
       this.actorUserId(ctx),
-      dto,
+      query.projectId,
+    );
+  }
+  @Get('work-options/tasks/:taskId/subtasks')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  workSubtasks(
+    @RequestContextData() ctx: RequestContext,
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+  ) {
+    return this.pieceSources.subtasks(
+      resolveCompanyAwareScope(ctx),
+      this.actorUserId(ctx),
+      taskId,
     );
   }
   @Patch('pieces/:pieceId/card')

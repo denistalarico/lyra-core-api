@@ -41,6 +41,7 @@ import { SocialApprovalBoardService } from './social-approval-board.service';
 import { SocialApprovalBoardPreferencesService } from './social-approval-board-preferences.service';
 import { SocialApprovalMediaService } from './social-approval-media.service';
 import { SocialApprovalPieceActionsService } from './social-approval-piece-actions.service';
+import { SocialApprovalPieceSourcesService } from './social-approval-piece-sources.service';
 import { SocialApprovalPieceSyncService } from './social-approval-piece-sync.service';
 import { SocialApprovalPiecesService } from './social-approval-pieces.service';
 import { SocialApprovalSettingsService } from './social-approval-settings.service';
@@ -97,6 +98,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
   ],
   controllers: [SocialApprovalsController],
   providers: [
+    SocialApprovalPieceSourcesService,
     SocialApprovalsCompanyProductParticipant,
     SocialApprovalsService,
     SocialApprovalAuthorityService,

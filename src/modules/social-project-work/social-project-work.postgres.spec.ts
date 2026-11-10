@@ -1,3 +1,4 @@
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { DataSource, type DataSourceOptions } from 'typeorm';
@@ -10,6 +11,7 @@ import { AddSocialApprovalViewedAudit1795800000000 } from '../../database/migrat
 import { AddSocialApprovalCommentVisibility1797400000000 } from '../../database/migrations/1797400000000-add-social-approval-comment-visibility';
 import { AllowOwnScopeSocialApprovals1798800000000 } from '../../database/migrations/1798800000000-allow-own-scope-social-approvals';
 import { CreateSocialApprovalPieces1802900000000 } from '../../database/migrations/1802900000000-create-social-approval-pieces';
+import { AddSocialApprovalPieceDescription1803400000000 } from '../../database/migrations/1803400000000-add-social-approval-piece-description';
 import { AddSocialApprovalCardCustomization1803300000000 } from '../../database/migrations/1803300000000-add-social-approval-card-customization';
 import { CreateSocialWorkLinks1803100000000 } from '../../database/migrations/1803100000000-create-social-work-links';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
@@ -45,6 +47,7 @@ import {
 } from '../social-approvals/entities';
 import { SocialApprovalAuthorityService } from '../social-approvals/social-approval-authority.service';
 import { SocialApprovalPieceActionsService } from '../social-approvals/social-approval-piece-actions.service';
+import { SocialApprovalPieceSourcesService } from '../social-approvals/social-approval-piece-sources.service';
 import { SocialApprovalPieceSyncService } from '../social-approvals/social-approval-piece-sync.service';
 import { SocialApprovalPiecesService } from '../social-approvals/social-approval-pieces.service';
 import { SocialApprovalSettingsService } from '../social-approvals/social-approval-settings.service';
@@ -236,6 +239,7 @@ run('AR4 Planner, Approvals and Projects (real PostgreSQL)', () => {
     await new AllowOwnScopeSocialApprovals1798800000000().up(runner);
     await new CreateSocialApprovalPieces1802900000000().up(runner);
     await new AddSocialApprovalCardCustomization1803300000000().up(runner);
+    await new AddSocialApprovalPieceDescription1803400000000().up(runner);
     await new CreateSocialWorkLinks1803100000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
@@ -1005,6 +1009,71 @@ run('AR4 Planner, Approvals and Projects (real PostgreSQL)', () => {
           where: { id: (result as { pieceId: string }).pieceId },
         });
       expect(piece.agencyClientId).toBeNull();
+    });
+
+    it('links a new avulsa only to work of its own client and keeps its description', async () => {
+      const sources = new SocialApprovalPieceSourcesService(db);
+      const { taskId, subtaskId } = await manualSubtask(clientA, 'Arte');
+      const sibling = await manualSubtask(clientA, 'Outra');
+      const foreign = await manualSubtask(null);
+      const foreignProject = await project(null);
+
+      const listed = (await sources.tasks(scopeA, ownerUser)).items.map(
+        (row) => row.id,
+      );
+      expect(listed).toContain(taskId);
+      expect(listed).not.toContain(foreign.taskId);
+      expect(await sources.subtasks(scopeA, ownerUser, taskId)).toEqual({
+        items: [{ id: subtaskId, title: 'Arte' }],
+      });
+      await expect(
+        sources.subtasks(scopeA, ownerUser, foreign.taskId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        sources.resolveWork(scopeA, ownerUser, { workTaskId: foreign.taskId }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        sources.resolveWork(scopeA, ownerUser, {
+          workProjectId: foreignProject.id,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        sources.resolveWork(scopeA, ownerUser, {
+          workTaskId: taskId,
+          workSubtaskId: sibling.subtaskId,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        sources.resolveWork(scopeA, ownerUser, { workSubtaskId: subtaskId }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      const work = await sources.resolveWork(scopeA, ownerUser, {
+        workTaskId: taskId,
+        workSubtaskId: subtaskId,
+      });
+      const { id } = await actions.createStandalone(
+        scopeA,
+        ownerUser,
+        {
+          title: 'Peça',
+          stepKind: 'text',
+          text: 'conteúdo',
+          description: '  Sobre a peça ',
+        },
+        { work: work! },
+      );
+      const piece = await db
+        .getRepository(SocialApprovalPieceEntity)
+        .findOneOrFail({ where: { id } });
+      expect(piece.description).toBe('Sobre a peça');
+      expect(piece.origin).toBe('approvals');
+      const step = await db
+        .getRepository(SocialApprovalStepEntity)
+        .findOneOrFail({ where: { pieceId: id } });
+      expect(step).toMatchObject({
+        workTaskId: taskId,
+        workSubtaskId: subtaskId,
+      });
     });
 
     it('offers nothing to a client without Social', async () => {

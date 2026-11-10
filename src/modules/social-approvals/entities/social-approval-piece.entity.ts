@@ -74,6 +74,7 @@ export class SocialApprovalPieceEntity {
   sourceId!: string | null;
   @Column({ type: 'varchar', length: 24 }) origin!: SocialApprovalPieceOrigin;
   @Column({ type: 'varchar', length: 255 }) title!: string;
+  @Column({ type: 'text', nullable: true }) description!: string | null;
   @Column({
     name: 'send_order',
     type: 'varchar',

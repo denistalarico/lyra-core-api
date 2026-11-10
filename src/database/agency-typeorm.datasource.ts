@@ -295,6 +295,7 @@ import { CreateSocialApprovalPieces1802900000000 } from './migrations/1802900000
 import { BackfillSocialApprovalPieces1802900100000 } from './migrations/1802900100000-backfill-social-approval-pieces';
 import { CreateSocialWorkLinks1803100000000 } from './migrations/1803100000000-create-social-work-links';
 import { CreateSocialApprovalBoardPreferences1803200000000 } from './migrations/1803200000000-create-social-approval-board-preferences';
+import { AddSocialApprovalPieceDescription1803400000000 } from './migrations/1803400000000-add-social-approval-piece-description';
 import { AddSocialApprovalCardCustomization1803300000000 } from './migrations/1803300000000-add-social-approval-card-customization';
 import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
 import { ScopeSocialOrganicAssetsByCompany1794700000000 } from './migrations/1794700000000-scope-social-organic-assets-by-company';
@@ -618,5 +619,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialWorkLinks1803100000000,
     CreateSocialApprovalBoardPreferences1803200000000,
     AddSocialApprovalCardCustomization1803300000000,
+    AddSocialApprovalPieceDescription1803400000000,
   ],
 });

@@ -112,6 +112,21 @@ export class CreateStandalonePieceDto {
   @ArrayMaxSize(20)
   @IsUUID('all', { each: true })
   mediaAssetIds?: string[];
+  @IsOptional() @IsString() @MaxLength(2000) description?: string;
+  /** Library creatives; the server sends the current version of each. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(20)
+  @IsUUID('all', { each: true })
+  creativeAssetIds?: string[];
+  @IsOptional() @IsUUID() workProjectId?: string;
+  @IsOptional() @IsUUID() workTaskId?: string;
+  @IsOptional() @IsUUID() workSubtaskId?: string;
+}
+
+export class ApprovalWorkTasksQueryDto {
+  @IsOptional() @IsUUID() projectId?: string;
 }
 
 export class FinishSocialApprovalPieceDto {
