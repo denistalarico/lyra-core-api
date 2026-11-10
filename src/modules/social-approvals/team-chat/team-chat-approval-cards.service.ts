@@ -35,7 +35,7 @@ import type { TeamChatApprovalCardPublisher } from '../team-chat-approval-card.p
 const AGENCY_CONNECTION = 'agency';
 const SOURCE_MODULE = 'social_approvals';
 const SENDER = {
-  displayName: 'Aprovações',
+  displayName: 'Orion',
   agentType: 'social_approvals',
 } as const;
 const MAX_BATCH_ITEMS = 50;
