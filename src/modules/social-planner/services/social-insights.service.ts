@@ -55,6 +55,10 @@ export type SocialInsightsView = {
   sources: { googleTrends: SocialInsightsSourceStatus; googleNews: SocialInsightsSourceStatus };
 };
 
+export type SocialNewsTickerView = Pick<SocialInsightsView, 'generatedAt' | 'segment' | 'ticker'> & {
+  sources: { googleNews: SocialInsightsSourceStatus };
+};
+
 const NEWS_TTL_MS = 30 * 60_000;
 const TRENDS_TTL_MS = 50 * 60_000;
 const FETCH_TIMEOUT_MS = 8_000;
@@ -115,11 +119,7 @@ export class SocialInsightsService {
     if (!nationalDay) await this.fetchFeed(trendingSearchesUrl(country), TRENDS_TTL_MS);
 
     const nicheDay = toNews(day.items, 8);
-    const nicheTicker = nicheDay.length >= 5 ? nicheDay : toNews(week.items, 8);
-    const ticker: SocialInsightsTickerItem[] = [
-      ...nicheTicker.map((item) => ({ ...item, scope: 'niche' as const })),
-      ...toNews(national.items, 8).map((item) => ({ ...item, scope: 'national' as const })),
-    ];
+    const ticker = buildTicker(day.items, week.items, national.items);
 
     const newsStatuses = [day.status, week.status, month.status, national.status];
     const trendsCached = this.cache.get(trendingSearchesUrl(country));
@@ -142,12 +142,28 @@ export class SocialInsightsService {
           : trendsCached
             ? 'stale'
             : 'unavailable',
-        googleNews: newsStatuses.every((status) => status === 'unavailable')
-          ? 'unavailable'
-          : newsStatuses.some((status) => status !== 'ok')
-            ? 'stale'
-            : 'ok',
+        googleNews: combineStatuses(newsStatuses),
       },
+    };
+  }
+
+  /**
+   * The news ticker alone, for Overviews outside Social (Agency Dashboard,
+   * LeadFlow). Public headlines only: `businessMode` just picks the niche
+   * query, and an unknown or missing mode falls back to the generic segment.
+   */
+  async getNewsTicker(businessMode: string | null, now = new Date()): Promise<SocialNewsTickerView> {
+    const segment = resolveInsightsSegment(businessMode);
+    const [day, week, national] = await Promise.all([
+      this.fetchFeed(nicheNewsUrl(segment, 'day'), NEWS_TTL_MS),
+      this.fetchFeed(nicheNewsUrl(segment, 'week'), NEWS_TTL_MS),
+      this.fetchFeed(NATIONAL_NEWS_URL, NEWS_TTL_MS),
+    ]);
+    return {
+      generatedAt: now.toISOString(),
+      segment: { key: segment.key, label: segment.label },
+      ticker: buildTicker(day.items, week.items, national.items),
+      sources: { googleNews: combineStatuses([day.status, week.status, national.status]) },
     };
   }
 
@@ -331,6 +347,21 @@ export class SocialInsightsService {
     const oldest = [...this.cache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
     if (oldest) this.cache.delete(oldest[0]);
   }
+}
+
+/** Niche headlines of the day (the week's when the day is thin), then national. */
+function buildTicker(day: RssItem[], week: RssItem[], national: RssItem[]): SocialInsightsTickerItem[] {
+  const nicheDay = toNews(day, 8);
+  const niche = nicheDay.length >= 5 ? nicheDay : toNews(week, 8);
+  return [
+    ...niche.map((item) => ({ ...item, scope: 'niche' as const })),
+    ...toNews(national, 8).map((item) => ({ ...item, scope: 'national' as const })),
+  ];
+}
+
+function combineStatuses(statuses: SocialInsightsSourceStatus[]): SocialInsightsSourceStatus {
+  if (statuses.every((status) => status === 'unavailable')) return 'unavailable';
+  return statuses.some((status) => status !== 'ok') ? 'stale' : 'ok';
 }
 
 function toNews(items: RssItem[], limit: number): SocialInsightsNewsItem[] {

@@ -96,4 +96,21 @@ describe('SocialInsightsService', () => {
     expect(view.sources).toEqual({ googleTrends: 'unavailable', googleNews: 'unavailable' });
     expect(view.dates.length).toBeGreaterThan(0);
   });
+
+  it('serves the ticker alone without touching trends, the brand or the snapshots', async () => {
+    const { service, urls, repository } = build();
+    const view = await service.getNewsTicker('agency_services', now);
+
+    expect(view.segment.label).toBe('Marketing e Marketing Digital');
+    expect(view.ticker[0]).toMatchObject({ title: 'Notícia A', scope: 'niche' });
+    expect(view.sources).toEqual({ googleNews: 'ok' });
+    expect(urls.some((url) => url.includes('trends.google.com'))).toBe(false);
+    expect(repository.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the generic segment for an unknown mode', async () => {
+    const { service } = build();
+    const view = await service.getNewsTicker('not_a_mode', now);
+    expect(view.segment.key).toBeNull();
+  });
 });

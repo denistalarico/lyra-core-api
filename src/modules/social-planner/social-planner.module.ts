@@ -20,6 +20,7 @@ import {
   SocialPublishingCadenceEntity,
   SocialTrendSnapshotEntity,
 } from './entities';
+import { NewsTickerController } from './news-ticker.controller';
 import { SocialPlannerController } from './social-planner.controller';
 import { SocialContentPublicationGuard } from './services/content-publication-guard.port';
 import { SocialCampaignService } from './services/social-campaign.service';
@@ -98,7 +99,7 @@ import { SocialInsightsScheduler } from './services/social-insights.scheduler';
       'agency',
     ),
   ],
-  controllers: [SocialPlannerController, SocialContentReferenceController],
+  controllers: [SocialPlannerController, SocialContentReferenceController, NewsTickerController],
   providers: [
     // AR4 — filled by the Social/Projects join module on init (D-30).
     SocialPlanContentChangeRegistry,
