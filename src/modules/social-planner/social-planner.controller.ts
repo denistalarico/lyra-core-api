@@ -710,9 +710,9 @@ export class SocialPlannerController {
    * Social Overview insights: trending searches (day/week/month), niche news,
    * the news ticker and the next commemorative dates. Public feeds read and
    * cached server-side; the agency reads as Marketing, a client by its
-   * Business Mode.
+   * Business Mode. Agency surface only: exposing it to the Client Area is a
+   * deliberate boundary change (CA7/CA10 specs) for when that UI exists.
    */
-  @ClientAreaExposed('social_planner')
   @Get('insights')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   getInsights(@RequestContextData() ctx: RequestContext) {
