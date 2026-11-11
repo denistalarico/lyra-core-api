@@ -12,3 +12,4 @@ export * from './social-campaign-template.entity';
 export * from './social-campaign-instance.entity';
 export * from './social-editorial-pillar.entity';
 export * from './social-content-idea.entity';
+export * from './social-trend-snapshot.entity';

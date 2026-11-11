@@ -18,6 +18,7 @@ import {
   SocialContentRevisionEntity,
   SocialPlannerSettingsEntity,
   SocialPublishingCadenceEntity,
+  SocialTrendSnapshotEntity,
 } from './entities';
 import { SocialPlannerController } from './social-planner.controller';
 import { SocialContentPublicationGuard } from './services/content-publication-guard.port';
@@ -39,6 +40,8 @@ import { SocialContentReferenceController } from './social-content-reference.con
 import { MediaAssetEntity } from '../../common/media-assets/media-asset.entity';
 import { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
+import { SocialInsightsService } from './services/social-insights.service';
+import { SocialInsightsScheduler } from './services/social-insights.scheduler';
 
 @Module({
   imports: [
@@ -89,6 +92,8 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
          * module's read methods perform — see the port's doc comment.
          */
         LeadFlowClientSettingsEntity,
+        /** Social Overview trends: public hourly observations (not tenant-scoped). */
+        SocialTrendSnapshotEntity,
       ],
       'agency',
     ),
@@ -116,6 +121,9 @@ import { SocialPublishingCadenceService } from './services/social-publishing-cad
     SocialBrandContextPort,
     SocialPlanGenerationProvider,
     SocialPlanGenerationService,
+    /** Social Overview: trends, news ticker and upcoming dates from public feeds. */
+    SocialInsightsService,
+    SocialInsightsScheduler,
     /**
      * The only provider here that runs on a timer. It is inert unless
      * `SOCIAL_COPY_GENERATION_PROVIDER_MODE` is set away from its `disabled`

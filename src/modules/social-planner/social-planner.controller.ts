@@ -64,6 +64,7 @@ import { SocialCopyGenerationService } from './services/social-copy-generation.s
 import { SocialPlanGenerationService } from './services/social-plan-generation.service';
 import { SocialPlannerSettingsService } from './services/social-planner-settings.service';
 import { SocialPublishingCadenceService } from './services/social-publishing-cadence.service';
+import { SocialInsightsService } from './services/social-insights.service';
 import { SocialApprovalsService } from '../social-approvals/social-approvals.service';
 
 const SOCIAL_PLANNER_VIEW_PERMISSION = 'social.planner.calendar.view.client';
@@ -110,6 +111,7 @@ export class SocialPlannerController {
     private readonly socialCopyGenerationService: SocialCopyGenerationService,
     private readonly socialPlanGenerationService: SocialPlanGenerationService,
     private readonly socialApprovalsService: SocialApprovalsService,
+    private readonly socialInsightsService: SocialInsightsService,
   ) {}
 
   @ClientAreaExposed('social_planner')
@@ -704,6 +706,19 @@ export class SocialPlannerController {
    * date. Country and business mode default to what the Brand Kit and the
    * client's LeadFlow settings already declare.
    */
+  /**
+   * Social Overview insights: trending searches (day/week/month), niche news,
+   * the news ticker and the next commemorative dates. Public feeds read and
+   * cached server-side; the agency reads as Marketing, a client by its
+   * Business Mode.
+   */
+  @ClientAreaExposed('social_planner')
+  @Get('insights')
+  @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
+  getInsights(@RequestContextData() ctx: RequestContext) {
+    return this.socialInsightsService.getInsights(this.requireScope(ctx));
+  }
+
   @ClientAreaExposed('social_planner')
   @Get('commemorative-dates')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)

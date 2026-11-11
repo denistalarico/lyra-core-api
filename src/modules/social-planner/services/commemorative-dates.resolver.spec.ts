@@ -1,4 +1,8 @@
-import { easterSunday } from '../catalog/commemorative-dates.catalog';
+import {
+  COMMEMORATIVE_DATES,
+  easterSunday,
+} from '../catalog/commemorative-dates.catalog';
+import { LeadFlowBusinessMode } from '../../leadflow-settings/enums/leadflow-business-mode.enum';
 import {
   resolveCommemorativeDates,
   resolveCommemorativeDatesByKey,
@@ -231,5 +235,38 @@ describe('commemorative dates resolver', () => {
     // Capped at six years of expansion rather than a thousand.
     const years = new Set(dates.map((entry) => entry.date.slice(0, 4)));
     expect(years.size).toBeLessThanOrEqual(6);
+  });
+
+  describe('catalog coverage', () => {
+    it('has unique keys', () => {
+      const keys = COMMEMORATIVE_DATES.map((item) => item.key);
+      expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    /**
+     * Every business mode must have dates of its own beyond the national
+     * calendar — otherwise "datas do seu nicho" is just the holiday list.
+     */
+    it.each(Object.values(LeadFlowBusinessMode))(
+      'gives %s at least three sector dates in Brazil',
+      (mode) => {
+        const own = COMMEMORATIVE_DATES.filter(
+          (item) =>
+            item.country !== 'US' &&
+            item.businessModes?.includes(mode as never),
+        );
+        expect(own.length).toBeGreaterThanOrEqual(3);
+      },
+    );
+
+    it('resolves the new rule-based sector date (World Habitat Day, 1st Monday of October)', () => {
+      const dates = resolveCommemorativeDates({
+        periodStart: '2026-10-01',
+        periodEnd: '2026-10-31',
+        country: 'BR',
+        businessMode: 'real_estate',
+      });
+      expect(dates.find((entry) => entry.key === 'world_habitat_day')?.date).toBe('2026-10-05');
+    });
   });
 });

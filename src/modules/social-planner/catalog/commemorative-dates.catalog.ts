@@ -114,6 +114,31 @@ export function easterSunday(year: number): { month: number; day: number } {
 }
 
 /**
+ * Compact constructors for the fixed-day sector and commercial rows. The
+ * country is assigned where they are spread into the catalog (`br_` keys are
+ * Brazilian, the rest are international observances).
+ */
+function sectorDate(
+  key: string,
+  label: string,
+  month: number,
+  day: number,
+  businessModes: SocialBusinessModeKey[] | null,
+): Omit<CommemorativeDateCatalogItem, 'country'> {
+  return { key, label, significance: 'sector', rule: { kind: 'fixed', month, day }, businessModes };
+}
+
+function commercialDate(
+  key: string,
+  label: string,
+  month: number,
+  day: number,
+  businessModes: SocialBusinessModeKey[] | null,
+): Omit<CommemorativeDateCatalogItem, 'country'> {
+  return { ...sectorDate(key, label, month, day, businessModes), significance: 'commercial' };
+}
+
+/**
  * The catalog itself.
  *
  * Scope of this etapa: GLOBAL dates plus Brazil and the United States in full.
@@ -440,6 +465,80 @@ export const COMMEMORATIVE_DATES: CommemorativeDateCatalogItem[] = [
     significance: 'sector',
     rule: { kind: 'fixed', month: 10, day: 28 },
     businessModes: ['automotive'],
+  },
+
+  // ------------------------------------------- BRAZIL: sector depth (2026-11) --
+  // Every business mode gets dates of its own beyond the national calendar.
+  // Same conservative tagging rule as above: only modes that would post.
+  ...[
+    // Agency / marketing
+    sectorDate('br_advertiser_day', 'Dia do Publicitário', 2, 1, ['agency_services']),
+    sectorDate('br_journalist_day', 'Dia do Jornalista', 4, 7, ['agency_services']),
+    sectorDate('world_creativity_day', 'Dia Mundial da Criatividade e Inovação', 4, 21, ['agency_services', 'education_courses']),
+    sectorDate('br_marketing_day', 'Dia do Profissional de Marketing', 5, 8, ['agency_services']),
+    sectorDate('internet_day', 'Dia da Internet', 5, 17, ['agency_services', 'ecommerce_light']),
+    sectorDate('social_media_day', 'Dia Mundial das Redes Sociais', 6, 30, ['agency_services', 'ecommerce_light']),
+    sectorDate('world_photography_day', 'Dia Mundial da Fotografia', 8, 19, ['agency_services', 'events_tourism']),
+    sectorDate('br_designer_day', 'Dia do Designer', 11, 5, ['agency_services']),
+    // Small business / local services / retail
+    sectorDate('br_small_business_day', 'Dia da Micro e Pequena Empresa', 10, 5, ['local_services', 'retail_store', 'agency_services', 'legal_accounting']),
+    sectorDate('br_electrician_day', 'Dia do Eletricista', 10, 17, ['local_services']),
+    sectorDate('br_merchant_day', 'Dia do Comerciante', 7, 16, ['retail_store', 'local_services']),
+    commercialDate('br_grandparents_day', 'Dia dos Avós', 7, 26, ['retail_store', 'ecommerce_light', 'restaurants_food']),
+    // Health / clinics / wellness
+    sectorDate('world_physical_activity_day', 'Dia Mundial da Atividade Física', 4, 6, ['fitness_wellness']),
+    sectorDate('world_health_day', 'Dia Mundial da Saúde', 4, 7, ['clinics_esthetics', 'fitness_wellness']),
+    sectorDate('nursing_day', 'Dia da Enfermagem', 5, 12, ['clinics_esthetics']),
+    sectorDate('yoga_day', 'Dia Internacional do Yoga', 6, 21, ['fitness_wellness']),
+    sectorDate('br_psychologist_day', 'Dia do Psicólogo', 8, 27, ['clinics_esthetics', 'fitness_wellness']),
+    sectorDate('br_yellow_september', 'Início do Setembro Amarelo', 9, 1, ['clinics_esthetics', 'fitness_wellness']),
+    sectorDate('world_heart_day', 'Dia Mundial do Coração', 9, 29, ['fitness_wellness', 'clinics_esthetics']),
+    sectorDate('br_pink_october', 'Início do Outubro Rosa', 10, 1, ['clinics_esthetics', 'fitness_wellness']),
+    sectorDate('br_physiotherapist_day', 'Dia do Fisioterapeuta', 10, 13, ['clinics_esthetics', 'fitness_wellness']),
+    sectorDate('br_blue_november', 'Início do Novembro Azul', 11, 1, ['clinics_esthetics', 'fitness_wellness']),
+    // Food
+    sectorDate('br_barbecue_day', 'Dia do Churrasco', 4, 24, ['restaurants_food']),
+    sectorDate('br_coffee_day', 'Dia Nacional do Café', 5, 24, ['restaurants_food']),
+    sectorDate('burger_day', 'Dia do Hambúrguer', 5, 28, ['restaurants_food']),
+    sectorDate('world_chocolate_day', 'Dia Mundial do Chocolate', 7, 7, ['restaurants_food', 'retail_store']),
+    sectorDate('br_pizza_day', 'Dia da Pizza', 7, 10, ['restaurants_food']),
+    sectorDate('br_waiter_day', 'Dia do Garçom', 8, 11, ['restaurants_food']),
+    sectorDate('world_food_day', 'Dia Mundial da Alimentação', 10, 16, ['restaurants_food', 'fitness_wellness']),
+    // Real estate
+    { ...sectorDate('world_habitat_day', 'Dia Mundial do Habitat', 10, 1, ['real_estate']), rule: { kind: 'weekday' as const, month: 10, weekday: 2, ordinal: 1 } },
+    sectorDate('br_engineer_day', 'Dia do Engenheiro', 12, 11, ['real_estate']),
+    // Education
+    sectorDate('world_book_day', 'Dia Mundial do Livro', 4, 23, ['education_courses']),
+    sectorDate('br_education_day', 'Dia da Educação', 4, 28, ['education_courses']),
+    sectorDate('br_student_day', 'Dia do Estudante', 8, 11, ['education_courses']),
+    // Automotive
+    sectorDate('br_yellow_may', 'Início do Maio Amarelo', 5, 1, ['automotive']),
+    sectorDate('br_driver_day', 'Dia do Motorista', 7, 25, ['automotive']),
+    sectorDate('br_motorcyclist_day', 'Dia do Motociclista', 7, 27, ['automotive']),
+    sectorDate('br_traffic_day', 'Dia Nacional do Trânsito', 9, 25, ['automotive']),
+    // Events / tourism
+    sectorDate('br_national_tourism_day', 'Dia Nacional do Turismo', 5, 8, ['events_tourism']),
+    commercialDate('br_sao_joao', 'São João (Festas Juninas)', 6, 24, null),
+    // Legal / accounting
+    sectorDate('br_taxpayer_day', 'Dia do Contribuinte', 5, 25, ['legal_accounting']),
+    sectorDate('br_administrator_day', 'Dia do Administrador', 9, 9, ['legal_accounting']),
+    sectorDate('br_justice_day', 'Dia da Justiça', 12, 8, ['legal_accounting']),
+  ].map((item) => ({ ...item, country: item.key.startsWith('br_') ? 'BR' : 'GLOBAL' })),
+  {
+    key: 'new_years_eve',
+    label: 'Véspera de Ano Novo',
+    country: 'GLOBAL',
+    significance: 'national',
+    rule: { kind: 'fixed', month: 12, day: 31 },
+    businessModes: null,
+  },
+  {
+    key: 'singles_day',
+    label: '11.11 (Singles Day)',
+    country: 'GLOBAL',
+    significance: 'commercial',
+    rule: { kind: 'fixed', month: 11, day: 11 },
+    businessModes: ['ecommerce_light', 'retail_store'],
   },
 
   // ------------------------------------------------------------------- US ---

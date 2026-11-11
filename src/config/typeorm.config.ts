@@ -436,6 +436,7 @@ import {
   SocialPlannerSettingsEntity,
   SocialPlanEntity,
   SocialPublishingCadenceEntity,
+  SocialTrendSnapshotEntity,
 } from '../modules/social-planner/entities';
 
 import { ClientAreaMembershipEntity } from '../modules/client-area/entities/client-area-membership.entity';
@@ -793,6 +794,7 @@ export const agencyEntities = [
   SocialCampaignInstanceEntity,
   SocialEditorialPillarEntity,
   SocialContentIdeaEntity,
+  SocialTrendSnapshotEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

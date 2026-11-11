@@ -89,6 +89,7 @@ describe('SocialPlannerController', () => {
     generatePlan: jest.fn(),
   };
   const approvalsService = { create: jest.fn() };
+  const insightsService = { getInsights: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -102,6 +103,7 @@ describe('SocialPlannerController', () => {
       copyGenerationService as unknown as SocialCopyGenerationService,
       planGenerationService as unknown as SocialPlanGenerationService,
       approvalsService as never,
+      insightsService as never,
     );
   });
 
