@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MediaAssetResolverService } from '../../../common/media-assets';
@@ -56,6 +56,8 @@ type PayloadSnapshotShape = {
  */
 @Injectable()
 export class SocialPublicationExecutorService implements SocialPublicationExecutor {
+  private readonly logger = new Logger(SocialPublicationExecutorService.name);
+
   constructor(
     @InjectRepository(SocialOrganicAssetEntity, 'agency')
     private readonly assetsRepository: Repository<SocialOrganicAssetEntity>,
@@ -104,6 +106,9 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
 
     const providerValidation = adapter.validate(payload);
     if (!providerValidation.valid) {
+      this.logger.warn(
+        `publication ${publication.id} rejected by ${publication.provider} validation: ${JSON.stringify(providerValidation.issues)}`,
+      );
       throw new SocialPublicationExecutionError(
         'payload_invalid',
         'provider_payload_rejected',
@@ -303,28 +308,41 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       : publication.mediaAssetId
         ? [publication.mediaAssetId]
         : [];
+    // Hashtags are published as part of the caption (appended at the end) and
+    // the CTA is a planning-only field: neither reaches the adapter on its own.
     return {
       assetType,
       placement,
-      caption:
-        !mediaOnly && typeof snapshot.caption === 'string'
-          ? snapshot.caption
-          : null,
+      caption: mediaOnly ? null : this.captionWithHashtags(snapshot),
       firstComment:
         !mediaOnly && typeof snapshot.firstComment === 'string'
           ? snapshot.firstComment
           : null,
-      hashtags: !mediaOnly && Array.isArray(snapshot.hashtags)
-        ? snapshot.hashtags.filter(
-            (entry): entry is string => typeof entry === 'string',
-          )
-        : [],
-      cta:
-        !mediaOnly && typeof snapshot.cta === 'string' ? snapshot.cta : null,
+      hashtags: [],
+      cta: null,
       mediaAssetId: publication.mediaAssetId,
       mediaAssetIds,
       scheduledAt: publication.scheduledAt,
     };
+  }
+
+  private captionWithHashtags(snapshot: PayloadSnapshotShape): string | null {
+    const caption =
+      typeof snapshot.caption === 'string' ? snapshot.caption.trimEnd() : '';
+    const existing = new Set(caption.toLowerCase().split(/\s+/));
+    const tags = (Array.isArray(snapshot.hashtags) ? snapshot.hashtags : [])
+      .filter((entry): entry is string => typeof entry === 'string')
+      .flatMap((entry) => entry.split(/\s+/))
+      .filter((tag) => tag.length > 0)
+      .map((tag) => (tag.startsWith('#') ? tag : `#${tag}`))
+      .filter((tag) => {
+        const key = tag.toLowerCase();
+        if (existing.has(key)) return false;
+        existing.add(key);
+        return true;
+      });
+    if (!tags.length) return caption || null;
+    return caption ? `${caption}\n\n${tags.join(' ')}` : tags.join(' ');
   }
 
   private async requireAsset(

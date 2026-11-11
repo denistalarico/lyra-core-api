@@ -416,6 +416,51 @@ describe('SocialPublicationExecutorService', () => {
       );
     });
 
+    it('appends hashtags to the Feed caption and drops the planning-only CTA', async () => {
+      const adapter = buildAdapter();
+      registry.resolve.mockReturnValue(adapter);
+
+      await executor.publish(
+        buildPublication({
+          payloadSnapshot: {
+            placement: 'feed',
+            caption: 'Fale conosco!\n.\n.\n',
+            cta: 'Fale conosco',
+            hashtags: ['#Lyra #MetaAds', 'FrancaSP', '#lyra'],
+            firstComment: null,
+          },
+        }),
+      );
+
+      expect(adapter.validate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          placement: 'feed',
+          caption: 'Fale conosco!\n.\n.\n\n#Lyra #MetaAds #FrancaSP',
+          cta: null,
+          hashtags: [],
+        }),
+      );
+    });
+
+    it('does not repeat hashtags already present in the caption', async () => {
+      const adapter = buildAdapter();
+      registry.resolve.mockReturnValue(adapter);
+
+      await executor.publish(
+        buildPublication({
+          payloadSnapshot: {
+            placement: 'feed',
+            caption: 'Texto #lyra',
+            hashtags: ['#Lyra'],
+          },
+        }),
+      );
+
+      expect(adapter.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ caption: 'Texto #lyra', hashtags: [] }),
+      );
+    });
+
     it('calls adapter.validate before any media resolution or publish', async () => {
       const adapter = buildAdapter({
         validate: jest.fn(
