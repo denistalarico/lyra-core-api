@@ -3,8 +3,9 @@ import type { SocialOrganicPostMetricDailyEntity } from '../entities/social-orga
 /**
  * Latest locally-observed organic metrics for one Lyra publication.
  *
- * Views and likes are provider lifetime snapshots; reach and shares are the
- * latest daily fact. The explicit granularities keep consumers from adding
+ * Views and likes are provider lifetime snapshots. Reach and shares prefer
+ * synchronized lifetime snapshots, falling back to historical daily facts.
+ * The explicit granularities keep consumers from adding
  * non-additive reach or treating a snapshot as a daily flow. Missing provider
  * values remain null, rather than becoming a misleading zero.
  */
@@ -17,12 +18,12 @@ export type SocialOrganicPublicationMetricsView = {
   viewsGranularity: 'lifetime';
   viewsObservedAt: string | null;
   reach: string | null;
-  reachGranularity: 'daily';
+  reachGranularity: 'daily' | 'lifetime';
   likes: string | null;
   likesGranularity: 'lifetime';
   likesObservedAt: string | null;
   shares: string | null;
-  sharesGranularity: 'daily';
+  sharesGranularity: 'daily' | 'lifetime';
 };
 
 export function toSocialOrganicPublicationMetricsView(
@@ -40,12 +41,12 @@ export function toSocialOrganicPublicationMetricsView(
     views,
     viewsGranularity: 'lifetime',
     viewsObservedAt: viewsObservedAt?.toISOString() ?? null,
-    reach: fact.reach,
-    reachGranularity: 'daily',
-    likes: fact.likesLifetime,
+    reach: fact.reachLifetime ?? fact.reach,
+    reachGranularity: fact.reachLifetime != null ? 'lifetime' : 'daily',
+    likes: fact.likesLifetime ?? fact.reactionsLike ?? null,
     likesGranularity: 'lifetime',
     likesObservedAt: fact.likesLifetimeObservedAt?.toISOString() ?? null,
-    shares: fact.shares,
-    sharesGranularity: 'daily',
+    shares: fact.sharesLifetime ?? fact.shares,
+    sharesGranularity: fact.sharesLifetime != null ? 'lifetime' : 'daily',
   };
 }
