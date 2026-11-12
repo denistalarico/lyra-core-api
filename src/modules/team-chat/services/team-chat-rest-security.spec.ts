@@ -542,6 +542,17 @@ describe('Team Chat unread watermark', () => {
     expect(counted).toContainEqual({ watermark: joinedAt });
   });
 
+  it("never counts the reader's own messages as unread", async () => {
+    const { service, counted } = makeUnreadHarness({
+      lastReadAt: new Date('2026-02-01T00:00:00.000Z'),
+      joinedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    await service.listEnriched(memberA, {});
+
+    expect(counted).toContainEqual({ readerUserId: memberA.userId });
+  });
+
   it('counts nothing for a legacy row with neither timestamp', async () => {
     const { service } = makeUnreadHarness({ lastReadAt: null, joinedAt: null });
 

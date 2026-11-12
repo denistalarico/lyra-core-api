@@ -253,15 +253,25 @@ export class TeamChatChannelsService {
       return 0;
     }
 
-    return this.messagesRepository
+    const query = this.messagesRepository
       .createQueryBuilder('message')
       .where('message.tenant_id = :tenantId', { tenantId: context.tenantId })
       .andWhere('message.workspace_id = :workspaceId', {
         workspaceId: context.workspaceId,
       })
       .andWhere('message.channel_id = :channelId', { channelId })
-      .andWhere('message.created_at > :watermark', { watermark })
-      .getCount();
+      .andWhere('message.created_at > :watermark', { watermark });
+
+    // A própria mensagem nunca é "não lida" para quem a enviou; cards do
+    // sistema (sender nulo) continuam contando.
+    if (context.userId) {
+      query.andWhere(
+        '(message.sender_user_id IS NULL OR message.sender_user_id <> :readerUserId)',
+        { readerUserId: context.userId },
+      );
+    }
+
+    return query.getCount();
   }
 
   async create(context: TeamChatContext, dto: CreateTeamChatChannelDto) {
