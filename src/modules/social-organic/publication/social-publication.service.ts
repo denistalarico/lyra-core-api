@@ -117,6 +117,29 @@ export class SocialPublicationService {
       );
     }
     const mediaAssetId = mediaAssetIds[0] ?? null;
+    const previousAttempts = await this.publicationsRepository.find({
+      where: {
+        ...this.scopeWhere(scope),
+        contentItemId: contentItem.id,
+        destinationId: destination.id,
+        assetId: asset.id,
+      },
+    });
+    if (
+      previousAttempts.some(
+        (attempt) =>
+          (['published', 'scheduled', 'queued', 'processing'].includes(
+            attempt.status,
+          ) ||
+            Boolean(attempt.externalPublicationId)) &&
+          (!destination.placement.toLowerCase().startsWith('story') ||
+            attempt.mediaAssetId === mediaAssetId),
+      )
+    ) {
+      throw new ConflictException(
+        'This destination or Story frame has already been sent.',
+      );
+    }
 
     for (const candidateMediaAssetId of mediaAssetIds) {
       // Schedule-time (P3.1): resolves scope and validates the asset against

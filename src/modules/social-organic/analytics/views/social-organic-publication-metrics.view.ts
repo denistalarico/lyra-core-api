@@ -15,6 +15,9 @@ export type SocialOrganicPublicationMetricsView = {
   syncedAt: string;
   isPartial: boolean;
   views: string | null;
+  /** Facebook Reel counters retain their provider meanings. */
+  plays?: string | null;
+  uniqueViewers?: string | null;
   viewsGranularity: 'lifetime';
   viewsObservedAt: string | null;
   reach: string | null;

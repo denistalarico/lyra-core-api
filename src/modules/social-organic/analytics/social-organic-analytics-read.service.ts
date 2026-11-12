@@ -772,7 +772,95 @@ export class SocialOrganicAnalyticsReadService {
       .addOrderBy('fact.syncedAt', 'DESC')
       .getMany();
 
-    return facts.map(toSocialOrganicPublicationMetricsView);
+    const items = facts.map(toSocialOrganicPublicationMetricsView);
+    const missingIds = publicationIds.filter(
+      (id) => !items.some((item) => item.publicationId === id),
+    );
+    if (!missingIds.length) return items;
+
+    // Collectors discover provider IDs independently of local queue IDs. Stories
+    // and Facebook reels have their own facts and never enter the daily table.
+    const rows = await this.postMetricsRepository.query<
+      Array<
+        Omit<
+          SocialOrganicPublicationMetricsView,
+          'syncedAt' | 'viewsObservedAt' | 'likesObservedAt'
+        > & {
+          syncedAt: string | Date;
+          viewsObservedAt: string | Date | null;
+          likesObservedAt: string | Date | null;
+        }
+      >
+    >(
+      `
+      SELECT publication.id AS "publicationId", observation.*
+      FROM social_publications publication
+      INNER JOIN social_organic_assets asset ON asset.id = publication.asset_id
+      CROSS JOIN LATERAL (
+        SELECT * FROM (
+          SELECT fact.metric_date::text AS "metricDate", fact.synced_at AS "syncedAt",
+            fact.is_partial AS "isPartial",
+            COALESCE(fact.video_views_lifetime, fact.impressions_lifetime)::text AS views,
+            'lifetime'::text AS "viewsGranularity",
+            COALESCE(fact.video_views_lifetime_observed_at, fact.impressions_lifetime_observed_at) AS "viewsObservedAt",
+            COALESCE(fact.reach_lifetime, fact.reach)::text AS reach,
+            CASE WHEN fact.reach_lifetime IS NULL THEN 'daily' ELSE 'lifetime' END AS "reachGranularity",
+            COALESCE(fact.likes_lifetime, fact.reactions_like)::text AS likes,
+            'lifetime'::text AS "likesGranularity", fact.likes_lifetime_observed_at AS "likesObservedAt",
+            COALESCE(fact.shares_lifetime, fact.shares)::text AS shares,
+            CASE WHEN fact.shares_lifetime IS NULL THEN 'daily' ELSE 'lifetime' END AS "sharesGranularity",
+            NULL::text AS plays, NULL::text AS "uniqueViewers"
+          FROM social_organic_post_metrics_daily fact
+          WHERE fact.asset_id = publication.asset_id
+            AND fact.external_publication_id = publication.external_publication_id
+            AND fact.tenant_id = publication.tenant_id AND fact.workspace_id = publication.workspace_id
+            AND fact.agency_client_id IS NOT DISTINCT FROM publication.agency_client_id
+          UNION ALL
+          SELECT (story.observed_at AT TIME ZONE asset.asset_timezone)::date::text,
+            story.observed_at, false, story.views::text, 'lifetime', story.observed_at,
+            story.reach::text, 'lifetime', NULL::text, 'lifetime', NULL::timestamptz,
+            story.shares::text, 'lifetime', NULL::text, NULL::text
+          FROM social_organic_stories story
+          WHERE story.asset_id = publication.asset_id
+            AND story.external_publication_id = publication.external_publication_id
+            AND story.tenant_id = publication.tenant_id AND story.workspace_id = publication.workspace_id
+            AND story.agency_client_id IS NOT DISTINCT FROM publication.agency_client_id
+          UNION ALL
+          SELECT (reel.observed_at AT TIME ZONE asset.asset_timezone)::date::text,
+            reel.observed_at, false, NULL::text, 'lifetime', NULL::timestamptz,
+            NULL::text, 'lifetime', reel.reactions_like::text, 'lifetime', reel.observed_at,
+            reel.shares::text, 'lifetime', reel.plays::text, reel.unique_viewers::text
+          FROM social_organic_facebook_reels reel
+          WHERE reel.asset_id = publication.asset_id
+            AND reel.external_publication_id = publication.external_publication_id
+            AND reel.tenant_id = publication.tenant_id AND reel.workspace_id = publication.workspace_id
+            AND reel.agency_client_id IS NOT DISTINCT FROM publication.agency_client_id
+        ) observations ORDER BY "syncedAt" DESC LIMIT 1
+      ) observation
+      WHERE publication.id = ANY($1::uuid[])
+        AND publication.tenant_id = $2 AND publication.workspace_id = $3
+        AND publication.agency_client_id IS NOT DISTINCT FROM $4::uuid
+        AND asset.tenant_id = $2 AND asset.workspace_id = $3
+        AND asset.agency_client_id IS NOT DISTINCT FROM $4::uuid
+        AND asset.company_context_id IS NOT DISTINCT FROM $5::uuid
+    `,
+      [
+        missingIds,
+        input.tenantId,
+        input.workspaceId,
+        input.agencyClientId,
+        input.companyContextId ?? null,
+      ],
+    );
+    return [
+      ...items,
+      ...rows.map((row) => ({
+        ...row,
+        syncedAt: readInstant(row.syncedAt)!,
+        viewsObservedAt: readInstant(row.viewsObservedAt),
+        likesObservedAt: readInstant(row.likesObservedAt),
+      })),
+    ];
   }
 
   /**

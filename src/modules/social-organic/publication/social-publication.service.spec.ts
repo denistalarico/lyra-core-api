@@ -34,7 +34,7 @@ type RepositoryMock = {
 
 function createRepositoryMock(): RepositoryMock {
   return {
-    find: jest.fn(),
+    find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn(),
     create: jest.fn((value) => value),
     save: jest.fn((value) => Promise.resolve(value)),
@@ -202,6 +202,49 @@ describe('SocialPublicationService', () => {
   });
 
   describe('create', () => {
+    it('rejects a destination that already published without creating another queue row', async () => {
+      publicationsRepository.find.mockResolvedValue([
+        { status: 'published', mediaAssetId },
+      ]);
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('allows a missing Story frame but rejects an already published frame', async () => {
+      destinationsRepository.findOne.mockResolvedValue({
+        ...destination,
+        placement: 'story',
+      });
+      publicationsRepository.find.mockResolvedValue([
+        { status: 'published', mediaAssetId: 'another-frame' },
+      ]);
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+        }),
+      ).resolves.toBeDefined();
+      publicationsRepository.find.mockResolvedValue([
+        { status: 'published', mediaAssetId },
+      ]);
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          mediaAssetId,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
     it('builds payload_snapshot from the content item, never from the request body (text-only)', async () => {
       const result = await service.create(agencyScope, actorUserId, {
         contentItemId,
