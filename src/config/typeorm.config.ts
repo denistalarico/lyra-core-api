@@ -454,7 +454,18 @@ import {
   ClientConversationParticipantEntity,
 } from '../modules/client-conversations/entities';
 
+import {
+  SocialGoogleAuditEventEntity,
+  SocialGoogleAuthorizationEntity,
+  SocialGoogleOAuthSessionEntity,
+  SocialGoogleProductLinkEntity,
+} from '../modules/social-google/entities';
+
 export const agencyEntities = [
+  SocialGoogleAuthorizationEntity,
+  SocialGoogleOAuthSessionEntity,
+  SocialGoogleProductLinkEntity,
+  SocialGoogleAuditEventEntity,
   LeadFlowContactCompanyEntity,
   LeadFlowAnalyticsDashboardEntity,
   ClientAreaIdentityPreferencesEntity,

@@ -8,6 +8,7 @@ import {
   LeadFlowBriefingSuggestionEntity,
 } from '../modules/leadflow-briefing/entities';
 import { UserProfileEntity } from '../modules/settings/entities/user-profile.entity';
+import * as socialGoogleEntities from '../modules/social-google/entities';
 import * as socialApprovalEntities from '../modules/social-approvals/entities';
 import * as socialProjectWorkEntities from '../modules/social-project-work/entities';
 import { agencyEntities, getAgencyTypeOrmConfig } from './typeorm.config';
@@ -60,6 +61,15 @@ describe('Agency TypeORM configuration', () => {
     );
 
     expect(exported.length).toBeGreaterThan(0);
+    expect(agencyEntities).toEqual(expect.arrayContaining(exported));
+  });
+
+  it('registers every Social Google OAuth entity in the runtime data source', () => {
+    const exported = Object.values(socialGoogleEntities).filter(
+      (value) => typeof value === 'function',
+    );
+
+    expect(exported).toHaveLength(4);
     expect(agencyEntities).toEqual(expect.arrayContaining(exported));
   });
 });
