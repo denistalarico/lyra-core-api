@@ -4533,16 +4533,20 @@ export class ContractsService {
   }
 
   private getObjectStorageClient() {
+    const accessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY;
+    const secretAccessKey = process.env.OBJECT_STORAGE_SECRET_KEY;
+    if (!accessKeyId || !secretAccessKey) {
+      throw new Error(
+        'Object storage credentials are not configured (OBJECT_STORAGE_ACCESS_KEY and OBJECT_STORAGE_SECRET_KEY).',
+      );
+    }
+
     return new S3Client({
       region: process.env.OBJECT_STORAGE_REGION ?? 'us-east-1',
       endpoint: process.env.OBJECT_STORAGE_ENDPOINT ?? 'http://localhost:9200',
       forcePathStyle:
         (process.env.OBJECT_STORAGE_FORCE_PATH_STYLE ?? 'true') === 'true',
-      credentials: {
-        accessKeyId: process.env.OBJECT_STORAGE_ACCESS_KEY ?? 'lyraadmin',
-        secretAccessKey:
-          process.env.OBJECT_STORAGE_SECRET_KEY ?? 'lyra_minio_dev_password',
-      },
+      credentials: { accessKeyId, secretAccessKey },
     });
   }
 

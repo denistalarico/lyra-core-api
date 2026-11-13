@@ -18,6 +18,8 @@ const r2 = {
 function service(withR2: boolean) {
   const values: Record<string, unknown> = {
     'files.s3.privateBucket': 'private',
+    'files.s3.accessKeyId': 'test-key',
+    'files.s3.secretAccessKey': 'test-secret',
     'files.s3.createBucket': false,
     ...(withR2 ? { 'files.r2': r2 } : {}),
   };

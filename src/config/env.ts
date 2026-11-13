@@ -39,16 +39,14 @@ export default () => ({
         process.env.S3_REGION ??
         process.env.OBJECT_STORAGE_REGION ??
         'us-east-1',
+      // No default and no MINIO_ROOT_* fallback: the application must use a
+      // dedicated service identity, and FilesService fails fast when it is
+      // missing instead of silently using a well-known credential.
       accessKeyId:
-        process.env.S3_ACCESS_KEY_ID ??
-        process.env.OBJECT_STORAGE_ACCESS_KEY ??
-        process.env.MINIO_ROOT_USER ??
-        'lyraadmin',
+        process.env.S3_ACCESS_KEY_ID ?? process.env.OBJECT_STORAGE_ACCESS_KEY,
       secretAccessKey:
         process.env.S3_SECRET_ACCESS_KEY ??
-        process.env.OBJECT_STORAGE_SECRET_KEY ??
-        process.env.MINIO_ROOT_PASSWORD ??
-        'lyra_minio_dev_password',
+        process.env.OBJECT_STORAGE_SECRET_KEY,
       publicBaseUrl:
         process.env.S3_PUBLIC_BASE_URL ??
         `${process.env.S3_ENDPOINT ?? process.env.OBJECT_STORAGE_ENDPOINT ?? 'http://localhost:9200'}/${
@@ -57,7 +55,9 @@ export default () => ({
         }`,
       forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
       createBucket: process.env.S3_CREATE_BUCKET !== 'false',
-      setPublicReadPolicy: process.env.S3_SET_PUBLIC_READ_POLICY !== 'false',
+      // Opt-in: a public-read bucket policy is never applied unless explicitly
+      // requested (G0.3.8).
+      setPublicReadPolicy: process.env.S3_SET_PUBLIC_READ_POLICY === 'true',
     },
     r2: {
       endpoint: process.env.R2_ENDPOINT,

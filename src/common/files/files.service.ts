@@ -74,20 +74,24 @@ export class FilesService {
     this.shouldCreateBucket =
       this.configService.get<boolean>('files.s3.createBucket') ?? true;
     this.shouldSetPublicReadPolicy =
-      this.configService.get<boolean>('files.s3.setPublicReadPolicy') ?? true;
+      this.configService.get<boolean>('files.s3.setPublicReadPolicy') ?? false;
+
+    const accessKeyId = this.configService.get<string>('files.s3.accessKeyId');
+    const secretAccessKey = this.configService.get<string>(
+      'files.s3.secretAccessKey',
+    );
+    if (!accessKeyId || !secretAccessKey) {
+      throw new Error(
+        'Object storage credentials are not configured (S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY).',
+      );
+    }
 
     this.client = new S3Client({
       region: this.configService.get<string>('files.s3.region') ?? 'us-east-1',
       endpoint: this.endpoint,
       forcePathStyle:
         this.configService.get<boolean>('files.s3.forcePathStyle') ?? true,
-      credentials: {
-        accessKeyId:
-          this.configService.get<string>('files.s3.accessKeyId') ?? 'lyraadmin',
-        secretAccessKey:
-          this.configService.get<string>('files.s3.secretAccessKey') ??
-          'lyra_minio_dev_password',
-      },
+      credentials: { accessKeyId, secretAccessKey },
     });
 
     const r2 = this.configService.get<{

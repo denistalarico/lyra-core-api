@@ -33,6 +33,10 @@ jest.mock('@aws-sdk/client-s3', () => ({
   GetObjectCommand: jest.fn(),
 }));
 
+// The service has no credential fallback; the S3 client is never reached.
+process.env.OBJECT_STORAGE_ACCESS_KEY ??= 'test-key';
+process.env.OBJECT_STORAGE_SECRET_KEY ??= 'test-secret';
+
 describe('ContractsService notification triggers', () => {
   it('publishes canceled after the contract cancellation is persisted', async () => {
     const contract = makeContract({ status: ContractStatus.Generated });

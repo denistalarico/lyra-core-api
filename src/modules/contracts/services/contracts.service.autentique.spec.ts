@@ -61,6 +61,10 @@ function internals(service: ContractsService) {
 
 type CreateDocumentInput = Parameters<AutentiqueClient['createDocument']>[0];
 
+// The service has no credential fallback; the S3 client is never reached.
+process.env.OBJECT_STORAGE_ACCESS_KEY ??= 'test-key';
+process.env.OBJECT_STORAGE_SECRET_KEY ??= 'test-secret';
+
 describe('ContractsService — Autentique', () => {
   const originalEnv = { ...process.env };
 
