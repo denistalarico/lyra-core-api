@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   type OnModuleInit,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -28,9 +29,12 @@ import { TaskWorkspaceService } from '../projects/services/task-workspace.servic
 import { CREATIVE_PRODUCTION_PERMISSIONS as P } from '../social-creative-studio/creative-production.permissions';
 import { CreativeProductionService } from '../social-creative-studio/creative-production.service';
 import {
+  SocialContentDestinationEntity,
   SocialContentItemEntity,
   SocialPlanEntity,
 } from '../social-planner/entities';
+import { SocialPlannerSettingsService } from '../social-planner/services/social-planner-settings.service';
+import { DEFAULT_SOCIAL_PLANNER_SETTINGS } from '../social-planner/social-planner.defaults';
 import {
   SocialPlanContentChangeRegistry,
   type SocialPlanContentChange,
@@ -50,6 +54,16 @@ import {
   SocialWorkGateService,
 } from './social-work-gate.service';
 import { SocialWorkStatusService } from './social-work-status.service';
+import {
+  itemSubtaskDescription,
+  itemTaskDescription,
+  itemTaskTitle,
+  planTaskDescription,
+  type WorkLabels,
+} from './plan-work-text';
+
+/** What every item of one plan needs to name and describe its work. */
+type PlanFacts = { planTitle: string; labels: WorkLabels };
 
 const PROJECT_CREATE = 'agency.projects.project.create.department';
 const TITLE_MAX = 180;
@@ -72,6 +86,17 @@ function conflict(code: string, message: string) {
 /** Noon UTC: the same calendar day in every timezone the agency works in. */
 function dueDateOf(plannedDate: string | null): string | null {
   return plannedDate ? `${plannedDate}T12:00:00.000Z` : null;
+}
+
+/**
+ * E5: "uma tarefa com subtarefas" may also start a new project, so creating
+ * one is a choice of its own and not only of `project_created`.
+ */
+function createsProject(dto: CreatePlanWorkLinkDto): boolean {
+  return (
+    dto.mode === 'project_created' ||
+    (dto.mode === 'task_created' && Boolean(dto.createProject))
+  );
 }
 
 function scopeOf(link: SocialPlanWorkLinkEntity): CompanyAwareScope {
@@ -117,6 +142,8 @@ export class SocialPlanWorkService implements OnModuleInit {
     private readonly status: SocialWorkStatusService,
     private readonly permissions: PlatformPermissionService,
     private readonly gate: SocialWorkGateService,
+    /** Catalog labels of the context; without it the defaults apply. */
+    @Optional() private readonly plannerSettings?: SocialPlannerSettingsService,
   ) {}
 
   onModuleInit(): void {
@@ -177,7 +204,7 @@ export class SocialPlanWorkService implements OnModuleInit {
     await this.gate.assertScope(ctx, scope);
     const identity = permissionIdentity(ctx);
     await this.permissions.assertCan(identity, P.taskCreate);
-    if (dto.mode === 'project_created')
+    if (createsProject(dto))
       await this.permissions.assertCan(identity, PROJECT_CREATE);
     const plan = await this.requirePlan(scope, planId);
     if (plan.status === 'archived')
@@ -222,7 +249,7 @@ export class SocialPlanWorkService implements OnModuleInit {
     };
     let projectId: string;
     let createdProject = false;
-    if (dto.mode === 'project_created') {
+    if (createsProject(dto)) {
       const firstStage = await this.dataSource.manager
         .getRepository(AgencyProjectStage)
         .findOne({
@@ -253,6 +280,7 @@ export class SocialPlanWorkService implements OnModuleInit {
       if (dto.mode === 'task_created') {
         const task = await this.tasks.createWorkspaceTask(context, {
           title: (dto.taskTitle?.trim() || plan.title).slice(0, TITLE_MAX),
+          description: planTaskDescription(plan),
           projectId,
           projectStageId: dto.projectStageId ?? undefined,
           clientId: scope.agencyClientId,
@@ -392,6 +420,7 @@ export class SocialPlanWorkService implements OnModuleInit {
         }),
       ]);
       const itemById = new Map(items.map((item) => [item.id, item]));
+      const facts = await this.planFacts(link);
       const rowsByItem = new Map<string, SocialContentWorkLinkEntity[]>();
       for (const row of rows)
         rowsByItem.set(row.contentItemId, [
@@ -405,6 +434,7 @@ export class SocialPlanWorkService implements OnModuleInit {
           if (
             await this.reconcileItem(
               link,
+              facts,
               id,
               itemById.get(id),
               rowsByItem.get(id) ?? [],
@@ -424,6 +454,7 @@ export class SocialPlanWorkService implements OnModuleInit {
 
   private async reconcileItem(
     link: SocialPlanWorkLinkEntity,
+    facts: PlanFacts,
     contentItemId: string,
     item: SocialContentItemEntity | undefined,
     rows: SocialContentWorkLinkEntity[],
@@ -436,7 +467,7 @@ export class SocialPlanWorkService implements OnModuleInit {
       item.planningStatus === 'cancelled';
     if (rows.length === 0) {
       if (removed || item.planningStatus === 'posted') return false;
-      await this.createItemWork(link, item);
+      await this.createItemWork(link, facts, item);
       return true;
     }
     if (removed) {
@@ -451,10 +482,22 @@ export class SocialPlanWorkService implements OnModuleInit {
 
   private async createItemWork(
     link: SocialPlanWorkLinkEntity,
+    facts: PlanFacts,
     item: SocialContentItemEntity,
   ): Promise<void> {
     const context = workContext(link);
     const dueDate = dueDateOf(item.plannedDate);
+    const destinations = await this.dataSource.manager
+      .getRepository(SocialContentDestinationEntity)
+      .find({
+        where: {
+          tenantId: link.tenantId,
+          workspaceId: link.workspaceId,
+          contentItemId: item.id,
+        },
+        select: { channel: true, placement: true },
+        order: { channel: 'ASC', placement: 'ASC' },
+      });
     const work: WorkRow[] = [];
     let createdTaskId: string | null = null;
     try {
@@ -462,7 +505,15 @@ export class SocialPlanWorkService implements OnModuleInit {
         const subtask = await this.checklist.createChecklistItem(
           context,
           link.parentTaskId,
-          { title: item.title.slice(0, TITLE_MAX), dueDate },
+          {
+            title: item.title.slice(0, TITLE_MAX),
+            description: itemSubtaskDescription(
+              item,
+              destinations,
+              facts.labels,
+            ),
+            dueDate,
+          },
         );
         work.push({
           stepKind: 'item',
@@ -471,8 +522,8 @@ export class SocialPlanWorkService implements OnModuleInit {
         });
       } else {
         const task = await this.tasks.createWorkspaceTask(context, {
-          title: item.title.slice(0, TITLE_MAX),
-          description: `Planner: /social/planner/content/${item.id}`,
+          title: itemTaskTitle(item, facts.planTitle).slice(0, TITLE_MAX),
+          description: itemTaskDescription(item, destinations, facts.labels),
           projectId: link.projectId,
           projectStageId: link.projectStageId ?? undefined,
           clientId: link.agencyClientId,
@@ -672,6 +723,30 @@ export class SocialPlanWorkService implements OnModuleInit {
   }
 
   // ── Internals ───────────────────────────────────────────────────────────
+
+  /** Read per run, so a renamed plan or catalog shows on the next item. */
+  private async planFacts(link: SocialPlanWorkLinkEntity): Promise<PlanFacts> {
+    const scope = scopeOf(link);
+    const [plan, settings] = await Promise.all([
+      this.dataSource.manager.getRepository(SocialPlanEntity).findOne({
+        where: { id: link.planId, tenantId: link.tenantId },
+        select: { id: true, title: true },
+      }),
+      this.plannerSettings
+        ?.getSettings(scope)
+        .then((result) => result.settings)
+        .catch(() => null),
+    ]);
+    const catalog = settings ?? DEFAULT_SOCIAL_PLANNER_SETTINGS;
+    return {
+      planTitle: plan?.title ?? '',
+      labels: {
+        formats: catalog.creativeFormats,
+        types: catalog.contentTypes,
+        objectives: catalog.objectives,
+      },
+    };
+  }
 
   private links() {
     return this.dataSource.manager.getRepository(SocialPlanWorkLinkEntity);

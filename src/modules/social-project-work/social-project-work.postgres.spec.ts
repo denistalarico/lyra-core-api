@@ -592,6 +592,91 @@ run('AR4 Planner, Approvals and Projects (real PostgreSQL)', () => {
       expect((await subtaskOf(a.subtaskId!)).title).toBe('Primeiro post');
     });
 
+    it('E5: a task per item is named by day and plan and describes the item', async () => {
+      const { planId } = await linked();
+      const first = await item(planId, scopeA, {
+        title: 'Seleção de presentes',
+        theme: 'Natal',
+        plannedDate: '2026-12-05',
+        creativeFormat: 'carousel',
+        funnelStage: 'discovery',
+        contentType: 'promotion',
+        objective: 'engagement',
+        cta: 'Compre já',
+      });
+      await db.getRepository(SocialContentDestinationEntity).save({
+        tenantId,
+        workspaceId,
+        agencyClientId: clientA,
+        contentItemId: first.id,
+        channel: 'instagram',
+        placement: 'feed',
+      } as never);
+      await materializeAll(planId);
+      const [row] = await links(first.id);
+      const task = await taskOf(row.taskId);
+      expect(task.title).toBe('05/12 · Plano Dezembro');
+      expect(task.description).toBe(
+        [
+          'Data: 05/12/2026',
+          'Tema: Natal',
+          'Conteúdo: Seleção de presentes',
+          'Canais: Instagram · Feed',
+          'Formato: Carrossel',
+          'Funil: Descoberta',
+          'Tipo: Divulgação',
+          'Objetivo: Engajamento',
+          'CTA: Compre já',
+        ].join('\n'),
+      );
+      expect(task.dueDate?.toISOString()).toBe('2026-12-05T12:00:00.000Z');
+    });
+
+    it('E5: one task with subtasks may start a new project and describes plan and items', async () => {
+      const created = await plan(scopeA);
+      await db.getRepository(SocialPlanEntity).update(created.id, {
+        primaryObjective: 'Engajamento',
+        strategyMode: 'always_on',
+      } as never);
+      const { link } = await work.createLink(ctx(scopeA), created.id, {
+        mode: 'task_created',
+        createProject: true,
+        projectName: 'Social Dezembro',
+      });
+      const project = await db
+        .getRepository(AgencyProject)
+        .findOneOrFail({ where: { id: link.projectId } });
+      expect(project.name).toBe('Social Dezembro');
+      const parent = await taskOf(link.parentTaskId!);
+      expect(parent).toMatchObject({
+        title: 'Plano Dezembro',
+        projectId: project.id,
+        description: [
+          'Início: 01/12/2026',
+          'Fim: 31/12/2026',
+          'Objetivo principal: Engajamento',
+          'Modo estratégico: Posts para Redes Sociais',
+        ].join('\n'),
+      });
+      const first = await item(created.id, scopeA, {
+        title: 'Primeiro post',
+        theme: 'Natal',
+        plannedDate: '2026-12-05',
+        creativeFormat: 'image',
+        cta: 'Saiba mais',
+      });
+      await materializeAll(created.id);
+      const [row] = await links(first.id);
+      const subtask = await subtaskOf(row.subtaskId!);
+      expect(subtask).toMatchObject({
+        title: 'Primeiro post',
+        description: '05/12 · Natal · Imagem · Saiba mais',
+      });
+      expect(new Date(subtask.dueDate!).toISOString()).toBe(
+        '2026-12-05T12:00:00.000Z',
+      );
+    });
+
     it('an item created after the modal becomes work, also from a generated grid', async () => {
       const { planId } = await linked();
       const created = await planner.createContent(scopeA, planId, ownerUser, {

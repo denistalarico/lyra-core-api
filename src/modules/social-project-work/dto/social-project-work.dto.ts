@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -31,6 +32,8 @@ export class CreatePlanWorkLinkDto {
   @IsOptional() @IsUUID() projectStageId?: string;
   /** `project_created`: defaults to the plan's title. */
   @IsOptional() @IsString() @MinLength(1) @MaxLength(180) projectName?: string;
+  /** E5 `task_created`: start a new project instead of choosing one. */
+  @IsOptional() @IsBoolean() createProject?: boolean;
   /** `task_created`: defaults to the plan's title. */
   @IsOptional() @IsString() @MinLength(1) @MaxLength(180) taskTitle?: string;
 }
