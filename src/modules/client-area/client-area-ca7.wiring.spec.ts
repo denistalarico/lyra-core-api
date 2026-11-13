@@ -43,7 +43,18 @@ describe('CA7 real Nest module wiring', () => {
   it('constructs the real module and registers its authenticator on init (not a foreign DI token)', async () => {
     const ref = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({ ignoreEnvFile: true, isGlobal: true }),
+        ConfigModule.forRoot({
+          ignoreEnvFile: true,
+          isGlobal: true,
+          // FilesService fails fast without object-storage credentials.
+          load: [
+            () => ({
+              files: {
+                s3: { accessKeyId: 'test-key', secretAccessKey: 'test-secret' },
+              },
+            }),
+          ],
+        }),
         StubAgencyDatabase,
         ClientAreaModule,
       ],

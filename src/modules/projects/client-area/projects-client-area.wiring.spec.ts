@@ -46,7 +46,18 @@ describe('CA9 real ProjectsModule wiring', () => {
   it('registers its scope adapter in the consumer registry during Nest init', async () => {
     const ref = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({ ignoreEnvFile: true, isGlobal: true }),
+        ConfigModule.forRoot({
+          ignoreEnvFile: true,
+          isGlobal: true,
+          // FilesService fails fast without object-storage credentials.
+          load: [
+            () => ({
+              files: {
+                s3: { accessKeyId: 'test-key', secretAccessKey: 'test-secret' },
+              },
+            }),
+          ],
+        }),
         DatabaseFixture,
         ProjectsModule,
       ],
