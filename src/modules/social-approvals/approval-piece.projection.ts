@@ -98,3 +98,81 @@ export function projectApprovalPiece(
 
   return { boardColumn: active.phase, activeStepId: active.id };
 }
+
+export type PieceVersionRequest = {
+  id: string;
+  stepId: string | null;
+  subjectRevisionId: string;
+  status: SocialApprovalStatus;
+  createdAt: Date;
+};
+
+export type ApprovalPieceVersion = {
+  number: number;
+  createdAt: string;
+  isCurrent: boolean;
+  /** Every step that was already sent, as it stood in this version. */
+  parts: Array<{ stepId: string; approvalId: string; changed: boolean }>;
+};
+
+/** Sends of one action (copy then creative) land seconds apart, never more. */
+const SAME_SEND_MS = 2 * 60 * 1000;
+
+/**
+ * E3: one version per send that changed something. Resending the same
+ * revision (after a withdrawal, say) is still that version; a copy and a
+ * creative sent together are one version, not two.
+ */
+export function approvalPieceVersions(
+  requests: readonly PieceVersionRequest[],
+): ApprovalPieceVersion[] {
+  const sent = requests
+    .filter((request) => request.stepId && request.status !== 'draft')
+    .sort(
+      (a, b) =>
+        a.createdAt.getTime() - b.createdAt.getTime() ||
+        a.id.localeCompare(b.id),
+    );
+  const latest = new Map<string, { approvalId: string; revisionId: string }>();
+  type Parts = Map<string, { approvalId: string; changed: boolean }>;
+  const versions: Array<{ startedAt: number; createdAt: Date; parts: Parts }> =
+    [];
+  for (const request of sent) {
+    const stepId = request.stepId!;
+    const previous = latest.get(stepId);
+    latest.set(stepId, {
+      approvalId: request.id,
+      revisionId: request.subjectRevisionId,
+    });
+    const last = versions.at(-1);
+    if (previous?.revisionId === request.subjectRevisionId) {
+      // Same content again: the version only points at the newer request.
+      const part = last?.parts.get(stepId);
+      if (part) part.approvalId = request.id;
+      continue;
+    }
+    if (
+      last &&
+      request.createdAt.getTime() - last.startedAt <= SAME_SEND_MS &&
+      !last.parts.get(stepId)?.changed
+    ) {
+      last.parts.set(stepId, { approvalId: request.id, changed: true });
+      continue;
+    }
+    const parts: Parts = new Map();
+    for (const [id, part] of last?.parts ?? [])
+      parts.set(id, { approvalId: part.approvalId, changed: false });
+    parts.set(stepId, { approvalId: request.id, changed: true });
+    versions.push({
+      startedAt: request.createdAt.getTime(),
+      createdAt: request.createdAt,
+      parts,
+    });
+  }
+  return versions.map((version, index) => ({
+    number: index + 1,
+    createdAt: version.createdAt.toISOString(),
+    isCurrent: index === versions.length - 1,
+    parts: [...version.parts].map(([stepId, part]) => ({ stepId, ...part })),
+  }));
+}

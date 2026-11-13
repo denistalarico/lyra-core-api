@@ -1,4 +1,5 @@
 import {
+  approvalPieceVersions,
   approvalStepPhase,
   projectApprovalPiece,
   type PieceProjectionInput,
@@ -98,5 +99,75 @@ describe('approval piece projection (D-13)', () => {
         ]),
       ),
     ).toEqual({ boardColumn: 'preparation', activeStepId: 'copy' });
+  });
+});
+
+describe('approval piece versions (E3)', () => {
+  const at = (minutes: number) => new Date(Date.UTC(2026, 10, 13, 12, minutes));
+  const request = (
+    id: string,
+    stepId: string,
+    revision: string,
+    minutes: number,
+    status: 'draft' | 'awaiting_client' | 'cancelled' = 'awaiting_client',
+  ) => ({
+    id,
+    stepId,
+    subjectRevisionId: revision,
+    status,
+    createdAt: at(minutes),
+  });
+
+  it('a copy and a creative sent together are one version', () => {
+    const versions = approvalPieceVersions([
+      request('creative-1', 'creative', 'c1', 0),
+      request('copy-1', 'copy', 't1', 0),
+    ]);
+    expect(versions).toHaveLength(1);
+    expect(versions[0]).toMatchObject({ number: 1, isCurrent: true });
+    expect(versions[0].parts).toEqual(
+      expect.arrayContaining([
+        { stepId: 'copy', approvalId: 'copy-1', changed: true },
+        { stepId: 'creative', approvalId: 'creative-1', changed: true },
+      ]),
+    );
+  });
+
+  it('a later send of one part keeps the other part as it was', () => {
+    const versions = approvalPieceVersions([
+      request('copy-1', 'copy', 't1', 0),
+      request('creative-1', 'creative', 'c1', 30),
+      request('copy-2', 'copy', 't2', 60),
+    ]);
+    expect(versions.map((version) => version.number)).toEqual([1, 2, 3]);
+    expect(versions[2].parts).toEqual([
+      { stepId: 'copy', approvalId: 'copy-2', changed: true },
+      { stepId: 'creative', approvalId: 'creative-1', changed: false },
+    ]);
+    expect(versions.map((version) => version.isCurrent)).toEqual([
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it('resending the same revision and drafts do not make a version', () => {
+    const versions = approvalPieceVersions([
+      request('copy-1', 'copy', 't1', 0, 'cancelled'),
+      request('copy-2', 'copy', 't1', 40),
+      request('copy-3', 'copy', 't2', 50, 'draft'),
+    ]);
+    expect(versions).toHaveLength(1);
+    expect(versions[0].parts).toEqual([
+      { stepId: 'copy', approvalId: 'copy-2', changed: true },
+    ]);
+  });
+
+  it('two revisions of the same part in a minute are two versions', () => {
+    const versions = approvalPieceVersions([
+      request('copy-1', 'copy', 't1', 0),
+      request('copy-2', 'copy', 't2', 1),
+    ]);
+    expect(versions).toHaveLength(2);
   });
 });

@@ -16,7 +16,10 @@ import {
   SocialPlanEntity,
 } from '../social-planner/entities';
 import { approvalPiecePost } from './approval-piece-post';
-import { approvalStepPhase } from './approval-piece.projection';
+import {
+  approvalPieceVersions,
+  approvalStepPhase,
+} from './approval-piece.projection';
 import { approvalScopeWhere } from './approval-scope';
 import { approvalScopeKind } from './approval-stage.policy';
 import type { SocialApprovalBoardQueryDto } from './dto/social-approval-piece.dto';
@@ -497,6 +500,21 @@ export class SocialApprovalBoardService {
       }),
     );
     const anyPending = detailed.some((step) => step.pending);
+    const history = steps.length
+      ? await this.requests.find({
+          where: {
+            ...approvalScopeWhere(scope),
+            stepId: In(steps.map((step) => step.id)),
+          },
+          select: {
+            id: true,
+            stepId: true,
+            subjectRevisionId: true,
+            status: true,
+            createdAt: true,
+          },
+        })
+      : [];
     const open =
       !piece.finishedAt &&
       piece.sourceState !== 'hidden' &&
@@ -515,6 +533,7 @@ export class SocialApprovalBoardService {
       finishReason: piece.finishReason,
       post: await approvalPiecePost(this.pieces.manager, piece),
       steps: detailed,
+      versions: approvalPieceVersions(history),
       events,
       actions: {
         canDelete:

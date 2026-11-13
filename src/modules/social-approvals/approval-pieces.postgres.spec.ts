@@ -1069,6 +1069,25 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       });
     });
 
+    it('the detail lists the sent version of the piece', async () => {
+      const { item, request } = await awaitingClient(scopeA);
+      const piece = await pieceOf(item.id);
+      const detail = await board.pieceDetail(scopeA, piece.id, {
+        userId: ownerUser,
+        role: 'owner',
+        permissions: new Set(),
+      });
+      expect(detail.versions).toEqual([
+        expect.objectContaining({
+          number: 1,
+          isCurrent: true,
+          parts: [
+            expect.objectContaining({ approvalId: request.id, changed: true }),
+          ],
+        }),
+      ]);
+    });
+
     it('a piece of another company answers 404 on detail', async () => {
       const { item } = await awaitingClient(scopeA);
       const piece = await pieceOf(item.id);
