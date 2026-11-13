@@ -1088,6 +1088,59 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       ]);
     });
 
+    it('the detail names who wrote each message of the chat', async () => {
+      const { item, request } = await awaitingClient(scopeA);
+      const piece = await pieceOf(item.id);
+      await approvals.comment(scopeA, request.id, ownerUser, {
+        body: 'da equipe',
+        attachments: [
+          {
+            id: '99999999-9999-4999-8999-999999999999',
+            kind: 'file',
+            fileName: 'ref.pdf',
+            mimeType: 'application/pdf',
+            byteSize: '4',
+            storagePath: 'social-approvals/secret/ref.pdf',
+          },
+        ],
+      });
+      await approvals.comment(
+        scopeA,
+        request.id,
+        clientOwner,
+        { body: 'do cliente' },
+        'client',
+        'client_area',
+      );
+      await approvals.comment(scopeA, request.id, operator, {
+        body: 'sem perfil',
+      });
+      const detail = await board.pieceDetail(scopeA, piece.id, {
+        userId: ownerUser,
+        role: 'owner',
+        permissions: new Set(),
+      });
+      const by = (body: string) =>
+        detail.conversation.find((comment) => comment.body === body);
+      expect(detail.conversation.map((comment) => comment.body)).toEqual([
+        'da equipe',
+        'do cliente',
+        'sem perfil',
+      ]);
+      expect(JSON.stringify(detail.conversation)).not.toContain('secret');
+      expect(by('da equipe')).toMatchObject({
+        approvalId: request.id,
+        attachments: [expect.objectContaining({ fileName: 'ref.pdf' })],
+        author: { name: 'Dono da Agência', side: 'agency', mine: true },
+      });
+      expect(by('do cliente')).toMatchObject({
+        author: { side: 'client', mine: false },
+      });
+      expect(by('sem perfil')).toMatchObject({
+        author: { name: 'Equipe', side: 'agency', mine: false },
+      });
+    });
+
     it('a piece of another company answers 404 on detail', async () => {
       const { item } = await awaitingClient(scopeA);
       const piece = await pieceOf(item.id);

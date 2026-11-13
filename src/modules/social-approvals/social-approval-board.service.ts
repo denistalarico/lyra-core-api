@@ -15,6 +15,8 @@ import {
   SocialContentItemEntity,
   SocialPlanEntity,
 } from '../social-planner/entities';
+import { approvalCommentAuthors } from './approval-comment-authors';
+import { publicApprovalAttachments } from './approval-comment-content';
 import { approvalPiecePost } from './approval-piece-post';
 import {
   approvalPieceVersions,
@@ -25,6 +27,7 @@ import { approvalScopeKind } from './approval-stage.policy';
 import type { SocialApprovalBoardQueryDto } from './dto/social-approval-piece.dto';
 import {
   SOCIAL_APPROVAL_BOARD_COLUMNS,
+  SocialApprovalCommentEntity,
   SocialApprovalEventEntity,
   SocialApprovalPieceEntity,
   SocialApprovalRequestEntity,
@@ -515,6 +518,35 @@ export class SocialApprovalBoardService {
           },
         })
       : [];
+    // E4: the chat spans every send, so a new version keeps the conversation.
+    const said = history.length
+      ? await this.pieces.manager
+          .getRepository(SocialApprovalCommentEntity)
+          .find({
+            where: {
+              approvalRequestId: In(history.map((request) => request.id)),
+            },
+            order: { createdAt: 'ASC', id: 'ASC' },
+          })
+      : [];
+    const authorOf = await approvalCommentAuthors(
+      this.pieces.manager,
+      scope,
+      reader.userId,
+      said.map((comment) => comment.actorUserId),
+    );
+    const conversation = said.map((comment) => ({
+      id: comment.id,
+      approvalId: comment.approvalRequestId,
+      body: comment.body,
+      richBody: comment.richBody,
+      attachments: publicApprovalAttachments(comment.attachments),
+      feedbackId: comment.feedbackId,
+      visibility: comment.visibility,
+      actorUserId: comment.actorUserId,
+      createdAt: comment.createdAt.toISOString(),
+      author: authorOf(comment.actorUserId),
+    }));
     const open =
       !piece.finishedAt &&
       piece.sourceState !== 'hidden' &&
@@ -534,6 +566,7 @@ export class SocialApprovalBoardService {
       post: await approvalPiecePost(this.pieces.manager, piece),
       steps: detailed,
       versions: approvalPieceVersions(history),
+      conversation,
       events,
       actions: {
         canDelete:
