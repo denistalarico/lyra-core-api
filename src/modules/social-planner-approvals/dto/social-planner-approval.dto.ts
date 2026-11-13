@@ -3,6 +3,7 @@ import {
   ArrayNotEmpty,
   IsArray,
   IsIn,
+  IsOptional,
   IsUUID,
 } from 'class-validator';
 import { SOCIAL_CONTENT_BATCH_MAX } from '../../social-planner/dto/social-content-action.dto';
@@ -15,9 +16,18 @@ export const CONTENT_APPROVAL_MODES = [
 ] as const;
 export type ContentApprovalMode = (typeof CONTENT_APPROVAL_MODES)[number];
 
+/** `auto` (the default): the server decides what changed and sends only that. */
+export const CONTENT_APPROVAL_REQUEST_MODES = [
+  ...CONTENT_APPROVAL_MODES,
+  'auto',
+] as const;
+export type ContentApprovalRequestMode =
+  (typeof CONTENT_APPROVAL_REQUEST_MODES)[number];
+
 export class SendContentForApprovalDto {
-  @IsIn(CONTENT_APPROVAL_MODES)
-  mode!: ContentApprovalMode;
+  @IsOptional()
+  @IsIn(CONTENT_APPROVAL_REQUEST_MODES)
+  mode?: ContentApprovalRequestMode;
 }
 
 export class SendContentBatchForApprovalDto {
@@ -27,6 +37,7 @@ export class SendContentBatchForApprovalDto {
   @IsUUID(undefined, { each: true })
   contentIds!: string[];
 
-  @IsIn(CONTENT_APPROVAL_MODES)
-  mode!: ContentApprovalMode;
+  @IsOptional()
+  @IsIn(CONTENT_APPROVAL_REQUEST_MODES)
+  mode?: ContentApprovalRequestMode;
 }

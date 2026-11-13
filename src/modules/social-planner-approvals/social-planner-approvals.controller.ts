@@ -84,7 +84,11 @@ export class SocialPlannerApprovalsController {
     @RequestContextData() ctx: RequestContext,
     @Body() dto: SendContentBatchForApprovalDto,
   ) {
-    return this.service.sendContentBatch(ctx, dto.contentIds, dto.mode);
+    return this.service.sendContentBatch(
+      ctx,
+      dto.contentIds,
+      dto.mode ?? 'auto',
+    );
   }
 
   @Get('content/:contentId/approval-state')
@@ -105,6 +109,6 @@ export class SocialPlannerApprovalsController {
     @Param('contentId', ParseUUIDPipe) contentId: string,
     @Body() dto: SendContentForApprovalDto,
   ) {
-    return this.service.sendContent(ctx, contentId, dto.mode);
+    return this.service.sendContent(ctx, contentId, dto.mode ?? 'auto');
   }
 }

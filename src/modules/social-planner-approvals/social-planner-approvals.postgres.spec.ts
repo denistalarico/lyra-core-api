@@ -760,6 +760,122 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
     });
   });
 
+  describe('auto send: the server decides what goes', () => {
+    it('text and creative ready go together; nothing new is refused', async () => {
+      const { itemId } = await withCopy();
+      await uploadDirect(itemId);
+      expect((await service.contentState(ctx(), itemId)).next).toMatchObject({
+        mode: 'together',
+        parts: ['copy', 'creative'],
+        changes: [
+          { part: 'copy', resend: false },
+          { part: 'creative', resend: false },
+        ],
+      });
+
+      const sent = await service.sendContent(ctx(), itemId, 'auto');
+      expect(sent.mode).toBe('together');
+      expect(sent.copy?.status).toBe('awaiting_internal_review');
+      expect(sent.creative?.status).toBe('awaiting_internal_review');
+
+      const state = await service.contentState(ctx(), itemId);
+      expect(state.next).toMatchObject({ mode: null, blocker: 'in_review' });
+      await expect(service.sendContent(ctx(), itemId, 'auto')).rejects.toEqual(
+        code('approval_nothing_to_send'),
+      );
+    });
+
+    it('after the text is approved, only the new creative goes', async () => {
+      const { itemId, approvalId } = await copyAwaitingClient();
+      await clientApprove(approvalId);
+      expect((await service.contentState(ctx(), itemId)).next).toMatchObject({
+        mode: null,
+        blocker: 'creative_missing',
+      });
+
+      await uploadDirect(itemId);
+      const sent = await service.sendContent(ctx(), itemId, 'auto');
+
+      expect(sent.mode).toBe('creative');
+      expect(sent.copy).toBeNull();
+      expect(sent.creative?.status).toBe('awaiting_internal_review');
+    });
+
+    it('a piece with only a creative sends just the creative', async () => {
+      const row = await item((await plan()).id);
+      await uploadDirect(row.id);
+
+      const sent = await service.sendContent(ctx(), row.id, 'auto');
+
+      expect(sent.mode).toBe('creative');
+      expect(sent.creative?.status).toBe('awaiting_internal_review');
+      expect(await planningStatus(row.id)).toBe('creative_ready');
+    });
+
+    it('a changed text after approval is a resend of the text only', async () => {
+      const { itemId, approvalId } = await copyAwaitingClient();
+      await clientApprove(approvalId);
+      await planner.createRevision(scopeA, itemId, ownerUser, {
+        copy: 'texto alterado',
+      });
+
+      expect((await service.contentState(ctx(), itemId)).next).toMatchObject({
+        mode: 'copy',
+        parts: ['copy'],
+        changes: [{ part: 'copy', resend: true, previousStatus: 'approved' }],
+      });
+    });
+
+    it('an unchanged text sent back for changes cannot go again', async () => {
+      const { itemId, approvalId } = await copyAwaitingClient();
+      await approvals.clientRequestChanges(
+        scopeA,
+        approvalId,
+        { type: 'user', userId: clientOwner },
+        'Trocar a chamada',
+      );
+
+      expect((await service.contentState(ctx(), itemId)).next).toMatchObject({
+        mode: null,
+        blocker: 'unchanged',
+      });
+      await expect(service.sendContent(ctx(), itemId, 'copy')).rejects.toEqual(
+        code('approval_nothing_changed'),
+      );
+    });
+
+    it('an approved, unchanged table cannot go again', async () => {
+      const { id } = await plan();
+      await item(id);
+      const sent = await service.sendPlanTable(ctx(), id);
+      await internalApprove(sent.approvalId);
+      await clientApprove(sent.approvalId);
+
+      expect(await service.planState(ctx(), id)).toMatchObject({
+        canSend: false,
+        blocker: 'approved',
+        resend: true,
+      });
+      await expect(service.sendPlanTable(ctx(), id)).rejects.toEqual(
+        code('approval_nothing_changed'),
+      );
+    });
+
+    it('a batch counts items with nothing new apart from failures', async () => {
+      const sent = await withCopy();
+      await service.sendContent(ctx(), sent.itemId, 'copy');
+      const fresh = await withCopy();
+
+      const outcome = await service.sendContentBatch(
+        ctx(),
+        [sent.itemId, fresh.itemId],
+        'auto',
+      );
+
+      expect(outcome).toMatchObject({ sent: 1, unchanged: 1, failed: 0 });
+    });
+  });
+
   describe('stale approvals (D-20)', () => {
     it('a new revision reopens an approved copy, with the event', async () => {
       const { itemId, approvalId } = await copyAwaitingClient();

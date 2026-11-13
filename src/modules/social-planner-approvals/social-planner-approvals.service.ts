@@ -57,9 +57,14 @@ import {
   SocialPlanEntity,
 } from '../social-planner/entities';
 import { SocialContentProductionStatusService } from '../social-planner/services/social-content-production-status.service';
-import type { ContentApprovalMode } from './dto/social-planner-approval.dto';
+import type {
+  ContentApprovalMode,
+  ContentApprovalRequestMode,
+} from './dto/social-planner-approval.dto';
 
 const IN_REVIEW = new Set(['awaiting_internal_review', 'awaiting_client']);
+/** A decided request whose picture did not change cannot be sent again. */
+const DECIDED = new Set(['approved', 'changes_requested']);
 
 export type ContentSendBlocker =
   | 'copy_missing'
@@ -69,8 +74,39 @@ export type ContentSendBlocker =
   | 'creative_revision_required'
   | 'in_review'
   | 'approved'
+  | 'unchanged'
+  | 'nothing_ready'
   | 'content_unavailable'
   | 'piece_finished';
+
+/** Which blocker explains "nothing to send" best, most specific first. */
+const NOTHING_TO_SEND_ORDER: readonly ContentSendBlocker[] = [
+  'content_unavailable',
+  'piece_finished',
+  'in_review',
+  'unchanged',
+  'creative_revision_required',
+  'creative_unavailable',
+  'nothing_ready',
+  'copy_not_approved',
+  'creative_missing',
+  'approved',
+  'copy_missing',
+];
+
+export type ContentApprovalPart = 'copy' | 'creative';
+
+export type ContentSendPlan = {
+  mode: ContentApprovalMode | null;
+  parts: ContentApprovalPart[];
+  blocker: ContentSendBlocker | null;
+  /** A part already went to approval before: this send is a new version. */
+  changes: Array<{
+    part: ContentApprovalPart;
+    resend: boolean;
+    previousStatus: string | null;
+  }>;
+};
 
 type StepFacts = {
   step: SocialApprovalStepEntity | null;
@@ -84,6 +120,8 @@ type ContentFacts = {
   copy: StepFacts;
   creative: StepFacts;
   media: string[];
+  /** Media of the last direct-upload creative sent, to tell a real change. */
+  sentMedia: string[] | null;
   copyApproved: boolean;
   creativeSource: 'creative_studio' | 'media_set' | null;
   unavailable: boolean;
@@ -273,10 +311,22 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
       .getRepository(SocialApprovalPieceEntity)
       .findOne({ where: { ...approvalScopeWhere(scope), kind, sourceId } });
     const { step, request } = await this.stepOf(manager, piece, 'table');
-    const canSend =
+    const open =
       sourceOpen &&
       (await this.hasOpenItems(manager, kind, sourceId)) &&
       !piece?.finishedAt;
+    const unchanged = await this.samePicture(manager, request, payload);
+    const blocker: ContentSendBlocker | null = !open
+      ? piece?.finishedAt
+        ? 'piece_finished'
+        : 'content_unavailable'
+      : unchanged && request
+        ? IN_REVIEW.has(request.status)
+          ? 'in_review'
+          : request.status === 'approved'
+            ? 'approved'
+            : 'unchanged'
+        : null;
     return {
       pieceId: piece?.id ?? null,
       approvalId: request?.id ?? null,
@@ -285,8 +335,33 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
       finishedAt: piece?.finishedAt?.toISOString() ?? null,
       itemCount: payload.rows.length,
       warnings: tableWarnings(payload),
-      canSend,
+      canSend: blocker === null,
+      blocker,
+      /** Already went to approval once: the next send is a new version. */
+      resend: Boolean(request && request.status !== 'draft'),
+      revisionLabel: request?.subjectVersionLabel ?? null,
     };
+  }
+
+  /**
+   * True when `request` reviews (or reviewed) exactly this picture, so sending
+   * it again would ask for the same decision twice.
+   */
+  private async samePicture(
+    manager: EntityManager,
+    request: SocialApprovalRequestEntity | null,
+    payload: ApprovalSnapshotPayload,
+  ) {
+    if (
+      !request ||
+      request.subjectType !== 'approval_snapshot' ||
+      !(IN_REVIEW.has(request.status) || DECIDED.has(request.status))
+    )
+      return false;
+    const reviewed = await manager
+      .getRepository(SocialApprovalSnapshotEntity)
+      .findOne({ where: { id: request.subjectRevisionId } });
+    return reviewed?.contentHash === hashSnapshotPayload(payload);
   }
 
   async sendPlanTable(ctx: RequestContext, planId: string) {
@@ -400,7 +475,10 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
       throw conflict('approval_piece_finished', 'Esta peça já foi finalizada.');
   }
 
-  /** The same picture already under review is not a new send (double click). */
+  /**
+   * The same picture already under review is not a new send (double click);
+   * the same picture already decided cannot be sent again.
+   */
   private async sendSnapshot(
     manager: EntityManager,
     scope: CompanyAwareScope,
@@ -417,16 +495,13 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
           .getRepository(SocialApprovalRequestEntity)
           .findOne({ where: { id: step.currentRequestId } })
       : null;
-    if (
-      current &&
-      IN_REVIEW.has(current.status) &&
-      current.subjectType === 'approval_snapshot'
-    ) {
-      const reviewed = await manager
-        .getRepository(SocialApprovalSnapshotEntity)
-        .findOne({ where: { id: current.subjectRevisionId } });
-      if (reviewed?.contentHash === hashSnapshotPayload(payload))
+    if (current && (await this.samePicture(manager, current, payload))) {
+      if (IN_REVIEW.has(current.status))
         return { request: current, changed: false };
+      throw conflict(
+        'approval_nothing_changed',
+        'Nada mudou desde o último envio.',
+      );
     }
     const snapshot = await this.pieces.createSnapshot(
       manager,
@@ -497,6 +572,14 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
     const media = mediaByItem.get(item.id) ?? [];
     const usableSelection =
       snapshot.selection && !snapshot.selection.unavailableReason;
+    const sent =
+      creative.request?.subjectType === 'approval_snapshot' &&
+      creative.request.displayType === 'media_set'
+        ? await manager
+            .getRepository(SocialApprovalSnapshotEntity)
+            .findOne({ where: { id: creative.request.subjectRevisionId } })
+        : null;
+    const sentItems = (sent?.payload as { items?: unknown } | undefined)?.items;
     return {
       snapshot,
       item,
@@ -504,6 +587,11 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
       copy,
       creative,
       media,
+      sentMedia: Array.isArray(sentItems)
+        ? sentItems.map((entry) =>
+            String((entry as { mediaAssetId?: unknown }).mediaAssetId),
+          )
+        : null,
       copyApproved:
         copy.request?.status === 'approved' &&
         !copy.step?.isStale &&
@@ -537,7 +625,11 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
           ? 'in_review'
           : facts.copyApproved
             ? 'approved'
-            : null);
+            : facts.copy.request?.status === 'changes_requested' &&
+                facts.copy.request.subjectRevisionId ===
+                  facts.item.currentRevisionId
+              ? 'unchanged'
+              : null);
     const creativeReady: ContentSendBlocker | null =
       general ??
       (facts.snapshot.selection?.unavailableReason
@@ -566,10 +658,80 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
                 facts.creative.request.displayType === 'media_set' &&
                 !facts.creative.step?.isStale
               ? 'approved'
-              : facts.piece?.sendOrder !== 'together' && !facts.copyApproved
-                ? 'copy_not_approved'
-                : null);
+              : facts.creativeSource === 'media_set' &&
+                  facts.creative.request?.status === 'changes_requested' &&
+                  facts.creative.request.displayType === 'media_set' &&
+                  this.sameMedia(facts.media, facts.sentMedia)
+                ? 'unchanged'
+                : // A piece without text has no copy to wait for.
+                  facts.item.currentRevisionId &&
+                    facts.piece?.sendOrder !== 'together' &&
+                    !facts.copyApproved
+                  ? 'copy_not_approved'
+                  : null);
     return { copy, creative, creativeReady };
+  }
+
+  private sameMedia(current: readonly string[], sent: string[] | null) {
+    if (!sent || sent.length !== current.length) return false;
+    const left = [...current].sort();
+    return [...sent].sort().every((id, index) => id === left[index]);
+  }
+
+  /**
+   * The send button decides for the user (no mode picker): whatever is ready
+   * and changed goes; nothing changed means nothing to send.
+   */
+  private sendPlan(facts: ContentFacts): ContentSendPlan {
+    const { copy, creative, creativeReady } = this.blockers(facts);
+    const copyOpen = copy === null;
+    // Creative waiting only on a copy that is going (or already in review)
+    // now goes along with it, in a single approval.
+    const creativeOpen =
+      creativeReady === null &&
+      (creative === null ||
+        (creative === 'copy_not_approved' &&
+          (copyOpen || copy === 'in_review')));
+    const mode: ContentApprovalMode | null =
+      copyOpen && creativeOpen
+        ? 'together'
+        : copyOpen
+          ? 'copy'
+          : creativeOpen
+            ? creative === null
+              ? 'creative'
+              : 'together'
+            : null;
+    const parts: ContentApprovalPart[] = [
+      ...(copyOpen ? (['copy'] as const) : []),
+      ...(creativeOpen ? (['creative'] as const) : []),
+    ];
+    const previous = (part: ContentApprovalPart) => {
+      const request =
+        part === 'copy' ? facts.copy.request : facts.creative.request;
+      return request && request.status !== 'draft' ? request.status : null;
+    };
+    const candidates: ContentSendBlocker[] = [
+      ...(copy ? [copy] : []),
+      ...(creative ? [creative] : []),
+      ...(copy === 'copy_missing' && creativeReady === 'creative_missing'
+        ? (['nothing_ready'] as const)
+        : []),
+    ];
+    return {
+      mode,
+      parts,
+      blocker: mode
+        ? null
+        : (NOTHING_TO_SEND_ORDER.find((code) => candidates.includes(code)) ??
+          candidates[0] ??
+          null),
+      changes: parts.map((part) => ({
+        part,
+        resend: previous(part) !== null,
+        previousStatus: previous(part),
+      })),
+    };
   }
 
   /** R-09/D-01/D-21: what the popover shows, decided here and not in the UI. */
@@ -630,6 +792,8 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
         pending:
           table.request?.status !== 'approved' || Boolean(table.step?.isStale),
       },
+      /** What the single send button will do now (mode `auto`). */
+      next: this.sendPlan(facts),
       modes: {
         copy: { allowed: copy === null, blocker: copy },
         creative: { allowed: creative === null, blocker: creative },
@@ -645,11 +809,31 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
   async sendContent(
     ctx: RequestContext,
     contentId: string,
-    mode: ContentApprovalMode,
+    requested: ContentApprovalRequestMode,
     batchId: string | null = null,
   ) {
     const scope = resolveCompanyAwareScope(ctx);
     const actor = this.actor(ctx);
+    let facts: ContentFacts | null = null;
+    let mode: ContentApprovalMode;
+    if (requested === 'auto') {
+      await this.sync.refreshStaleness(scope, [
+        {
+          clientId: scope.agencyClientId,
+          companyContextId: scope.companyContextId,
+        },
+      ]);
+      facts = await this.contentFacts(scope, contentId);
+      this.assertSendable(facts);
+      const plan = this.sendPlan(facts);
+      if (!plan.mode)
+        throw conflict(
+          'approval_nothing_to_send',
+          'Não há nada novo para enviar nesta peça.',
+          { blocker: plan.blocker },
+        );
+      mode = plan.mode;
+    } else mode = requested;
     if (mode === 'creative' || mode === 'together')
       await this.permissions.assertCan(
         {
@@ -660,8 +844,18 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
         },
         CREATIVE_PRODUCTION_PERMISSIONS.submitReview,
       );
-    const facts = await this.contentFacts(scope, contentId);
-    this.assertSendable(facts);
+    if (!facts) {
+      facts = await this.contentFacts(scope, contentId);
+      this.assertSendable(facts);
+    }
+    if (
+      (mode === 'copy' || mode === 'sequential') &&
+      this.blockers(facts).copy === 'unchanged'
+    )
+      throw conflict(
+        'approval_nothing_changed',
+        'Nada mudou desde o último envio.',
+      );
 
     let copy: SentStep | null = null;
     let creative: SentStep | null = null;
@@ -673,12 +867,23 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
         copy = await this.sendCopy(scope, actor, facts, batchId, 'sequential');
         break;
       case 'creative':
-        // D-21: only an explicit send, and only after the copy is approved.
-        if (facts.piece?.sendOrder !== 'together' && !facts.copyApproved)
+        // D-21: only after the copy is approved — unless there is no copy.
+        if (
+          facts.item.currentRevisionId &&
+          facts.piece?.sendOrder !== 'together' &&
+          !facts.copyApproved
+        )
           throw conflict(
             'approval_copy_not_approved',
             'Aprove a copy antes de enviar o criativo.',
           );
+        // D-22: with no text, the creative is the whole piece; the item
+        // enters the creative segment the way "Tudo junto" does.
+        if (!facts.item.currentRevisionId)
+          await this.plannerStatus.reflectCopyHandoff(scope, {
+            contentItemId: facts.item.id,
+            actorUserId: actor.userId,
+          });
         creative = await this.sendCreative(ctx, scope, actor, facts, batchId);
         break;
       case 'together': {
@@ -705,6 +910,7 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
     }
     return {
       changed: Boolean(copy?.changed || creative?.changed),
+      mode,
       copy,
       creative,
       state: await this.contentState(ctx, contentId),
@@ -851,7 +1057,7 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
   async sendContentBatch(
     ctx: RequestContext,
     contentIds: readonly string[],
-    mode: ContentApprovalMode,
+    mode: ContentApprovalRequestMode,
   ) {
     const batchId = randomUUID();
     const results: Array<{
@@ -872,17 +1078,21 @@ export class SocialPlannerApprovalsService implements OnModuleInit {
           message: null,
         });
       } catch (error) {
+        const failure = this.failure(error);
+        // Nothing new on an item is not a failure of the batch.
         results.push({
           contentId,
-          ok: false,
+          ok: failure.code === 'approval_nothing_to_send',
           changed: false,
-          ...this.failure(error),
+          ...failure,
         });
       }
     }
     return {
       batchId,
       sent: results.filter((result) => result.ok && result.changed).length,
+      unchanged: results.filter((result) => result.ok && !result.changed)
+        .length,
       failed: results.filter((result) => !result.ok).length,
       results,
     };
