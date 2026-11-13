@@ -521,7 +521,10 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       const note = detail.comments.at(-1)!;
       expect(note.visibility).toBe('client');
       const decision = detail.decisions.at(-1)!;
-      expect(decision).toMatchObject({ decision: 'approved', commentId: note.id });
+      expect(decision).toMatchObject({
+        decision: 'approved',
+        commentId: note.id,
+      });
       expect(
         buildClientApprovalHistory(saved, [decision], [], () => null).map(
           (entry) => entry.kind,
@@ -1024,6 +1027,46 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
         .getRepository(SocialApprovalPieceEntity)
         .findOneBy({ kind: 'content_item', sourceId: item.id });
       expect(foreign === null || !ids.includes(foreign.id)).toBe(true);
+    });
+
+    it('a planning card carries its channels, placements and format', async () => {
+      const { item } = await awaitingClient(scopeA);
+      await db.getRepository(SocialContentItemEntity).update(item.id, {
+        plannedDate: '2026-12-05',
+        creativeFormat: 'carousel',
+      });
+      for (const [channel, placement] of [
+        ['instagram', 'story'],
+        ['instagram', 'feed'],
+        ['facebook', 'feed'],
+      ])
+        await db.getRepository(SocialContentDestinationEntity).save({
+          tenantId,
+          workspaceId,
+          agencyClientId: scopeA.agencyClientId,
+          contentItemId: item.id,
+          channel,
+          placement,
+        } as never);
+      const piece = await pieceOf(item.id);
+      const result = (await board.board(agencyCtx(), {
+        column: piece.boardColumn,
+        limit: 100,
+      })) as {
+        columns: Record<string, { items: Array<Record<string, unknown>> }>;
+      };
+      const card = result.columns[piece.boardColumn].items.find(
+        (entry) => entry.id === piece.id,
+      );
+      expect(card).toMatchObject({
+        plannedDate: '2026-12-05',
+        creativeFormat: 'carousel',
+        destinations: [
+          { channel: 'facebook', placement: 'feed' },
+          { channel: 'instagram', placement: 'feed' },
+          { channel: 'instagram', placement: 'story' },
+        ],
+      });
     });
 
     it('a piece of another company answers 404 on detail', async () => {

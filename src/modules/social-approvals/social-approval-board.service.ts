@@ -66,6 +66,8 @@ type ContextSettings = ReturnType<SocialApprovalSettingsService['get']>;
 type RawCard = {
   planned_date: string | null;
   content_type: string | null;
+  creative_format: string | null;
+  destinations: Array<{ channel: string; placement: string }> | null;
   plan_title: string | null;
   campaign_name: string | null;
 };
@@ -222,8 +224,14 @@ export class SocialApprovalBoardService {
         'campaign',
         `campaign.id = CASE WHEN piece.kind = 'campaign_table' THEN piece.sourceId ELSE item.campaignInstanceId END`,
       )
-      .addSelect('item.plannedDate', 'planned_date')
+      // to_char: a raw `date` would come back as a Date at local midnight.
+      .addSelect(`to_char(item.planned_date, 'YYYY-MM-DD')`, 'planned_date')
       .addSelect('item.contentType', 'content_type')
+      .addSelect('item.creativeFormat', 'creative_format')
+      .addSelect(
+        `(SELECT COALESCE(json_agg(json_build_object('channel', d.channel, 'placement', d.placement) ORDER BY d.channel, d.placement), '[]'::json) FROM social_content_destinations d WHERE d.content_item_id = item.id)`,
+        'destinations',
+      )
       .addSelect('plan.title', 'plan_title')
       .addSelect('campaign.name', 'campaign_name')
       .where(
@@ -395,6 +403,8 @@ export class SocialApprovalBoardService {
               !closedSource,
           },
           contentType: raw[index]?.content_type ?? null,
+          creativeFormat: raw[index]?.creative_format ?? null,
+          destinations: raw[index]?.destinations ?? [],
           plannedDate: raw[index]?.planned_date ?? null,
           planTitle: raw[index]?.plan_title ?? null,
           campaignName: raw[index]?.campaign_name ?? null,
