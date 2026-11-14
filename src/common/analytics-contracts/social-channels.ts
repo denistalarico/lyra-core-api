@@ -82,7 +82,7 @@ export const ANALYTICS_CHANNELS: AnalyticsChannel[] = [
     id: "google_ads",
     label: "Google Ads",
     icon: "/integrations/webp/googleads.webp",
-    integrated: false,
+    integrated: true,
   },
 ];
 

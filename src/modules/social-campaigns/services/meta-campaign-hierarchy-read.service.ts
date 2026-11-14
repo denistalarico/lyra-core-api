@@ -19,6 +19,8 @@ import type { SocialCampaignsScope } from './social-boost-template.service';
 import { deriveMetaCampaignAttentionReasons } from './meta-campaign-attention';
 
 const META_PROVIDER = 'meta_ads';
+/** G2: the mirror is shared; only the provider filter differs (D-G6). */
+export type CampaignHierarchyProvider = 'meta_ads' | 'google_ads';
 const PAID_SOURCE = 'paid';
 const ACCOUNT_DEFAULT_ATTRIBUTION = 'account_default';
 const EMPTY_METRICS: MetaCampaignNodeMetrics = {
@@ -50,6 +52,8 @@ export type MetaCampaignHierarchyInput = SocialCampaignsScope & {
   search?: string;
   page?: number;
   limit?: number;
+  /** Defaults to Meta so the existing route keeps its exact behavior. */
+  provider?: CampaignHierarchyProvider;
 };
 
 /**
@@ -80,7 +84,8 @@ export class MetaCampaignHierarchyReadService {
     const limit = input.limit ?? 25;
     const status = input.status ?? 'all';
     const search = input.search?.trim() || null;
-    const connection = await this.findConnection(input);
+    const provider = input.provider ?? META_PROVIDER;
+    const connection = await this.findConnection(input, provider);
 
     const campaignQuery = this.entities
       .createQueryBuilder('campaign')
@@ -95,7 +100,7 @@ export class MetaCampaignHierarchyReadService {
       .andWhere('campaign.connection_id = :connectionId', {
         connectionId: connection.id,
       })
-      .andWhere('campaign.provider = :provider', { provider: META_PROVIDER })
+      .andWhere('campaign.provider = :provider', { provider })
       .andWhere('campaign.entity_level = :level', { level: 'campaign' });
 
     this.applyStatusFilter(campaignQuery, status);
@@ -127,9 +132,9 @@ export class MetaCampaignHierarchyReadService {
 
     const campaignIds = campaigns.map((campaign) => campaign.externalId);
     const [children, metrics, hierarchyFreshness] = await Promise.all([
-      this.readChildren(connection.id, input, campaignIds),
-      this.readMetrics(connection.id, input, period, campaignIds),
-      this.readHierarchyFreshness(connection.id, input),
+      this.readChildren(connection.id, input, campaignIds, provider),
+      this.readMetrics(connection.id, input, period, campaignIds, provider),
+      this.readHierarchyFreshness(connection.id, input, provider),
     ]);
 
     const adSets = children.filter((entity) => entity.entityLevel === 'adset');
@@ -189,7 +194,10 @@ export class MetaCampaignHierarchyReadService {
     };
   }
 
-  private findConnection(input: MetaCampaignHierarchyInput) {
+  private findConnection(
+    input: MetaCampaignHierarchyInput,
+    provider: CampaignHierarchyProvider,
+  ) {
     return this.connections
       .findOne({
         where: {
@@ -200,12 +208,16 @@ export class MetaCampaignHierarchyReadService {
             input.agencyClientId === null ? IsNull() : input.agencyClientId,
           companyContextId:
             input.companyContextId == null ? IsNull() : input.companyContextId,
-          provider: META_PROVIDER,
+          provider,
         },
       })
       .then((connection) => {
         if (!connection)
-          throw new NotFoundException('Meta connection not found.');
+          throw new NotFoundException(
+            provider === META_PROVIDER
+              ? 'Meta connection not found.'
+              : 'Google Ads connection not found.',
+          );
         return connection;
       });
   }
@@ -238,6 +250,7 @@ export class MetaCampaignHierarchyReadService {
     connectionId: string,
     scope: SocialCampaignsScope,
     campaignIds: string[],
+    provider: CampaignHierarchyProvider,
   ) {
     if (!campaignIds.length) return [];
     return this.entities
@@ -251,7 +264,7 @@ export class MetaCampaignHierarchyReadService {
         { agencyClientId: scope.agencyClientId },
       )
       .andWhere('entity.connection_id = :connectionId', { connectionId })
-      .andWhere('entity.provider = :provider', { provider: META_PROVIDER })
+      .andWhere('entity.provider = :provider', { provider })
       .andWhere(`entity.entity_level IN ('adset', 'ad')`)
       .andWhere('entity.campaign_external_id IN (:...campaignIds)', {
         campaignIds,
@@ -267,6 +280,7 @@ export class MetaCampaignHierarchyReadService {
     scope: SocialCampaignsScope,
     period: { since: string; until: string },
     campaignIds: string[],
+    provider: CampaignHierarchyProvider,
   ) {
     const result = new Map<string, MetaCampaignNodeMetrics>();
     if (!campaignIds.length) return result;
@@ -289,7 +303,7 @@ export class MetaCampaignHierarchyReadService {
         agencyClientId: scope.agencyClientId,
       })
       .andWhere('fact.connection_id = :connectionId', { connectionId })
-      .andWhere('fact.provider = :provider', { provider: META_PROVIDER })
+      .andWhere('fact.provider = :provider', { provider })
       .andWhere('fact.source = :source', { source: PAID_SOURCE })
       .andWhere('fact.attribution_setting = :attribution', {
         attribution: ACCOUNT_DEFAULT_ATTRIBUTION,
@@ -320,6 +334,7 @@ export class MetaCampaignHierarchyReadService {
   private async readHierarchyFreshness(
     connectionId: string,
     scope: SocialCampaignsScope,
+    provider: CampaignHierarchyProvider,
   ) {
     const row = await this.entities
       .createQueryBuilder('entity')
@@ -333,7 +348,7 @@ export class MetaCampaignHierarchyReadService {
         { agencyClientId: scope.agencyClientId },
       )
       .andWhere('entity.connection_id = :connectionId', { connectionId })
-      .andWhere('entity.provider = :provider', { provider: META_PROVIDER })
+      .andWhere('entity.provider = :provider', { provider })
       .getRawOne<{ last_seen_at: Date | string | null }>();
     const value = row?.last_seen_at;
     return value ? new Date(value).toISOString() : null;

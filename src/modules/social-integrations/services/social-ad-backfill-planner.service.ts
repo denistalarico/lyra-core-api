@@ -12,7 +12,11 @@ import {
   type SocialAdSyncRunKind,
 } from '../sync/social-ad-sync-run.contract';
 import type { SocialAdSchedulableConnection } from './social-ad-connection.service';
-import { SocialAdSyncConfigService } from './social-ad-sync-config.service';
+import {
+  GOOGLE_ADS_BACKFILL_CHUNK_DAYS,
+  GOOGLE_ADS_BACKFILL_DAYS,
+  SocialAdSyncConfigService,
+} from './social-ad-sync-config.service';
 import {
   SocialAdSyncRunService,
   type SocialAdBackfillChunkOutcome,
@@ -308,7 +312,18 @@ export class SocialAdBackfillPlannerService {
       return { action: 'skipped', reason: 'sync_disabled' };
     }
 
-    const totalDays = this.config.backfillDays;
+    const google = connection.provider === 'google_ads';
+
+    // Google has its own switch (D-G8), default off.
+    if (google && !this.config.googleAdsEnabled) {
+      return { action: 'skipped', reason: 'sync_disabled' };
+    }
+
+    // Google reads a shorter history in one wide chunk (D-G11); the shared
+    // knob can only lower it, never raise it.
+    const totalDays = google
+      ? Math.min(this.config.backfillDays, GOOGLE_ADS_BACKFILL_DAYS)
+      : this.config.backfillDays;
 
     if (totalDays <= 0) {
       return { action: 'skipped', reason: 'backfill_disabled' };
@@ -364,7 +379,9 @@ export class SocialAdBackfillPlannerService {
     const chunks = planBackfillChunks({
       anchor,
       totalDays,
-      chunkDays: this.config.backfillChunkDays,
+      chunkDays: google
+        ? GOOGLE_ADS_BACKFILL_CHUNK_DAYS
+        : this.config.backfillChunkDays,
     });
 
     if (chunks.length === 0) {

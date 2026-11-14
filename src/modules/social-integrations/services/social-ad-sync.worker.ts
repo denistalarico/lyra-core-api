@@ -28,6 +28,7 @@ import {
   SocialAdBackfillPlannerService,
   advancesBackfillChain,
 } from './social-ad-backfill-planner.service';
+import { GoogleAdsSyncService } from './google-ads-sync.service';
 import { SocialAdConnectionService } from './social-ad-connection.service';
 import { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './social-ad-insights-sync.service';
@@ -92,6 +93,7 @@ export class SocialAdSyncWorker {
     private readonly insightsSync: SocialAdInsightsSyncService,
     private readonly connectionService: SocialAdConnectionService,
     private readonly backfillPlanner: SocialAdBackfillPlannerService,
+    private readonly googleAdsSync: GoogleAdsSyncService,
   ) {}
 
   @Interval(TICK_MS)
@@ -274,12 +276,19 @@ export class SocialAdSyncWorker {
   }): Promise<void> {
     const { counters } = input;
 
+    // The one provider branch of the worker (G2): Google rows use the Google
+    // services, which return the same summaries and write through the same
+    // writers. Everything below this decision is provider-blind.
+    const google = input.credential.provider === 'google_ads';
+
     if (!isInsightsSegment(input.segment)) {
-      const summary = await this.hierarchySync.syncHierarchyWith(
-        input.credential,
-        // Provenance for the destination observations this sweep may append.
-        input.run.id,
-      );
+      const summary = google
+        ? await this.googleAdsSync.syncHierarchyWith(input.credential)
+        : await this.hierarchySync.syncHierarchyWith(
+            input.credential,
+            // Provenance for the destination observations this sweep may append.
+            input.run.id,
+          );
 
       counters.entitiesWritten += summary.entitiesWritten;
       counters.apiCalls += summary.apiCalls;
@@ -329,7 +338,8 @@ export class SocialAdSyncWorker {
       assertClosedInsightsWindow(window, input.credential.timezone);
     }
 
-    const summary = await this.insightsSync.ingestLevel({
+    const insights = google ? this.googleAdsSync : this.insightsSync;
+    const summary = await insights.ingestLevel({
       credential: input.credential,
       // From the total map rather than a conditional: a segment that is not an
       // insights read never reaches this line (the hierarchy branch returned

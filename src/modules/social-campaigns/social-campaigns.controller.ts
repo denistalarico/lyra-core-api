@@ -520,6 +520,29 @@ export class SocialCampaignsController {
     });
   }
 
+  /** G2: same view over the local Google Ads mirror. Read-only (D-G7). */
+  @ClientAreaExposed('social_campaigns')
+  @Get('google/hierarchy')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  googleHierarchy(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: MetaCampaignHierarchyQueryDto,
+  ) {
+    return this.hierarchy.read({
+      ...this.requireScope(ctx),
+      connectionId: query.connectionId,
+      since: query.since,
+      until: query.until,
+      status: query.status,
+      search: query.search,
+      page: query.page,
+      limit: query.limit,
+      provider: 'google_ads',
+    });
+  }
+
   @ClientAreaExposed('social_campaigns')
   @Get('boost-templates')
   @UseGuards(JwtAuthGuard, PermissionsGuard)

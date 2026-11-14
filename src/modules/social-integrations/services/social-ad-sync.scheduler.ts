@@ -120,7 +120,10 @@ export class SocialAdSyncScheduler {
 
   /** Queues everything every connection is due, in one pass. */
   async enqueueDue(now: Date = new Date()): Promise<number> {
-    const connections = await this.connectionService.listSchedulable();
+    // Google is opt-in through its own kill switch (D-G8).
+    const connections = await this.connectionService.listSchedulable(
+      this.config.googleAdsEnabled ? ['meta_ads', 'google_ads'] : ['meta_ads'],
+    );
 
     let enqueued = 0;
 
@@ -253,6 +256,10 @@ export class SocialAdSyncScheduler {
     connection: SocialAdSchedulableConnection,
     now: Date,
   ): Promise<boolean> {
+    // Intraday is off for Google (D-G11): the daily run is the only read, so
+    // the project's operation budget is not spent on provisional days.
+    if (connection.provider === 'google_ads') return false;
+
     const intervalHours = this.config.intradayIntervalHours;
 
     if (intervalHours <= 0) return false;

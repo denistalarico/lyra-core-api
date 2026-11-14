@@ -47,6 +47,8 @@ import { SocialAdReachPeriodService } from './services/social-ad-reach-period.se
 import { SocialAdRetentionConfigService } from './services/social-ad-retention-config.service';
 import { SocialAdRetentionService } from './services/social-ad-retention.service';
 import { SocialAdRetentionScheduler } from './services/social-ad-retention.scheduler';
+import { GoogleAdsReaderService } from './services/google-ads-reader.service';
+import { GoogleAdsSyncService } from './services/google-ads-sync.service';
 import { SocialAdSyncConfigService } from './services/social-ad-sync-config.service';
 import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import { SocialAdSyncScheduler } from './services/social-ad-sync.scheduler';
@@ -134,6 +136,8 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdSyncRunService,
     SocialAdBackfillPlannerService,
     SocialAdBackfillResumeService,
+    GoogleAdsReaderService,
+    GoogleAdsSyncService,
     SocialAdSyncWorker,
     SocialAdSyncScheduler,
     // Housekeeping over the run log, on its own switch and its own daily

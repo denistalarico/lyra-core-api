@@ -290,12 +290,12 @@ describe('SocialAnalyticsDashboardsService', () => {
         .map(([entity]) => entity.channelKey)
         .filter(Boolean);
 
-      expect(seededChannels).toEqual(['facebook', 'instagram', 'meta_ads']);
-
-      // Google Ads is not seeded: the integration does not exist, and a tab
-      // that can only say "not integrated" is a promise the product does not
-      // keep.
-      expect(seededChannels).not.toContain('google_ads');
+      expect(seededChannels).toEqual([
+        'facebook',
+        'instagram',
+        'meta_ads',
+        'google_ads',
+      ]);
     });
 
     it('seeds each channel screen with its frozen default layout', async () => {

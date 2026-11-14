@@ -43,10 +43,8 @@ export const DEFAULT_DASHBOARD_NAME = 'Visão Geral';
  * The channels that get a screen of their own, and what those screens are
  * called.
  *
- * `google_ads` is deliberately absent: the integration does not exist yet, and
- * a seeded tab that can only ever say "not integrated" is a promise the product
- * does not keep. It joins the list when the channel does, with a default
- * layout of its own (SO-DEF1).
+ * `google_ads` joined with G2, once its integration read from the local mirror
+ * (default layout of its own, SO-DEF1). `ga4` joins with G3.
  */
 export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
   channel: SocialChannelDefaultId;
@@ -55,6 +53,7 @@ export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
   { channel: 'facebook', name: 'Facebook' },
   { channel: 'instagram', name: 'Instagram' },
   { channel: 'meta_ads', name: 'Meta Ads' },
+  { channel: 'google_ads', name: 'Google Ads' },
 ];
 
 export type SocialAnalyticsDashboardView = {

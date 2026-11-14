@@ -1,9 +1,9 @@
-/* eslint-disable @typescript-eslint/require-await -- worker test doubles expose partial service shapes. */
 import type { ResolvedAdCredential } from '../credentials/resolved-ad-credential';
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
 import type { SocialAdCredentialResolver } from '../credentials/social-ad-credential.resolver';
 import type { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
 import { MetaGraphError } from './meta-graph-error';
+import type { GoogleAdsSyncService } from './google-ads-sync.service';
 import type { SocialAdConnectionService } from './social-ad-connection.service';
 import type { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.service';
 import type { SocialAdInsightsSyncService } from './social-ad-insights-sync.service';
@@ -22,6 +22,12 @@ const CREDENTIAL = {
   externalAccountId: 'act_415877197389621',
   currency: 'BRL',
   timezone: 'America/Sao_Paulo',
+} as unknown as ResolvedAdCredential;
+
+const GOOGLE_CREDENTIAL = {
+  ...CREDENTIAL,
+  provider: 'google_ads',
+  externalAccountId: '1234567890',
 } as unknown as ResolvedAdCredential;
 
 function run(
@@ -69,6 +75,8 @@ type HarnessOptions = {
   hierarchyError?: Error;
   insightsErrorFor?: 'account' | 'campaign' | 'adset';
   insightsError?: Error;
+  /** Resolve a Google Ads credential instead of the Meta one. */
+  google?: boolean;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -95,7 +103,7 @@ function createHarness(options: HarnessOptions = {}) {
     resolvePersisted: jest.fn(async () => {
       if (options.resolveError) throw options.resolveError;
 
-      return CREDENTIAL;
+      return options.google ? GOOGLE_CREDENTIAL : CREDENTIAL;
     }),
   };
 
@@ -146,6 +154,19 @@ function createHarness(options: HarnessOptions = {}) {
     planNext: jest.fn(async () => ({ action: 'skipped', reason: 'complete' })),
   };
 
+  const googleAdsSync = {
+    syncHierarchyWith: jest.fn(async () => {
+      order.push('google_hierarchy');
+
+      return { entitiesWritten: 3, apiCalls: 4, levels: [] };
+    }),
+    ingestLevel: jest.fn(async (input: { level: string }) => {
+      order.push(`google_${input.level}_insights`);
+
+      return { written: 2, skipped: 0, apiCalls: 1 };
+    }),
+  };
+
   const worker = new SocialAdSyncWorker(
     config,
     runService as unknown as SocialAdSyncRunService,
@@ -154,6 +175,7 @@ function createHarness(options: HarnessOptions = {}) {
     insightsSync as unknown as SocialAdInsightsSyncService,
     connectionService as unknown as SocialAdConnectionService,
     backfillPlanner as unknown as SocialAdBackfillPlannerService,
+    googleAdsSync as unknown as GoogleAdsSyncService,
   );
 
   return {
@@ -164,6 +186,7 @@ function createHarness(options: HarnessOptions = {}) {
     insightsSync,
     connectionService,
     backfillPlanner,
+    googleAdsSync,
     levels,
     order,
   };
@@ -179,6 +202,38 @@ function createHarness(options: HarnessOptions = {}) {
 function firstCall<T>(fn: { mock: { calls: unknown[][] } }): T {
   return fn.mock.calls[0][0] as T;
 }
+
+describe('SocialAdSyncWorker — Google Ads dispatch (G2)', () => {
+  it('sends every segment of a google_ads credential to the Google services', async () => {
+    const harness = createHarness({ google: true });
+
+    await harness.worker.processDue();
+
+    expect(harness.order).toEqual([
+      'google_hierarchy',
+      'google_account_insights',
+      'google_campaign_insights',
+      'google_adset_insights',
+    ]);
+  });
+
+  it('never calls the Meta services for a google_ads credential', async () => {
+    const harness = createHarness({ google: true });
+
+    await harness.worker.processDue();
+
+    expect(harness.hierarchySync.syncHierarchyWith).not.toHaveBeenCalled();
+    expect(harness.insightsSync.ingestLevel).not.toHaveBeenCalled();
+  });
+
+  it('keeps the Meta services for a meta_ads credential', async () => {
+    const harness = createHarness();
+
+    await harness.worker.processDue();
+
+    expect(harness.googleAdsSync.ingestLevel).not.toHaveBeenCalled();
+  });
+});
 
 describe('SocialAdSyncWorker — a run that works', () => {
   it('executes the hierarchy before the insights that reference it', async () => {

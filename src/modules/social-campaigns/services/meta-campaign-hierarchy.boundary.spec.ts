@@ -31,7 +31,9 @@ describe('Meta campaign operational hierarchy boundary', () => {
     expect(source).toContain('tenantId: input.tenantId');
     expect(source).toContain('workspaceId: input.workspaceId');
     expect(source).toContain('agencyClientId:');
-    expect(source).toContain('provider: META_PROVIDER');
+    // Meta stays the default; Google is opt-in per route (G2, D-G6).
+    expect(source).toContain('input.provider ?? META_PROVIDER');
+    expect(source).toContain('provider,');
   });
 
   it('keeps tenant and workspace out of the public query DTO', () => {

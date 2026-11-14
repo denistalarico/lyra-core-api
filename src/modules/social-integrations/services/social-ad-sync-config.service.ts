@@ -10,6 +10,31 @@ export const SOCIAL_ADS_SYNC_BACKFILL_CHUNK_DAYS_ENV =
 export const SOCIAL_ADS_SYNC_INTRADAY_INTERVAL_HOURS_ENV =
   'SOCIAL_ADS_SYNC_INTRADAY_INTERVAL_HOURS';
 
+/**
+ * Google Ads (G2). Separate kill switch, **default off** until the authenticated
+ * smoke (D-G8): unlike the Meta switch, an unset variable means disabled.
+ */
+export const SOCIAL_GOOGLE_ADS_SYNC_ENABLED_ENV =
+  'SOCIAL_GOOGLE_ADS_SYNC_ENABLED';
+export const SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET_ENV =
+  'SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET';
+
+/**
+ * Operations the process may spend on the Google Ads API per Pacific day.
+ *
+ * The Explorer tier allows 2 880 per day for the whole Cloud project (D-G11).
+ * 2 000 leaves headroom for the account discovery calls, which do not go
+ * through this budget, and for a second API process, which keeps its own count.
+ */
+const DEFAULT_GOOGLE_ADS_DAILY_OPERATION_BUDGET = 2_000;
+
+/**
+ * Google history is shorter than Meta's and read in one wide window (D-G11):
+ * thirty days in a single chunk is one run per connection instead of thirteen.
+ */
+export const GOOGLE_ADS_BACKFILL_DAYS = 30;
+export const GOOGLE_ADS_BACKFILL_CHUNK_DAYS = 30;
+
 /** How far back a daily run re-reads, when nothing says otherwise. */
 const DEFAULT_DAILY_LOOKBACK_DAYS = 7;
 
@@ -91,6 +116,24 @@ export class SocialAdSyncConfigService {
     if (raw === undefined || raw === '') return true;
 
     return !['false', '0', 'no', 'off'].includes(raw);
+  }
+
+  /** Whether Google Ads accounts are scheduled at all. Off unless set. */
+  get googleAdsEnabled(): boolean {
+    const raw =
+      process.env[SOCIAL_GOOGLE_ADS_SYNC_ENABLED_ENV]?.trim().toLowerCase();
+
+    return raw !== undefined && ['true', '1', 'yes', 'on'].includes(raw);
+  }
+
+  /** Per-process daily operation budget for the Google Ads API (D-G11). */
+  get googleAdsDailyOperationBudget(): number {
+    return this.readInteger({
+      name: SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET_ENV,
+      fallback: DEFAULT_GOOGLE_ADS_DAILY_OPERATION_BUDGET,
+      min: 1,
+      max: 15_000,
+    });
   }
 
   /** Days a daily run re-reads, ending at the account's last settled day. */

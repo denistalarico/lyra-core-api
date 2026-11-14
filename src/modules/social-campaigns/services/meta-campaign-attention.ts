@@ -33,7 +33,9 @@ export function deriveMetaCampaignAttentionReasons(input: {
   if (effectiveStatus && DELIVERY_ISSUE_STATUSES.has(effectiveStatus)) {
     reasons.add('delivery_issue');
   }
+  // Destination is a Meta ad-set concept; Google has no equivalent (D-G6).
   if (
+    entity.provider !== 'google_ads' &&
     entity.entityLevel === 'adset' &&
     (!entity.destinationType || entity.destinationType === 'unknown')
   ) {

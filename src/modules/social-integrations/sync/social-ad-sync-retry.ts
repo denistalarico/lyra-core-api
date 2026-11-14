@@ -1,4 +1,5 @@
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
+import { GoogleAdsError } from './google-ads-error';
 import { MetaGraphError } from '../services/meta-graph-error';
 import {
   SocialAdInsightsWindowNotClosedError,
@@ -96,6 +97,20 @@ export function classifySocialAdSyncRetry(
           retryAfterMs: null,
         };
 
+      case 'permanent':
+        return { action: 'stop', code, retryAfterMs: null };
+    }
+  }
+
+  // Google Ads (G2): same four kinds, mapped to the same three actions. The
+  // code is Google's own safe code, never a provider string.
+  if (error instanceof GoogleAdsError) {
+    switch (error.kind) {
+      case 'transient':
+        return { action: 'backoff', code, retryAfterMs: error.retryAfterMs };
+      case 'rate_limited':
+        return { action: 'rate_limit', code, retryAfterMs: error.retryAfterMs };
+      case 'auth':
       case 'permanent':
         return { action: 'stop', code, retryAfterMs: null };
     }

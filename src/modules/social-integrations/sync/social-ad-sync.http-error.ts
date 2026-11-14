@@ -2,6 +2,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
 import type { SocialAdCredentialErrorCode } from '../credentials/social-ad-credential.error';
 import { MetaGraphError } from '../services/meta-graph-error';
+import { GoogleAdsError, type GoogleAdsErrorKind } from './google-ads-error';
 import {
   SocialAdBreakdownDisabledError,
   SocialAdBreakdownTruncatedError,
@@ -115,6 +116,14 @@ const CREDENTIAL_MESSAGE: Record<SocialAdCredentialErrorCode, string> = {
  * that is not.
  */
 const GRAPH_STATUS: Record<MetaGraphError['kind'], HttpStatus> = {
+  rate_limited: HttpStatus.TOO_MANY_REQUESTS,
+  transient: HttpStatus.SERVICE_UNAVAILABLE,
+  auth: HttpStatus.CONFLICT,
+  permanent: HttpStatus.BAD_GATEWAY,
+};
+
+/** Same meaning as `GRAPH_STATUS`, for the Google Ads reader (G2). */
+const GOOGLE_ADS_STATUS: Record<GoogleAdsErrorKind, HttpStatus> = {
   rate_limited: HttpStatus.TOO_MANY_REQUESTS,
   transient: HttpStatus.SERVICE_UNAVAILABLE,
   auth: HttpStatus.CONFLICT,
@@ -256,6 +265,16 @@ export function describeSocialAdSyncFailure(
     };
   }
 
+  if (error instanceof GoogleAdsError) {
+    return {
+      status: GOOGLE_ADS_STATUS[error.kind],
+      // Already a safe code of ours; the provider's text is never read.
+      code: error.code,
+      message: 'Google Ads could not complete the request.',
+      ...(error.retryAfterMs ? { retryAfterMs: error.retryAfterMs } : {}),
+    };
+  }
+
   // An unclassified error is a bug. It gets a code that says so rather than a
   // reassuring one, and the message stays generic because its own text has been
   // through no sanitizer.
@@ -277,7 +296,8 @@ export function mapSocialAdSyncError(error: unknown): unknown {
     error instanceof SocialAdInsightsWindowNotIntradayError ||
     error instanceof SocialAdSyncDisabledError ||
     error instanceof SocialAdBackfillResumeError ||
-    error instanceof MetaGraphError
+    error instanceof MetaGraphError ||
+    error instanceof GoogleAdsError
   ) {
     const { status, ...body } = describeSocialAdSyncFailure(error);
 

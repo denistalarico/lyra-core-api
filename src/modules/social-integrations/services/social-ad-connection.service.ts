@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { SocialAdAccountConnectionEntity } from '../entities/social-ad-account-connection.entity';
 import {
   SocialAdConnectionView,
@@ -140,10 +140,12 @@ export class SocialAdConnectionService {
    * credential error at execution, which is a real failure written into the run
    * history every single hour.
    */
-  async listSchedulable(): Promise<SocialAdSchedulableConnection[]> {
+  async listSchedulable(
+    providers: readonly ('meta_ads' | 'google_ads')[] = ['meta_ads'],
+  ): Promise<SocialAdSchedulableConnection[]> {
     const connections = await this.connectionsRepository.find({
       where: {
-        provider: 'meta_ads',
+        provider: In([...providers]),
         connectionStatus: 'connected',
         credentialRemovedAt: IsNull(),
       },
