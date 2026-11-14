@@ -28,6 +28,8 @@ export type SocialAdCredentialErrorCode =
   | 'account_not_bound'
   | 'token_missing'
   | 'token_expired'
+  /** Google: the shared authorization could not refresh right now. Retry later. */
+  | 'credential_refresh_failed'
   | 'credential_decryption_failed'
   /** The account has no timezone, so no date could be attributed to a day. */
   | 'timezone_missing'

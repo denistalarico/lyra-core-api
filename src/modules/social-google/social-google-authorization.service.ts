@@ -9,6 +9,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, EntityManager } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
+import { SocialAdAccountConnectionEntity } from '../social-integrations/entities/social-ad-account-connection.entity';
 import {
   GoogleOAuthClient,
   GoogleOAuthError,
@@ -89,7 +90,111 @@ export class SocialGoogleAuthorizationService {
           authorization,
         )) > 0
       : false;
-    return toGoogleStatusView(authorization, links, sharedIdentity);
+    const adsAccounts = authorization
+      ? await this.listSelectedAdsAccounts(this.dataSource.manager, scope)
+      : [];
+    return toGoogleStatusView(
+      authorization,
+      links,
+      sharedIdentity,
+      adsAccounts,
+    );
+  }
+
+  /** Google Ads accounts the context selected (G1); never credential data. */
+  async listSelectedAdsAccounts(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+  ) {
+    const rows = await manager
+      .getRepository(SocialAdAccountConnectionEntity)
+      .createQueryBuilder('c')
+      .where(`c.provider = 'google_ads'`)
+      .andWhere(`c.connectionStatus = 'connected'`)
+      .andWhere('c.credentialRemovedAt IS NULL')
+      .andWhere('c.externalAccountId IS NOT NULL')
+      .andWhere('c.tenantId = :tenantId', { tenantId: scope.tenantId })
+      .andWhere('c.workspaceId = :workspaceId', {
+        workspaceId: scope.workspaceId,
+      })
+      .andWhere('c.agencyClientId IS NOT DISTINCT FROM :agencyClientId', {
+        agencyClientId: scope.agencyClientId,
+      })
+      .andWhere('c.companyContextId IS NOT DISTINCT FROM :companyContextId', {
+        companyContextId: scope.companyContextId,
+      })
+      .orderBy('c.createdAt', 'ASC')
+      .getMany();
+    return rows.map((row) => ({
+      id: row.externalAccountId as string,
+      name: row.accountName ?? (row.externalAccountId as string),
+    }));
+  }
+
+  /**
+   * Runs `work` inside a transaction holding the live authorization's row lock,
+   * so selection writes are ordered with refresh, disconnect and revoke.
+   */
+  async withLockedAuthorization<T>(
+    scope: CompanyAwareScope,
+    work: (ctx: {
+      manager: EntityManager;
+      authorization: SocialGoogleAuthorizationEntity;
+      audit: (
+        event: string,
+        product: string | null,
+        actorId: string | null,
+        detail?: string | null,
+      ) => Promise<void>;
+    }) => Promise<T>,
+  ): Promise<T> {
+    return this.dataSource.transaction(async (manager) => {
+      const authorization = await this.lockLive(manager, scope);
+      if (!authorization) throw new NotFoundException('not_connected');
+      return work({
+        manager,
+        authorization,
+        audit: (event, product, actorId, detail = null) =>
+          this.audit(
+            manager,
+            scope,
+            authorization.id,
+            event,
+            product,
+            actorId,
+            detail,
+          ),
+      });
+    });
+  }
+
+  /** A-11: a product that is gone must leave no selection that a sync would read. */
+  private async clearSelections(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    products: GoogleProduct[],
+  ) {
+    if (!products.includes('ads')) return;
+    await manager
+      .createQueryBuilder()
+      .update(SocialAdAccountConnectionEntity)
+      .set({
+        connectionStatus: 'disconnected',
+        credentialRemovedAt: () => 'now()',
+      })
+      .where(`provider = 'google_ads'`)
+      .andWhere(`connection_status <> 'disconnected'`)
+      .andWhere('tenant_id = :tenantId', { tenantId: scope.tenantId })
+      .andWhere('workspace_id = :workspaceId', {
+        workspaceId: scope.workspaceId,
+      })
+      .andWhere('agency_client_id IS NOT DISTINCT FROM :agencyClientId', {
+        agencyClientId: scope.agencyClientId,
+      })
+      .andWhere('company_context_id IS NOT DISTINCT FROM :companyContextId', {
+        companyContextId: scope.companyContextId,
+      })
+      .execute();
   }
 
   /**
@@ -137,7 +242,9 @@ export class SocialGoogleAuthorizationService {
 
       link.status = 'disconnected';
       link.disconnectedAt = new Date();
+      link.resources = [];
       await links.save(link);
+      await this.clearSelections(manager, input.scope, [input.product]);
       await this.audit(
         manager,
         input.scope,
@@ -211,8 +318,14 @@ export class SocialGoogleAuthorizationService {
         for (const link of connected) {
           link.status = 'disconnected';
           link.disconnectedAt = now;
+          link.resources = [];
         }
         if (connected.length) await links.save(connected);
+        await this.clearSelections(
+          manager,
+          input.scope,
+          connected.map((link) => link.product),
+        );
 
         const shared =
           (await this.countOtherLiveHolders(manager, authorization)) > 0;

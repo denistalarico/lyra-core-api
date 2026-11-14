@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { PermissionsModule } from '../permissions';
+import { SocialGoogleModule } from '../social-google/social-google.module';
 import { SocialAdCredentialResolver } from './credentials/social-ad-credential.resolver';
 import {
   SocialAdAccountConnectionEntity,
@@ -65,6 +66,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
 @Module({
   imports: [
     PermissionsModule,
+    SocialGoogleModule,
     // `SocialAdSyncRunEntity` joins now that it has an owner:
     // `SocialAdSyncRunService` is the only thing that reads or writes it, and
     // the worker reaches the table through that service rather than through a

@@ -72,6 +72,7 @@ const CREDENTIAL_STATUS: Record<SocialAdCredentialErrorCode, HttpStatus> = {
   account_not_bound: HttpStatus.CONFLICT,
   token_missing: HttpStatus.CONFLICT,
   token_expired: HttpStatus.CONFLICT,
+  credential_refresh_failed: HttpStatus.SERVICE_UNAVAILABLE,
   credential_decryption_failed: HttpStatus.CONFLICT,
   timezone_missing: HttpStatus.CONFLICT,
   timezone_unsupported: HttpStatus.CONFLICT,
@@ -91,6 +92,8 @@ const CREDENTIAL_MESSAGE: Record<SocialAdCredentialErrorCode, string> = {
   account_not_bound: 'This connection has no ad account selected.',
   token_missing: 'This connection needs to be authorized again.',
   token_expired: 'This connection needs to be authorized again.',
+  credential_refresh_failed:
+    'The Google credential could not be refreshed. Try again later.',
   credential_decryption_failed: 'This connection needs to be authorized again.',
   timezone_missing: 'This ad account has no timezone.',
   timezone_unsupported: 'This ad account reports a timezone we cannot read.',

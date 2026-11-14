@@ -39,6 +39,19 @@ export const SOCIAL_GOOGLE_CLIENT_SECRET_ENV = 'SOCIAL_GOOGLE_CLIENT_SECRET';
 export const SOCIAL_GOOGLE_CALLBACK_URL_ENV =
   'SOCIAL_GOOGLE_OAUTH_CALLBACK_URL';
 
+/**
+ * Server-side Google Ads settings (read at call time, never persisted).
+ * There is no developer token: it was sunset on 2026-09-09 and must not be sent.
+ */
+export const GOOGLE_ADS_API_VERSION_ENV = 'GOOGLE_ADS_API_VERSION';
+export const GOOGLE_ADS_DEFAULT_API_VERSION = 'v25';
+/** Optional manager (MCC) customer id used to enumerate child accounts. */
+export const SOCIAL_GOOGLE_ADS_LOGIN_CUSTOMER_ID_ENV =
+  'SOCIAL_GOOGLE_ADS_LOGIN_CUSTOMER_ID';
+
+/** D-G3: GA4 properties selectable per context. */
+export const GOOGLE_GA4_MAX_PROPERTIES = 5;
+
 export const GOOGLE_AUTHORIZATION_ENDPOINT =
   'https://accounts.google.com/o/oauth2/v2/auth';
 export const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';

@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { GoogleAdsCredentialResolver } from '../../social-google/google-ads-credential.resolver';
 import { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
 import { SocialAdAccountConnectionEntity } from '../entities/social-ad-account-connection.entity';
 import { SocialInternalAccessService } from '../internal/social-internal-access.service';
@@ -61,6 +62,7 @@ export class SocialAdCredentialResolver {
     private readonly connectionsRepository: Repository<SocialAdAccountConnectionEntity>,
     private readonly cryptoService: SettingsCryptoService,
     private readonly internalAccess: SocialInternalAccessService,
+    @Optional() private readonly googleAds?: GoogleAdsCredentialResolver,
   ) {}
 
   /**
@@ -82,9 +84,18 @@ export class SocialAdCredentialResolver {
       throw new SocialAdCredentialError('connection_not_found');
     }
 
+    if (connection.provider === 'google_ads') {
+      // The one provider delegation point. Google rows hold no token; the
+      // Google resolver reads it from the shared Google authorization.
+      if (!this.googleAds) {
+        throw new SocialAdCredentialError('unsupported_provider');
+      }
+      return this.googleAds.resolve(input);
+    }
+
     if (connection.provider !== 'meta_ads') {
-      // Google Ads exists in the provider union and nowhere else. Refusing by
-      // name beats resolving a Meta credential for a row that is not Meta.
+      // Refusing by name beats resolving a Meta credential for a row that is
+      // not Meta.
       throw new SocialAdCredentialError('unsupported_provider');
     }
 

@@ -30,11 +30,43 @@ export function whereScope<T extends ObjectLiteral>(
     );
 }
 
+export type GoogleSelectedResource = { id: string; name: string };
+
+/** Products whose data needs an explicit account/property choice (G1). */
+const SELECTABLE_PRODUCTS: readonly GoogleProduct[] = ['ga4', 'ads'];
+
+/** GA4 properties kept in `resources`, defensively parsed from jsonb. */
+export function readGa4Resources(resources: unknown): Array<{
+  propertyId: string;
+  displayName: string;
+  accountId: string;
+  timeZone: string | null;
+  currency: string | null;
+}> {
+  if (!Array.isArray(resources)) return [];
+  const out: ReturnType<typeof readGa4Resources> = [];
+  for (const item of resources) {
+    if (typeof item !== 'object' || item === null) continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.propertyId !== 'string' || !r.propertyId) continue;
+    out.push({
+      propertyId: r.propertyId,
+      displayName:
+        typeof r.displayName === 'string' ? r.displayName : r.propertyId,
+      accountId: typeof r.accountId === 'string' ? r.accountId : '',
+      timeZone: typeof r.timeZone === 'string' ? r.timeZone : null,
+      currency: typeof r.currency === 'string' ? r.currency : null,
+    });
+  }
+  return out;
+}
+
 /** Safe, credential-free projection of an authorization and its products. */
 export function toGoogleStatusView(
   authorization: SocialGoogleAuthorizationEntity | null,
   links: SocialGoogleProductLinkEntity[],
   sharedIdentity = false,
+  adsAccounts: GoogleSelectedResource[] = [],
 ) {
   const live =
     authorization && authorization.status !== 'revoked' ? authorization : null;
@@ -44,6 +76,16 @@ export function toGoogleStatusView(
   const products = GOOGLE_PRODUCTS.map((product) => {
     const link = links.find((candidate) => candidate.product === product);
     const connected = !!live && link?.status === 'connected';
+    const selected: GoogleSelectedResource[] = !connected
+      ? []
+      : product === 'ads'
+        ? adsAccounts
+        : product === 'ga4'
+          ? readGa4Resources(link?.resources).map((property) => ({
+              id: property.propertyId,
+              name: property.displayName,
+            }))
+          : [];
     return {
       product,
       requiredScope: GOOGLE_PRODUCT_SCOPES[product],
@@ -53,6 +95,12 @@ export function toGoogleStatusView(
       connectedAt: connected
         ? (link?.connectedAt?.toISOString() ?? null)
         : null,
+      // Connected but empty ⇒ "awaiting selection": nothing is read until the
+      // user picks an account/property.
+      selection: {
+        required: connected && SELECTABLE_PRODUCTS.includes(product),
+        selected,
+      },
     };
   });
 

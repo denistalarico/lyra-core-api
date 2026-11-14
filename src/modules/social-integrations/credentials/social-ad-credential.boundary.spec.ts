@@ -137,4 +137,19 @@ describe('social ad credential boundary', () => {
       'modules/social-integrations/credentials/social-ad-credential.resolver.ts',
     ]);
   });
+
+  it('takes Google tokens only through getAccessToken, in known files', () => {
+    expect(filesContaining(/\.getAccessToken\s*\(/)).toEqual(
+      [
+        // Google Ads: the one resolver.
+        'modules/social-google/google-ads-credential.resolver.ts',
+        // G1: discovery for the selection step.
+        'modules/social-google/social-google-selection.service.ts',
+      ].sort(),
+    );
+  });
+
+  it('keeps the developer-token header out of the API', () => {
+    expect(filesContaining(/developer-token/i)).toEqual([]);
+  });
 });

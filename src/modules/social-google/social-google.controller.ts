@@ -23,8 +23,13 @@ import {
 import { ConfirmGoogleConnectionDto } from './dto/confirm-google-connection.dto';
 import { RevokeGoogleAuthorizationDto } from './dto/revoke-google-authorization.dto';
 import { StartGoogleConnectionDto } from './dto/start-google-connection.dto';
+import {
+  SelectGa4PropertyDto,
+  SelectGoogleAdsAccountDto,
+} from './dto/select-google-resource.dto';
 import { isGoogleProduct } from './google-oauth.constants';
 import { SocialGoogleAuthorizationService } from './social-google-authorization.service';
+import { SocialGoogleSelectionService } from './social-google-selection.service';
 import { SocialGoogleOAuthService } from './social-google-oauth.service';
 
 const SOCIAL_INTEGRATIONS_PERMISSION =
@@ -40,6 +45,7 @@ export class SocialGoogleController {
   constructor(
     private readonly oauth: SocialGoogleOAuthService,
     private readonly authorizations: SocialGoogleAuthorizationService,
+    private readonly selection: SocialGoogleSelectionService,
   ) {}
 
   @Get('status')
@@ -130,4 +136,85 @@ export class SocialGoogleController {
       revokeAtGoogle: dto.revokeAtGoogle === true,
     });
   }
+
+  @Get('ads/accounts')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  listAdsAccounts(@RequestContextData() ctx: RequestContext) {
+    return this.selection.listAdsCandidates(resolveCompanyAwareScope(ctx));
+  }
+
+  @Post('ads/select')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  selectAdsAccount(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SelectGoogleAdsAccountDto,
+  ) {
+    return this.selection.selectAdsAccount({
+      scope: resolveCompanyAwareScope(ctx),
+      userId: ctx.userId ?? null,
+      customerId: dto.customerId,
+    });
+  }
+
+  @Delete('ads/accounts/:customerId')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  removeAdsAccount(
+    @RequestContextData() ctx: RequestContext,
+    @Param('customerId') customerId: string,
+  ) {
+    return this.selection.removeAdsAccount({
+      scope: resolveCompanyAwareScope(ctx),
+      userId: ctx.userId ?? null,
+      customerId: assertId(customerId, /^\d{10}$/),
+    });
+  }
+
+  @Get('ga4/properties')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  listGa4Properties(@RequestContextData() ctx: RequestContext) {
+    return this.selection.listGa4Candidates(resolveCompanyAwareScope(ctx));
+  }
+
+  @Post('ga4/select')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  selectGa4Property(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SelectGa4PropertyDto,
+  ) {
+    return this.selection.selectGa4Property({
+      scope: resolveCompanyAwareScope(ctx),
+      userId: ctx.userId ?? null,
+      propertyId: dto.propertyId,
+    });
+  }
+
+  @Delete('ga4/properties/:propertyId')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  removeGa4Property(
+    @RequestContextData() ctx: RequestContext,
+    @Param('propertyId') propertyId: string,
+  ) {
+    return this.selection.removeGa4Property({
+      scope: resolveCompanyAwareScope(ctx),
+      userId: ctx.userId ?? null,
+      propertyId: assertId(propertyId, /^\d{1,20}$/),
+    });
+  }
+}
+
+function assertId(value: string, pattern: RegExp) {
+  if (!pattern.test(value)) throw new BadRequestException('selection_invalid');
+  return value;
 }

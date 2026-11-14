@@ -57,7 +57,10 @@ export type SocialAdConnectionStatus =
  */
 export type SocialAdAuthorizationMethod =
   | 'business_login'
-  | 'internal_system_user';
+  | 'internal_system_user'
+  // Google Ads: the row stores no token; it lives in the Google authorization
+  // and is read only through `SocialGoogleAuthorizationService.getAccessToken`.
+  | 'google_oauth';
 
 @Entity('social_ad_account_connections')
 // NULL external_account_id is distinct in Postgres, so in-flight rows never
