@@ -25,7 +25,11 @@ function build(properties: string[], resources: unknown[] = []) {
       expiresAt: null,
     })),
     withLockedAuthorization: jest.fn(
-      async (_scope: unknown, work: (ctx: unknown) => unknown) =>
+      async (
+        _scope: unknown,
+        _product: unknown,
+        work: (ctx: unknown) => unknown,
+      ) =>
         work({
           manager,
           authorization: { id: 'a1' },

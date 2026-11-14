@@ -70,6 +70,7 @@ export class SocialGoogleSelectionService {
 
     return this.authorizations.withLockedAuthorization(
       input.scope,
+      'ads',
       async ({ manager, authorization, audit }) => {
         await this.requireConnectedLink(manager, authorization.id, 'ads');
         const repo = manager.getRepository(SocialAdAccountConnectionEntity);
@@ -141,6 +142,7 @@ export class SocialGoogleSelectionService {
   }) {
     return this.authorizations.withLockedAuthorization(
       input.scope,
+      'ads',
       async ({ manager, audit }) => {
         const repo = manager.getRepository(SocialAdAccountConnectionEntity);
         const row = await repo
@@ -201,6 +203,7 @@ export class SocialGoogleSelectionService {
 
     return this.authorizations.withLockedAuthorization(
       input.scope,
+      'ga4',
       async ({ manager, authorization, audit }) => {
         const link = await this.requireConnectedLink(
           manager,
@@ -246,6 +249,7 @@ export class SocialGoogleSelectionService {
   }) {
     return this.authorizations.withLockedAuthorization(
       input.scope,
+      'ga4',
       async ({ manager, authorization, audit }) => {
         const link = await this.requireConnectedLink(
           manager,

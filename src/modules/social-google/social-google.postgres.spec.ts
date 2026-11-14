@@ -1,9 +1,11 @@
-import { ConflictException, Logger } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { CreateSocialGoogleOAuth1803700000000 } from '../../database/migrations/1803700000000-create-social-google-oauth';
+import { SocialGoogleIdentityPerAuthorization1804000000000 } from '../../database/migrations/1804000000000-social-google-identity-per-authorization';
+import { SocialAdAccountConnectionEntity } from '../social-integrations/entities/social-ad-account-connection.entity';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import {
   GoogleOAuthClient,
@@ -193,6 +195,7 @@ run('Google OAuth foundation against PostgreSQL', () => {
         SocialGoogleOAuthSessionEntity,
         SocialGoogleProductLinkEntity,
         SocialGoogleAuditEventEntity,
+        SocialAdAccountConnectionEntity,
       ],
     });
     await dataSource.initialize();
@@ -200,6 +203,7 @@ run('Google OAuth foundation against PostgreSQL', () => {
     const migration = new CreateSocialGoogleOAuth1803700000000();
     await migration.down(runner);
     await migration.up(runner);
+    await new SocialGoogleIdentityPerAuthorization1804000000000().up(runner);
     await runner.release();
   });
 
@@ -210,8 +214,8 @@ run('Google OAuth foundation against PostgreSQL', () => {
   beforeEach(() => {
     testSub = `sub-${randomUUID()}`;
     google = new FakeGoogle();
-    oauth = new SocialGoogleOAuthService(dataSource, google, crypto);
     auth = new SocialGoogleAuthorizationService(dataSource, google, crypto);
+    oauth = new SocialGoogleOAuthService(dataSource, google, crypto, auth);
     logged.length = 0;
     for (const level of ['log', 'warn', 'error', 'debug', 'verbose'] as const) {
       jest
@@ -422,34 +426,6 @@ run('Google OAuth foundation against PostgreSQL', () => {
         connect(scope, randomUUID(), 'ga4', grant({ refreshToken: null })),
       ).rejects.toThrow('missing_refresh_token');
       expect((await auth.getStatus(scope)).status).toBe('not_connected');
-    });
-
-    it('rejects a different Google identity and leaves the grant untouched', async () => {
-      const scope = newScope();
-      const user = randomUUID();
-      await connect(scope, user, 'ga4', grant());
-      const before = await row(scope);
-      await expect(
-        connect(
-          scope,
-          user,
-          'ads',
-          grant({
-            sub: 'sub-OTHER',
-            scopes: ['openid', ADS],
-            accessToken: 'at-x',
-            refreshToken: 'rt-x',
-          }),
-        ),
-      ).rejects.toBeInstanceOf(ConflictException);
-      const after = await row(scope);
-      expect(after.credentialVersion).toBe(before.credentialVersion);
-      expect(after.grantedScopes).toEqual(before.grantedScopes);
-      expect(crypto.decrypt(after.refreshTokenEncrypted)).toBe('rt-1');
-      const status = await auth.getStatus(scope);
-      expect(status.products.find((p) => p.product === 'ads')?.status).toBe(
-        'disconnected',
-      );
     });
 
     it('adds a product incrementally, unions scopes and keeps the refresh token', async () => {
@@ -1004,16 +980,279 @@ run('Google OAuth foundation against PostgreSQL', () => {
         ).status,
       ).toBe('not_connected');
     });
+  });
 
-    it('enforces one live authorization per context at the database level', async () => {
+  describe('independent products per identity', () => {
+    const SUB_B = () => `${testSub}-B`;
+    const adsGrant = (overrides: Partial<Grant> = {}) =>
+      grant({
+        sub: SUB_B(),
+        scopes: ['openid', ADS],
+        accessToken: 'at-B',
+        refreshToken: 'rt-B',
+        ...overrides,
+      });
+    const product = (
+      status: Awaited<ReturnType<typeof auth.getStatus>>,
+      name: string,
+    ) => status.products.find((p) => p.product === name)!;
+
+    it('keeps GA4 on account A and Ads on account B in one context', async () => {
+      const scope = newScope();
+      const user = randomUUID();
+      await connect(scope, user, 'ga4', grant());
+      const view = await connect(scope, user, 'ads', adsGrant());
+
+      expect(view.authorizations).toHaveLength(2);
+      const ga4 = product(view, 'ga4');
+      const ads = product(view, 'ads');
+      expect(ga4.status).toBe('connected');
+      expect(ads.status).toBe('connected');
+      expect(ga4.authorizationId).not.toBe(ads.authorizationId);
+      expect(ga4.identityRef).not.toBe(ads.identityRef);
+      expect(JSON.stringify(view)).not.toContain(testSub);
+      expect(
+        (await auth.getAccessToken({ scope, product: 'ga4' })).accessToken,
+      ).toBe('at-1');
+      expect(
+        (await auth.getAccessToken({ scope, product: 'ads' })).accessToken,
+      ).toBe('at-B');
+      // Each grant carries only its own product scope.
+      const rows = await dataSource
+        .getRepository(SocialGoogleAuthorizationEntity)
+        .find({ where: { tenantId: scope.tenantId } });
+      expect(rows.map((r) => r.grantedScopes.includes(GA4)).sort()).toEqual([
+        false,
+        true,
+      ]);
+    });
+
+    it('shares one authorization when both products use the same account', async () => {
+      const scope = newScope();
+      const user = randomUUID();
+      await connect(scope, user, 'ga4', grant());
+      const view = await connect(
+        scope,
+        user,
+        'ads',
+        grant({ scopes: ['openid', GA4, ADS], accessToken: 'at-2' }),
+      );
+      expect(view.authorizations).toHaveLength(1);
+      expect(product(view, 'ga4').authorizationId).toBe(
+        product(view, 'ads').authorizationId,
+      );
+      expect(product(view, 'ga4').identityRef).toBe(
+        product(view, 'ads').identityRef,
+      );
+    });
+
+    it('binds the callback and confirmation to the requested product', async () => {
+      const scope = newScope();
+      const { params } = await startAndCallback(
+        scope,
+        randomUUID(),
+        'ads',
+        adsGrant(),
+      );
+      expect(params.get('product')).toBe('ads');
+      // A GA4 grant cannot satisfy an Ads session: no automatic reuse.
+      const wrong = await startAndCallback(scope, randomUUID(), 'ads', grant());
+      expect(wrong.params.get('reason')).toBe('scope_denied');
+    });
+
+    it('reconnects one product with another identity without touching the rest', async () => {
+      const scope = newScope();
+      const user = randomUUID();
+      await connect(scope, user, 'ga4', grant());
+      await connect(scope, user, 'ads', adsGrant());
+      const before = await auth.getStatus(scope);
+      const oldGa4 = product(before, 'ga4').authorizationId;
+
+      const view = await connect(
+        scope,
+        user,
+        'ga4',
+        grant({
+          sub: `${testSub}-C`,
+          accessToken: 'at-C',
+          refreshToken: 'rt-C',
+        }),
+      );
+      expect(view.authorizations).toHaveLength(2);
+      expect(product(view, 'ga4').authorizationId).not.toBe(oldGa4);
+      expect(product(view, 'ads').authorizationId).toBe(
+        product(before, 'ads').authorizationId,
+      );
+      expect(
+        (await auth.getAccessToken({ scope, product: 'ga4' })).accessToken,
+      ).toBe('at-C');
+      expect(
+        (await auth.getAccessToken({ scope, product: 'ads' })).accessToken,
+      ).toBe('at-B');
+      // The replaced identity kept no product, so Lyra discarded it locally
+      // and never revoked it at Google.
+      const old = await dataSource
+        .getRepository(SocialGoogleAuthorizationEntity)
+        .findOneOrFail({
+          where: { id: oldGa4! },
+          select: { id: true, status: true, refreshTokenEncrypted: true },
+        });
+      expect(old.status).toBe('revoked');
+      expect(old.refreshTokenEncrypted).toBeNull();
+      expect(google.revokeImpl).not.toHaveBeenCalled();
+    });
+
+    it('allows only one holder per product under concurrent confirms', async () => {
+      const scope = newScope();
+      const user = randomUUID();
+      const one = await startAndCallback(scope, user, 'ga4', grant());
+      const two = await startAndCallback(
+        scope,
+        user,
+        'ga4',
+        grant({ sub: `${testSub}-C`, refreshToken: 'rt-C' }),
+      );
+      // Both sessions are different states for the same product; confirming
+      // them together must leave a single connected GA4 link.
+      await Promise.allSettled([
+        oauth.confirm({
+          scope,
+          userId: user,
+          sessionId: one.params.get('session')!,
+        }),
+        oauth.confirm({
+          scope,
+          userId: user,
+          sessionId: two.params.get('session')!,
+        }),
+      ]);
+      const links = await dataSource.query(
+        `SELECT l.id FROM social_google_product_links l
+           JOIN social_google_authorizations a ON a.id = l.authorization_id
+          WHERE a.tenant_id = $1 AND l.product = 'ga4' AND l.status = 'connected'
+            AND a.status <> 'revoked'`,
+        [scope.tenantId],
+      );
+      expect(links).toHaveLength(1);
+    });
+
+    it('disconnects one product without affecting the other identity', async () => {
+      const scope = newScope();
+      const user = randomUUID();
+      await connect(scope, user, 'ga4', grant());
+      await connect(scope, user, 'ads', adsGrant());
+      const result = await auth.disconnectProduct({
+        scope,
+        userId: user,
+        product: 'ads',
+      });
+      expect(result.authorizationRevoked).toBe(true);
+      expect(result.providerRevoked).toBeNull();
+      const status = await auth.getStatus(scope);
+      expect(product(status, 'ads').status).toBe('disconnected');
+      expect(product(status, 'ga4').status).toBe('connected');
+      expect(
+        (await auth.getAccessToken({ scope, product: 'ga4' })).accessToken,
+      ).toBe('at-1');
+      await expect(
+        auth.getAccessToken({ scope, product: 'ads' }),
+      ).rejects.toMatchObject({ code: 'product_not_connected' });
+      expect(google.revokeImpl).not.toHaveBeenCalled();
+    });
+
+    it('refreshes and fails per identity: invalid_grant on A leaves B working', async () => {
+      const scope = newScope();
+      const user = randomUUID();
+      await connect(scope, user, 'ga4', grant());
+      await connect(scope, user, 'ads', adsGrant());
+      await expireToken(scope);
+      google.refreshImpl.mockImplementation((token: string) =>
+        token === 'rt-1'
+          ? Promise.reject(new GoogleOAuthError('invalid_grant'))
+          : Promise.resolve({
+              accessToken: 'at-B2',
+              refreshToken: null,
+              expiresInSeconds: 3600,
+              scopes: ['openid', ADS],
+              idToken: null,
+            } as unknown as GoogleTokenSet),
+      );
+      await expect(
+        auth.getAccessToken({ scope, product: 'ga4' }),
+      ).rejects.toMatchObject({ code: 'reauth_required' });
+      expect(
+        (await auth.getAccessToken({ scope, product: 'ads' })).accessToken,
+      ).toBe('at-B2');
+      const status = await auth.getStatus(scope);
+      expect(product(status, 'ga4').reauthRequired).toBe(true);
+      expect(product(status, 'ads').reauthRequired).toBe(false);
+      expect(product(status, 'ads').scopeGranted).toBe(true);
+    });
+
+    it('revokes one identity by id and requires the id when ambiguous', async () => {
+      const scope = newScope();
+      const user = randomUUID();
+      await connect(scope, user, 'ga4', grant());
+      await connect(scope, user, 'ads', adsGrant());
+      const status = await auth.getStatus(scope);
+
+      await expect(
+        auth.revoke({ scope, userId: user, confirm: true }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      const result = await auth.revoke({
+        scope,
+        userId: user,
+        confirm: true,
+        revokeAtGoogle: true,
+        authorizationId: product(status, 'ads').authorizationId!,
+      });
+      expect(result.disconnectedProducts).toEqual(['ads']);
+      expect(result.remoteRevocation).toBe('revoked');
+      expect(google.revokeImpl).toHaveBeenCalledTimes(1);
+      expect(google.revokeImpl).toHaveBeenCalledWith('rt-B');
+      const after = await auth.getStatus(scope);
+      expect(product(after, 'ga4').status).toBe('connected');
+      expect(product(after, 'ads').status).toBe('disconnected');
+    });
+
+    it('rejects an authorization id from another context or tenant', async () => {
+      const scope = newScope();
+      const other = newScope();
+      await connect(scope, randomUUID(), 'ga4', grant());
+      await connect(other, randomUUID(), 'ga4', grant({ sub: SUB_B() }));
+      const foreign = product(
+        await auth.getStatus(other),
+        'ga4',
+      ).authorizationId!;
+      await expect(
+        auth.revoke({
+          scope,
+          userId: null,
+          confirm: true,
+          authorizationId: foreign,
+        }),
+      ).rejects.toMatchObject({ message: 'not_connected' });
+      expect(product(await auth.getStatus(other), 'ga4').status).toBe(
+        'connected',
+      );
+    });
+
+    it('enforces one live authorization per context and identity in the database', async () => {
       const scope = newScope();
       await connect(scope, randomUUID(), 'ga4', grant());
       await expect(
         dataSource.query(
-          `INSERT INTO social_google_authorizations (tenant_id, workspace_id, google_sub) VALUES ($1, $2, 'dup')`,
+          `INSERT INTO social_google_authorizations (tenant_id, workspace_id, google_sub) VALUES ($1, $2, $3)`,
+          [scope.tenantId, scope.workspaceId, testSub],
+        ),
+      ).rejects.toThrow(/UQ_social_google_authorizations_live_identity/);
+      await expect(
+        dataSource.query(
+          `INSERT INTO social_google_authorizations (tenant_id, workspace_id, google_sub) VALUES ($1, $2, 'another')`,
           [scope.tenantId, scope.workspaceId],
         ),
-      ).rejects.toThrow(/UQ_social_google_authorizations_live_context/);
+      ).resolves.toBeDefined();
     });
   });
 

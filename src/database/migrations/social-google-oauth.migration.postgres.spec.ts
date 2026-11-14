@@ -1,6 +1,7 @@
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyDataSource } from '../agency-typeorm.datasource';
 import { CreateSocialGoogleOAuth1803700000000 } from './1803700000000-create-social-google-oauth';
+import { SocialGoogleIdentityPerAuthorization1804000000000 } from './1804000000000-social-google-identity-per-authorization';
 
 const run = describePostgresIntegration();
 
@@ -67,5 +68,41 @@ run('social Google OAuth migration against PostgreSQL', () => {
     await migration.down(runner);
     await migration.up(runner);
     await runner.release();
+  });
+
+  it('relaxes the live index to one per identity without touching rows', async () => {
+    const base = new CreateSocialGoogleOAuth1803700000000();
+    const migration = new SocialGoogleIdentityPerAuthorization1804000000000();
+    const runner = AgencyDataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    try {
+      await base.down(runner);
+      await base.up(runner);
+      const insert = (sub: string) =>
+        runner.query(
+          `INSERT INTO social_google_authorizations (tenant_id, workspace_id, google_sub)
+           VALUES ('00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000b1',$1)`,
+          [sub],
+        );
+      await insert('a');
+      await migration.up(runner);
+      await migration.up(runner); // idempotent
+      await insert('b'); // a second identity is now allowed
+      await runner.query('SAVEPOINT dup');
+      await expect(insert('b')).rejects.toThrow(/live_identity/);
+      await runner.query('ROLLBACK TO SAVEPOINT dup');
+      expect(
+        await runner.query(`SELECT 1 FROM social_google_authorizations`),
+      ).toHaveLength(2);
+      // down cannot restore the stricter index over two identities, and must
+      // fail rather than delete anything.
+      await runner.query('SAVEPOINT down');
+      await expect(migration.down(runner)).rejects.toThrow();
+      await runner.query('ROLLBACK TO SAVEPOINT down');
+    } finally {
+      await runner.rollbackTransaction();
+      await runner.release();
+    }
   });
 });

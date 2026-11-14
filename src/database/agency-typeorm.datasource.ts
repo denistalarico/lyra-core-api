@@ -299,6 +299,7 @@ import { AddSocialApprovalPieceDescription1803400000000 } from './migrations/180
 import { AddSocialApprovalCommentRichContent1803500000000 } from './migrations/1803500000000-add-social-approval-comment-rich-content';
 import { CreateSocialGoogleOAuth1803700000000 } from './migrations/1803700000000-create-social-google-oauth';
 import { CreateSocialGa4ReadModel1803900000000 } from './migrations/1803900000000-create-social-ga4-read-model';
+import { SocialGoogleIdentityPerAuthorization1804000000000 } from './migrations/1804000000000-social-google-identity-per-authorization';
 import { CreateSocialTrendSnapshots1803600000000 } from './migrations/1803600000000-create-social-trend-snapshots';
 import { AddSocialApprovalCardCustomization1803300000000 } from './migrations/1803300000000-add-social-approval-card-customization';
 import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
@@ -628,5 +629,6 @@ export const AgencyDataSource = new DataSource({
     CreateSocialTrendSnapshots1803600000000,
     CreateSocialGoogleOAuth1803700000000,
     CreateSocialGa4ReadModel1803900000000,
+    SocialGoogleIdentityPerAuthorization1804000000000,
   ],
 });

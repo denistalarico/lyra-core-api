@@ -1,4 +1,4 @@
-import { Equals, IsBoolean, IsOptional } from 'class-validator';
+import { Equals, IsBoolean, IsOptional, IsUUID } from 'class-validator';
 
 export class RevokeGoogleAuthorizationDto {
   /** Must be literally `true`: the UI shows the impact before asking. */
@@ -13,4 +13,9 @@ export class RevokeGoogleAuthorizationDto {
   @IsOptional()
   @IsBoolean()
   revokeAtGoogle?: boolean;
+
+  /** Which Google identity to revoke; optional only with a single identity. */
+  @IsOptional()
+  @IsUUID()
+  authorizationId?: string;
 }

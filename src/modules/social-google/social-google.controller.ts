@@ -134,6 +134,7 @@ export class SocialGoogleController {
       userId: ctx.userId ?? null,
       confirm: dto.confirm,
       revokeAtGoogle: dto.revokeAtGoogle === true,
+      authorizationId: dto.authorizationId,
     });
   }
 

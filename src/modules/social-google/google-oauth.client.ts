@@ -174,7 +174,7 @@ export class GoogleOAuthClient {
     // Offline access + consent so Google issues a refresh token, and
     // incremental authorization so earlier products' grants are kept.
     url.searchParams.set('access_type', 'offline');
-    url.searchParams.set('prompt', 'consent');
+    url.searchParams.set('prompt', 'select_account consent');
     url.searchParams.set('include_granted_scopes', 'true');
     return url.toString();
   }

@@ -6,7 +6,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, In } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { SocialAdAccountConnectionEntity } from '../social-integrations/entities/social-ad-account-connection.entity';
@@ -71,34 +71,38 @@ export class SocialGoogleAuthorizationService {
   ) {}
 
   async getStatus(scope: CompanyAwareScope) {
-    const authorization = await whereScope(
+    const authorizations = await whereScope(
       this.dataSource
         .getRepository(SocialGoogleAuthorizationEntity)
         .createQueryBuilder('auth')
         .where(`auth.status <> 'revoked'`),
       'auth',
       scope,
-    ).getOne();
-    const links = authorization
+    )
+      .orderBy('auth.createdAt', 'ASC')
+      .getMany();
+    const links = authorizations.length
       ? await this.dataSource
           .getRepository(SocialGoogleProductLinkEntity)
-          .find({ where: { authorizationId: authorization.id } })
+          .find({
+            where: { authorizationId: In(authorizations.map((a) => a.id)) },
+          })
       : [];
-    const sharedIdentity = authorization
-      ? (await this.countOtherLiveHolders(
+    const shared = new Set<string>();
+    for (const authorization of authorizations) {
+      if (
+        (await this.countOtherLiveHolders(
           this.dataSource.manager,
           authorization,
         )) > 0
-      : false;
-    const adsAccounts = authorization
+      ) {
+        shared.add(authorization.id);
+      }
+    }
+    const adsAccounts = authorizations.length
       ? await this.listSelectedAdsAccounts(this.dataSource.manager, scope)
       : [];
-    return toGoogleStatusView(
-      authorization,
-      links,
-      sharedIdentity,
-      adsAccounts,
-    );
+    return toGoogleStatusView(authorizations, links, shared, adsAccounts);
   }
 
   /** Google Ads accounts the context selected (G1); never credential data. */
@@ -132,11 +136,13 @@ export class SocialGoogleAuthorizationService {
   }
 
   /**
-   * Runs `work` inside a transaction holding the live authorization's row lock,
+   * Runs `work` inside a transaction holding the row lock of the live
+   * authorization that backs `product`,
    * so selection writes are ordered with refresh, disconnect and revoke.
    */
   async withLockedAuthorization<T>(
     scope: CompanyAwareScope,
+    product: GoogleProduct,
     work: (ctx: {
       manager: EntityManager;
       authorization: SocialGoogleAuthorizationEntity;
@@ -149,8 +155,10 @@ export class SocialGoogleAuthorizationService {
     }) => Promise<T>,
   ): Promise<T> {
     return this.dataSource.transaction(async (manager) => {
-      const authorization = await this.lockLive(manager, scope);
-      if (!authorization) throw new NotFoundException('not_connected');
+      const authorization = await this.lockLive(manager, scope, { product });
+      if (!authorization) {
+        throw new NotFoundException(await this.missingCode(manager, scope));
+      }
       return work({
         manager,
         authorization,
@@ -217,6 +225,69 @@ export class SocialGoogleAuthorizationService {
   }
 
   /**
+   * One live connection per product and context: when `keepId` takes over
+   * `product`, any other identity holding it in the same context releases it
+   * (link disconnected, selection cleared). An identity left with no product is
+   * discarded locally; its grant at Google is never touched here. Callers hold
+   * the context advisory lock, which orders concurrent confirms.
+   */
+  async releaseProductFromOthers(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    product: GoogleProduct,
+    keepId: string,
+    actorId: string | null,
+  ) {
+    const others = await whereScope(
+      manager
+        .getRepository(SocialGoogleAuthorizationEntity)
+        .createQueryBuilder('auth')
+        .addSelect(TOKEN_COLUMNS)
+        .where(`auth.status <> 'revoked'`)
+        .andWhere('auth.id <> :keepId', { keepId })
+        .andWhere(
+          `EXISTS (SELECT 1 FROM social_google_product_links l
+             WHERE l.authorization_id = auth.id AND l.product = :product
+               AND l.status = 'connected')`,
+          { product },
+        ),
+      'auth',
+      scope,
+    )
+      .setLock('pessimistic_write')
+      .getMany();
+
+    const links = manager.getRepository(SocialGoogleProductLinkEntity);
+    for (const other of others) {
+      await links.update(
+        { authorizationId: other.id, product },
+        { status: 'disconnected', disconnectedAt: new Date(), resources: [] },
+      );
+      await this.clearSelections(manager, scope, [product]);
+      await this.audit(
+        manager,
+        scope,
+        other.id,
+        'product_replaced',
+        product,
+        actorId,
+      );
+      const remaining = await links.count({
+        where: { authorizationId: other.id, status: 'connected' },
+      });
+      if (remaining === 0) {
+        await this.tearDown(
+          manager,
+          scope,
+          other,
+          actorId,
+          'credentials_discarded',
+        );
+      }
+    }
+  }
+
+  /**
    * Disconnects one product. Other products keep working. When it was the last
    * connected product the stored credentials have no purpose left and are
    * discarded locally — but the grant at Google is never touched here: it may
@@ -229,8 +300,14 @@ export class SocialGoogleAuthorizationService {
     product: GoogleProduct;
   }) {
     const outcome = await this.dataSource.transaction(async (manager) => {
-      const authorization = await this.lockLive(manager, input.scope);
-      if (!authorization) throw new NotFoundException('not_connected');
+      const authorization = await this.lockLive(manager, input.scope, {
+        product: input.product,
+      });
+      if (!authorization) {
+        throw new NotFoundException(
+          await this.missingCode(manager, input.scope),
+        );
+      }
 
       const links = manager.getRepository(SocialGoogleProductLinkEntity);
       const link = await links.findOne({
@@ -258,7 +335,10 @@ export class SocialGoogleAuthorizationService {
         where: { authorizationId: authorization.id, status: 'connected' },
       });
       if (remaining > 0) {
-        return { authorizationRevoked: false };
+        return {
+          authorizationRevoked: false,
+          authorizationId: authorization.id,
+        };
       }
       await this.tearDown(
         manager,
@@ -267,7 +347,7 @@ export class SocialGoogleAuthorizationService {
         input.userId,
         'credentials_discarded',
       );
-      return { authorizationRevoked: true };
+      return { authorizationRevoked: true, authorizationId: authorization.id };
     });
 
     return {
@@ -284,7 +364,9 @@ export class SocialGoogleAuthorizationService {
       // connected products keep theirs until the authorization is revoked.
       remainingProducts: outcome.authorizationRevoked
         ? []
-        : (await this.getStatus(input.scope)).revokeImpact.products,
+        : ((await this.getStatus(input.scope)).authorizations.find(
+            (item) => item.id === outcome.authorizationId,
+          )?.products ?? []),
     };
   }
 
@@ -300,6 +382,8 @@ export class SocialGoogleAuthorizationService {
     userId: string | null;
     confirm: boolean;
     revokeAtGoogle?: boolean;
+    /** Required when the context holds more than one Google identity. */
+    authorizationId?: string;
   }) {
     if (input.confirm !== true) {
       throw new BadRequestException('confirmation_required');
@@ -307,7 +391,12 @@ export class SocialGoogleAuthorizationService {
 
     const { token, impacted, shared } = await this.dataSource.transaction(
       async (manager) => {
-        const authorization = await this.lockLive(manager, input.scope);
+        const authorizationId =
+          input.authorizationId ??
+          (await this.soleLiveId(manager, input.scope));
+        const authorization = await this.lockLive(manager, input.scope, {
+          authorizationId,
+        });
         if (!authorization) throw new NotFoundException('not_connected');
 
         const links = manager.getRepository(SocialGoogleProductLinkEntity);
@@ -375,8 +464,14 @@ export class SocialGoogleAuthorizationService {
     const result = await this.runRefreshTransaction(async (manager) => {
       // The lock is what serializes concurrent refreshes: the second caller
       // blocks here, then finds the fresh token the first one stored.
-      const authorization = await this.lockLive(manager, input.scope);
-      if (!authorization) throw new GoogleCredentialError('not_connected');
+      const authorization = await this.lockLive(manager, input.scope, {
+        product: input.product,
+      });
+      if (!authorization) {
+        throw new GoogleCredentialError(
+          await this.missingCode(manager, input.scope),
+        );
+      }
       if (authorization.status === 'reauth_required') {
         throw new GoogleCredentialError('reauth_required');
       }
@@ -501,14 +596,23 @@ export class SocialGoogleAuthorizationService {
     }
   }
 
-  private async lockLive(manager: EntityManager, scope: CompanyAwareScope) {
+  /**
+   * Locks one live authorization of the context: the one backing a connected
+   * product, or one named explicitly. Each refresh, disconnect and revoke thus
+   * contends only on its own Google identity.
+   */
+  private async lockLive(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    selector: { product: GoogleProduct } | { authorizationId: string },
+  ) {
     // Bounded wait: never queue forever behind a slow Google call. SET LOCAL
     // dies with the transaction, so it cannot leak to the pooled connection.
     await manager.query(
       `SET LOCAL lock_timeout = ${Math.trunc(this.lockTimeoutMs)}`,
     );
     try {
-      return await this.lockLiveQuery(manager, scope);
+      return await this.lockLiveQuery(manager, scope, selector);
     } catch (error) {
       if ((error as { code?: string }).code === '55P03') {
         throw new ServiceUnavailableException('authorization_busy');
@@ -517,8 +621,12 @@ export class SocialGoogleAuthorizationService {
     }
   }
 
-  private lockLiveQuery(manager: EntityManager, scope: CompanyAwareScope) {
-    return whereScope(
+  private lockLiveQuery(
+    manager: EntityManager,
+    scope: CompanyAwareScope,
+    selector: { product: GoogleProduct } | { authorizationId: string },
+  ) {
+    const qb = whereScope(
       manager
         .getRepository(SocialGoogleAuthorizationEntity)
         .createQueryBuilder('auth')
@@ -526,9 +634,51 @@ export class SocialGoogleAuthorizationService {
         .where(`auth.status <> 'revoked'`),
       'auth',
       scope,
+    );
+    if ('product' in selector) {
+      qb.andWhere(
+        `EXISTS (SELECT 1 FROM social_google_product_links l
+           WHERE l.authorization_id = auth.id AND l.product = :lockProduct
+             AND l.status = 'connected')`,
+        { lockProduct: selector.product },
+      );
+    } else {
+      qb.andWhere('auth.id = :lockId', { lockId: selector.authorizationId });
+    }
+    return qb.setLock('pessimistic_write').getOne();
+  }
+
+  /** Why no authorization backs a product: nothing connected, or just not it. */
+  private async missingCode(manager: EntityManager, scope: CompanyAwareScope) {
+    const live = await whereScope(
+      manager
+        .getRepository(SocialGoogleAuthorizationEntity)
+        .createQueryBuilder('auth')
+        .where(`auth.status <> 'revoked'`),
+      'auth',
+      scope,
+    ).getCount();
+    return live > 0
+      ? ('product_not_connected' as const)
+      : ('not_connected' as const);
+  }
+
+  /** The only live authorization of the context; ambiguity must be explicit. */
+  private async soleLiveId(manager: EntityManager, scope: CompanyAwareScope) {
+    const rows = await whereScope(
+      manager
+        .getRepository(SocialGoogleAuthorizationEntity)
+        .createQueryBuilder('auth')
+        .where(`auth.status <> 'revoked'`),
+      'auth',
+      scope,
     )
-      .setLock('pessimistic_write')
-      .getOne();
+      .limit(2)
+      .getMany();
+    if (rows.length === 0) throw new NotFoundException('not_connected');
+    if (rows.length > 1)
+      throw new BadRequestException('authorization_required');
+    return rows[0].id;
   }
 
   /** Marks revoked, wipes tokens, returns the token to revoke at Google. */

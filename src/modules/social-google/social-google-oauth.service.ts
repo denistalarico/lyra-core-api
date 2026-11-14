@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -33,7 +32,8 @@ import {
   SocialGoogleOAuthSessionEntity,
   SocialGoogleProductLinkEntity,
 } from './entities';
-import { toGoogleStatusView, whereScope } from './social-google.support';
+import { SocialGoogleAuthorizationService } from './social-google-authorization.service';
+import { whereScope } from './social-google.support';
 
 export type GoogleCallbackInput = {
   code?: string;
@@ -63,6 +63,7 @@ export class SocialGoogleOAuthService {
     @InjectDataSource('agency') private readonly dataSource: DataSource,
     private readonly google: GoogleOAuthClient,
     private readonly crypto: SettingsCryptoService,
+    private readonly lifecycle: SocialGoogleAuthorizationService,
   ) {}
 
   async start(input: {
@@ -333,6 +334,20 @@ export class SocialGoogleOAuthService {
         };
       }
 
+      // Serializes confirms of one context so the one-connection-per-product
+      // rule holds under concurrency (the unique index only covers identity).
+      await manager.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+        [
+          'social-google',
+          input.scope.tenantId,
+          input.scope.workspaceId,
+          input.scope.agencyClientId ?? '-',
+          input.scope.companyContextId ?? '-',
+        ].join(':'),
+      ]);
+
+      // Credentials are only ever merged within the same Google identity; a
+      // different account becomes its own authorization.
       const existing = await whereScope(
         authorizations
           .createQueryBuilder('auth')
@@ -340,27 +355,13 @@ export class SocialGoogleOAuthService {
             'auth.accessTokenEncrypted',
             'auth.refreshTokenEncrypted',
           ])
-          .where(`auth.status <> 'revoked'`),
+          .where(`auth.status <> 'revoked'`)
+          .andWhere('auth.googleSub = :sub', { sub: session.googleSub }),
         'auth',
         input.scope,
       )
         .setLock('pessimistic_write')
         .getOne();
-
-      if (existing && existing.googleSub !== session.googleSub) {
-        // A different Google account must not be merged into this grant; the
-        // user has to revoke the current authorization first.
-        await wipe('failed', 'identity_mismatch');
-        await this.audit(
-          manager,
-          input.scope,
-          existing.id,
-          'identity_mismatch',
-          session.product,
-          input.userId,
-        );
-        return { ok: false as const, code: 'identity_mismatch', commit: true };
-      }
 
       const existingRefresh = existing
         ? this.crypto.decrypt(existing.refreshTokenEncrypted)
@@ -431,6 +432,14 @@ export class SocialGoogleOAuthService {
       link.disconnectedAt = null;
       await links.save(link);
 
+      await this.lifecycle.releaseProductFromOthers(
+        manager,
+        input.scope,
+        session.product,
+        authorization.id,
+        input.userId,
+      );
+
       await this.audit(
         manager,
         input.scope,
@@ -441,22 +450,14 @@ export class SocialGoogleOAuthService {
       );
       await wipe('consumed', null);
 
-      const allLinks = await links.find({
-        where: { authorizationId: authorization.id },
-      });
-      return {
-        ok: true as const,
-        view: toGoogleStatusView(authorization, allLinks),
-      };
+      return { ok: true as const };
     });
 
     if (!result.ok) {
-      if (result.code === 'identity_mismatch') {
-        throw new ConflictException(result.code);
-      }
       throw new BadRequestException(result.code);
     }
-    return result.view;
+    // Whole-context view: other identities may have been touched.
+    return this.lifecycle.getStatus(input.scope);
   }
 
   private async audit(
