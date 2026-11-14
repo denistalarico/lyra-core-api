@@ -158,6 +158,16 @@ export const METRIC_IDS = [
   "summary_publications",
   "summary_new_followers",
   "summary_engagement",
+  // Google Analytics 4 (G3): the site's own traffic, from `social_ga4_*`.
+  "ga_sessions",
+  "ga_users",
+  "ga_new_users",
+  "ga_engaged_sessions",
+  "ga_engagement_rate",
+  "ga_avg_session_duration",
+  "ga_key_events",
+  "ga_revenue",
+  "ga_page_views",
 ] as const;
 
 export type MetricId = (typeof METRIC_IDS)[number];
@@ -192,7 +202,12 @@ export type MetricSource =
    * endpoint, no single grain, and the card reads them from a value builder
    * that already holds both overviews.
    */
-  | "summary";
+  | "summary"
+  /**
+   * Site traffic from the GA4 read model (G3). Not an ad account: sessions and
+   * key events of a property, in the property's own time zone and currency.
+   */
+  | "ga4";
 
 /**
  * The shape a metric's reading actually has, which decides the card that can
@@ -253,7 +268,13 @@ export type MetricGrain =
   | "paid_period_deduplicated"
   | "organic_period"
   | "snapshot"
-  | "event_window";
+  | "event_window"
+  /**
+   * A GA4 figure over the selected period for one property. Sessions, engaged
+   * sessions and key events come from the same report and the same cohort, so
+   * the funnel's step-to-step rates between them are legitimate.
+   */
+  | "ga4_period";
 
 export type MetricDefinition = {
   id: MetricId;
@@ -336,6 +357,9 @@ const FACEBOOK_ONLY: ChannelId[] = ["facebook"];
  * channel rule exists to prevent.
  */
 const SUMMARY_ONLY: ChannelId[] = ["summary"];
+
+/** Metrics only a GA4 property answers. */
+const GA4_ONLY: ChannelId[] = ["ga4"];
 
 export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
   {
@@ -1796,6 +1820,120 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     availability: "available",
     grain: "organic_period",
   },
+  {
+    id: "ga_sessions",
+    label: "Sessões",
+    description: "Visitas ao site no período, segundo o Google Analytics.",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_users",
+    label: "Usuários",
+    description:
+      "Pessoas que usaram o site. No período com mais de um dia, é a soma dos usuários ativos de cada dia: quem volta conta de novo.",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_new_users",
+    label: "Novos usuários",
+    description: "Pessoas que visitaram o site pela primeira vez no período.",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_engaged_sessions",
+    label: "Sessões engajadas",
+    description:
+      "Sessões que duraram mais de 10 segundos, tiveram um evento-chave ou duas ou mais telas.",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_engagement_rate",
+    label: "Taxa de engajamento",
+    description:
+      "Sessões engajadas divididas pelas sessões do período inteiro.",
+    channels: GA4_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_avg_session_duration",
+    label: "Duração média da sessão (s)",
+    description:
+      "Tempo médio de engajamento por sessão, em segundos, ponderado pelas sessões de cada dia.",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_key_events",
+    label: "Eventos-chave",
+    description:
+      "Ações que você marcou como importantes no Google Analytics (antes chamadas de conversões).",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_revenue",
+    label: "Receita",
+    description:
+      "Receita registrada pelo Google Analytics, na moeda da propriedade.",
+    channels: GA4_ONLY,
+    format: "currency",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_page_views",
+    label: "Visualizações de página",
+    description: "Quantas vezes as páginas do site foram vistas.",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
 ];
 
 /**
@@ -1857,6 +1995,7 @@ const COMPARABLE_GRAINS: Record<MetricGrain, MetricGrain[]> = {
   organic_period: ["organic_period"],
   snapshot: [],
   event_window: [],
+  ga4_period: ["ga4_period"],
 };
 
 export function grainsAreComparable(a: MetricGrain, b: MetricGrain): boolean {

@@ -44,7 +44,8 @@ export const DEFAULT_DASHBOARD_NAME = 'Visão Geral';
  * called.
  *
  * `google_ads` joined with G2, once its integration read from the local mirror
- * (default layout of its own, SO-DEF1). `ga4` joins with G3.
+ * (default layout of its own, SO-DEF1). `ga4` joined with G3: its screen reads
+ * the GA4 read model, not an ad account.
  */
 export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
   channel: SocialChannelDefaultId;
@@ -54,6 +55,7 @@ export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
   { channel: 'instagram', name: 'Instagram' },
   { channel: 'meta_ads', name: 'Meta Ads' },
   { channel: 'google_ads', name: 'Google Ads' },
+  { channel: 'ga4', name: 'Google Analytics' },
 ];
 
 export type SocialAnalyticsDashboardView = {

@@ -8,6 +8,7 @@ import {
   LeadFlowBriefingSuggestionEntity,
 } from '../modules/leadflow-briefing/entities';
 import { UserProfileEntity } from '../modules/settings/entities/user-profile.entity';
+import * as socialGa4Entities from '../modules/social-ga4/entities';
 import * as socialGoogleEntities from '../modules/social-google/entities';
 import * as socialApprovalEntities from '../modules/social-approvals/entities';
 import * as socialProjectWorkEntities from '../modules/social-project-work/entities';
@@ -70,6 +71,15 @@ describe('Agency TypeORM configuration', () => {
     );
 
     expect(exported).toHaveLength(4);
+    expect(agencyEntities).toEqual(expect.arrayContaining(exported));
+  });
+
+  it('registers every Social GA4 read model entity in the runtime data source', () => {
+    const exported = Object.values(socialGa4Entities).filter(
+      (value) => typeof value === 'function' && /Entity$/.test(value.name),
+    );
+
+    expect(exported).toHaveLength(3);
     expect(agencyEntities).toEqual(expect.arrayContaining(exported));
   });
 });

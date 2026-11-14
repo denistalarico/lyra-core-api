@@ -58,6 +58,7 @@ import { IntelligenceAnalyticsModule } from './modules/intelligence-analytics/in
 import { SocialIntegrationsModule } from './modules/social-integrations';
 import { InboxSocialAdLookupModule } from './modules/social-integrations/inbox-social-ad-lookup.module';
 import { SocialGoogleModule } from './modules/social-google';
+import { SocialGa4Module } from './modules/social-ga4/social-ga4.module';
 import { SocialOrganicModule } from './modules/social-organic';
 import { SocialPlannerModule } from './modules/social-planner';
 import { SocialCampaignsModule } from './modules/social-campaigns';
@@ -177,6 +178,7 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     ClientAreaAgencyModule,
     SocialOrganicModule,
     SocialGoogleModule,
+    SocialGa4Module,
   ],
 })
 export class AppModule {}

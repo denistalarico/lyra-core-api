@@ -33,6 +33,7 @@ export const ANALYTICS_CHANNEL_IDS = [
   "instagram",
   "meta_ads",
   "google_ads",
+  "ga4",
 ] as const;
 
 export type ChannelId = (typeof ANALYTICS_CHANNEL_IDS)[number];
@@ -82,6 +83,12 @@ export const ANALYTICS_CHANNELS: AnalyticsChannel[] = [
     id: "google_ads",
     label: "Google Ads",
     icon: "/integrations/webp/googleads.webp",
+    integrated: true,
+  },
+  {
+    id: "ga4",
+    label: "Google Analytics",
+    icon: "/integrations/webp/analytics.webp",
     integrated: true,
   },
 ];

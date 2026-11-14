@@ -12,7 +12,8 @@ export type AnalyticsReadQuery = {
     | 'instagram'
     | 'meta_ads'
     | 'summary'
-    | 'google_ads';
+    | 'google_ads'
+    | 'ga4';
   from?: string;
   to?: string;
   connectionId?: string;

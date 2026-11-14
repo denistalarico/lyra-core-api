@@ -25,6 +25,7 @@ export const DASHBOARD_CHANNEL_IDS = [
   'instagram',
   'meta_ads',
   'google_ads',
+  'ga4',
 ] as const;
 
 export type DashboardChannelId = (typeof DASHBOARD_CHANNEL_IDS)[number];
@@ -133,6 +134,7 @@ const DEFAULT_SECTION_TITLES: Record<DashboardChannelId, string> = {
   instagram: 'Instagram',
   meta_ads: 'Meta Ads',
   google_ads: 'Google Ads',
+  ga4: 'Google Analytics',
 };
 
 export class DashboardLayoutError extends Error {}

@@ -145,6 +145,8 @@ describe('social ad credential boundary', () => {
         'modules/social-google/google-ads-credential.resolver.ts',
         // G1: discovery for the selection step.
         'modules/social-google/social-google-selection.service.ts',
+        // G3: the GA4 sync, the only reader of the GA4 Data API.
+        'modules/social-ga4/ga4-sync.service.ts',
       ].sort(),
     );
   });

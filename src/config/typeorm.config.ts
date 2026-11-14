@@ -460,8 +460,16 @@ import {
   SocialGoogleOAuthSessionEntity,
   SocialGoogleProductLinkEntity,
 } from '../modules/social-google/entities';
+import {
+  SocialGa4DailyMetricEntity,
+  SocialGa4DimensionDailyEntity,
+  SocialGa4SyncRunEntity,
+} from '../modules/social-ga4/entities';
 
 export const agencyEntities = [
+  SocialGa4DailyMetricEntity,
+  SocialGa4DimensionDailyEntity,
+  SocialGa4SyncRunEntity,
   SocialGoogleAuthorizationEntity,
   SocialGoogleOAuthSessionEntity,
   SocialGoogleProductLinkEntity,

@@ -57,6 +57,10 @@ export const TABLE_SOURCE_IDS = [
   "reel_interactions",
   "story_interactions",
   "ad_interactions",
+  "ga4_channels",
+  "ga4_source_medium",
+  "ga4_campaigns",
+  "ga4_landing_pages",
 ] as const;
 
 export type TableSourceId = (typeof TABLE_SOURCE_IDS)[number];
@@ -120,7 +124,13 @@ export type TableSourceKind =
    */
   | "interactions"
   /** The same row for the ad account, from the paid overview's actions. */
-  | "ad_interactions";
+  | "ad_interactions"
+  /**
+   * A GA4 dimension ranking (channel, source/medium, UTM campaign, landing
+   * page) read from `GET social/analytics/ga4/breakdown`. Neither paid nor
+   * organic: it is the site's traffic, with no ad account behind it.
+   */
+  | "ga4";
 
 /**
  * Whether a kind reads from the ad account rather than from a connected page.
@@ -144,6 +154,8 @@ export function isPaidSourceKind(kind: TableSourceKind): boolean {
     case "action_types":
     case "ad_interactions":
       return true;
+    case "ga4":
+      return false;
     case "organic":
     case "stories":
     case "facebook_reels":
@@ -394,6 +406,37 @@ const PAID_ONLY: ChannelId[] = ["meta_ads"];
 const INSTAGRAM_ONLY: ChannelId[] = ["instagram"];
 const FACEBOOK_ONLY: ChannelId[] = ["facebook"];
 const ORGANIC_NETWORKS: ChannelId[] = ["instagram", "facebook"];
+const GA4_ONLY: ChannelId[] = ["ga4"];
+
+/**
+ * The columns of a GA4 ranking. Sorting is the endpoint's (sessions, desc), so
+ * no column offers a sort key. `engagementRate` is Σ engaged ÷ Σ sessions of the
+ * row, recomputed by the API and never averaged across days.
+ */
+function ga4Columns(nameLabel: string, withRevenue: boolean): TableColumnDefinition[] {
+  return [
+    { id: "name", label: nameLabel, format: "text", sortKey: null, numeric: false },
+    { id: "sessions", label: "Sessões", format: "integer", sortKey: null, numeric: true },
+    { id: "engagedSessions", label: "Sessões engajadas", format: "integer", sortKey: null, numeric: true },
+    { id: "engagementRate", label: "Taxa de engajamento", format: "percent", sortKey: null, numeric: true },
+    { id: "keyEvents", label: "Eventos-chave", format: "integer", sortKey: null, numeric: true },
+    ...(withRevenue ? [{ id: "revenue", label: "Receita", format: "currency" as const, sortKey: null, numeric: true }] : []),
+  ];
+}
+
+function ga4Source(id: TableSourceId, label: string, description: string, nameLabel: string, withRevenue: boolean): TableSourceDefinition {
+  return {
+    id,
+    label,
+    description,
+    kind: "ga4",
+    channels: GA4_ONLY,
+    surface: null,
+    columns: ga4Columns(nameLabel, withRevenue),
+    defaultColumnIds: ["name", "sessions", "engagedSessions", "keyEvents"],
+    defaultSort: { columnId: "sessions", direction: "desc" },
+  };
+}
 
 /**
  * The interactions row. The headers are icons (see
@@ -684,6 +727,34 @@ export const TABLE_SOURCES: TableSourceDefinition[] = [
     defaultColumnIds: INTERACTION_COLUMN_IDS,
     defaultSort: { columnId: "views", direction: "desc" },
   },
+  ga4Source(
+    "ga4_channels",
+    "Canais de aquisição",
+    "Sessões do site por canal (busca orgânica, direto, social pago…), segundo o Google Analytics.",
+    "Canal",
+    true,
+  ),
+  ga4Source(
+    "ga4_source_medium",
+    "Origem / mídia",
+    "Sessões do site por origem e mídia (por exemplo, google / cpc).",
+    "Origem / mídia",
+    true,
+  ),
+  ga4Source(
+    "ga4_campaigns",
+    "Campanhas (UTM)",
+    "Sessões por campanha identificada nos parâmetros UTM. Sessões sem campanha aparecem como (not set).",
+    "Campanha",
+    true,
+  ),
+  ga4Source(
+    "ga4_landing_pages",
+    "Páginas de entrada",
+    "As páginas por onde as sessões começaram. Mostra as 50 maiores por dia; o resto vai em Outros.",
+    "Página",
+    false,
+  ),
 ];
 
 const SOURCES_BY_ID = new Map(TABLE_SOURCES.map((source) => [source.id, source] as const));
