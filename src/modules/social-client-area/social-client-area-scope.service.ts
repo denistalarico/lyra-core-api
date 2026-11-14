@@ -154,6 +154,9 @@ export const SOCIAL_CLIENT_AREA_SCOPE_SQL: Record<SocialClientAreaRef, string> =
       `${own('ad')}, ad.client_area_owner_user_id AS owner`,
     ),
     analyticsReport: scoped('social_analytics_reports ar', 'ar', own('ar')),
+    // G3 — the id is the GA4 property id kept in the product link's `resources`
+    // (text, matched against `$3::text[]`); the authorization carries the scope.
+    ga4Property: `SELECT r.item->>'propertyId' AS id, a.agency_client_id AS client, a.company_context_id AS company, NULL AS creator, NULL AS parent FROM social_google_authorizations a JOIN social_google_product_links l ON l.authorization_id = a.id AND l.product = 'ga4' AND l.status = 'connected' CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(l.resources) = 'array' THEN l.resources ELSE '[]'::jsonb END) AS r(item) WHERE a.tenant_id=$1 AND a.workspace_id=$2 AND a.status <> 'revoked' AND r.item->>'propertyId' = ANY($3::text[])`,
   };
 
 /** Values of `field`, or of `items[].field` across an array of objects. */
@@ -218,9 +221,13 @@ export class SocialClientAreaScopeService implements OnModuleInit {
     const wanted = new Map<SocialClientAreaRef, Set<string>>();
     const want = (ref: SocialClientAreaRef, values: unknown[]) => {
       for (const value of values) {
-        if (!isUuid(value)) return false;
+        const valid =
+          ref === 'ga4Property'
+            ? typeof value === 'string' && /^\d{1,20}$/.test(value)
+            : isUuid(value);
+        if (!valid) return false;
         const set = wanted.get(ref) ?? new Set<string>();
-        set.add(value.toLowerCase());
+        set.add((value as string).toLowerCase());
         wanted.set(ref, set);
       }
       return true;

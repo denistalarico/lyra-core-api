@@ -1,3 +1,4 @@
+import { ClientAreaExposed } from '../client-area/client-area.decorators';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { resolveCompanyAwareScope } from '../../common/context/company-aware-scope';
 import { RequestContextData } from '../../common/context/request-context.decorator';
@@ -22,15 +23,15 @@ const SOCIAL_ANALYTICS_READ_PERMISSION =
 /**
  * Read-only reporting over the local GA4 mirror. No handler reaches Google.
  *
- * Deliberately not `@ClientAreaExposed`: exposing a route to the Client Area
- * also requires a route rule and a subject proof for the property id (see
- * G3 Registro, divergência 1). Until that exists the routes are agency-only,
- * which fails closed.
+ * Exposed to the Client Area (`analytics` module, CA-AN1): each route has a rule
+ * in `SOCIAL_CLIENT_AREA_ROUTES`, and a named `propertyId` is proven to belong
+ * to the company by the `ga4Property` scope query. The sync route is not exposed.
  */
 @Controller('social/analytics/ga4')
 export class Ga4AnalyticsController {
   constructor(private readonly reads: Ga4AnalyticsReadService) {}
 
+  @ClientAreaExposed('analytics')
   @Get('properties')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -39,6 +40,7 @@ export class Ga4AnalyticsController {
     return this.reads.properties(resolveCompanyAwareScope(ctx));
   }
 
+  @ClientAreaExposed('analytics')
   @Get('overview')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -50,6 +52,7 @@ export class Ga4AnalyticsController {
     return this.reads.overview(resolveCompanyAwareScope(ctx), query);
   }
 
+  @ClientAreaExposed('analytics')
   @Get('timeseries')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -61,6 +64,7 @@ export class Ga4AnalyticsController {
     return this.reads.timeseries(resolveCompanyAwareScope(ctx), query);
   }
 
+  @ClientAreaExposed('analytics')
   @Get('breakdown')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')
@@ -72,6 +76,7 @@ export class Ga4AnalyticsController {
     return this.reads.breakdown(resolveCompanyAwareScope(ctx), query);
   }
 
+  @ClientAreaExposed('analytics')
   @Get('freshness')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

@@ -56,7 +56,9 @@ export type SocialClientAreaRef =
   | 'alert'
   | 'brandKitAsset'
   | 'analyticsDashboard'
-  | 'analyticsReport';
+  | 'analyticsReport'
+  /** G3 — a GA4 property selected for the company (numeric id, not a uuid). */
+  | 'ga4Property';
 
 export type SocialClientAreaRule = {
   /** CA-AN1: a read shared by two modules lists both (Campaigns + Analytics). */
@@ -129,6 +131,7 @@ const promoteAsVersion = {
 const connection = { connectionId: 'connection' } as const;
 const organicAsset = { assetId: 'organicAsset' } as const;
 const SA = '/social/analytics';
+const ga4Property = { propertyId: 'ga4Property' } as const;
 const dashboard = { ref: 'analyticsDashboard', param: 'id' } as const;
 const reportDashboard = { dashboardId: 'analyticsDashboard' } as const;
 const OA = '/social/organic/analytics';
@@ -470,6 +473,10 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
     manager: true,
   }),
   [`GET ${M}/hierarchy`]: campaigns({ query: connection }),
+  // G2 — same read for a Google Ads connection (the service proves the provider).
+  ['GET /social/campaigns/google/hierarchy']: campaigns({
+    query: connection,
+  }),
   ['GET /social/campaigns/boost-templates']: campaigns(),
   // Read-only analytics the Campaigns page needs (social-integrations,
   // decorator-only opt-in authorized by the user, 2026-10-19); CA-AN1 shares
@@ -487,6 +494,14 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
       'breakdown',
       'freshness',
     ].map((path) => [`GET ${SA}/${path}`, analytics({ query: connection })]),
+  ),
+  // G3 — GA4 read model: the list takes no id, every other read names its property.
+  [`GET ${SA}/ga4/properties`]: analytics(),
+  ...Object.fromEntries(
+    ['overview', 'timeseries', 'breakdown', 'freshness'].map((path) => [
+      `GET ${SA}/ga4/${path}`,
+      analytics({ query: ga4Property }),
+    ]),
   ),
   // Organic data (every read but the asset list names its asset).
   [`GET ${OA}/assets`]: analytics(),

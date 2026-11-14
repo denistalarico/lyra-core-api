@@ -112,6 +112,19 @@ describe('CA10 Social Client Area scope adapter', () => {
     campaign = randomUUID(),
     connection = randomUUID();
   const rows: Record<string, Fake> = {
+    // G3: a GA4 property id is numeric text, kept in the product link.
+    '4242': {
+      table: 'social_google_authorizations',
+      client,
+      company,
+      creator: null,
+    },
+    '4343': {
+      table: 'social_google_authorizations',
+      client,
+      company: randomUUID(),
+      creator: null,
+    },
     [ownContent]: {
       table: 'social_content_items',
       client,
@@ -405,5 +418,35 @@ describe('CA10 Social Client Area scope adapter', () => {
         }),
       ),
     ).resolves.toBeNull();
+  });
+
+  describe('GA4 property (G3)', () => {
+    const analyticsContext = () => ({
+      ...context({}),
+      memberAccess: resolveMemberAccess('client_member', { analytics: true }, {
+        analytics: 'operator',
+      } as never),
+    });
+    const read = (propertyId: string) =>
+      service().resolve(
+        'analytics',
+        analyticsContext(),
+        'k',
+        req('GET', '/social/analytics/ga4/overview', { query: { propertyId } }),
+      );
+
+    it('accepts a property selected for the company', async () => {
+      await expect(read('4242')).resolves.toMatchObject({
+        companyContextId: company,
+      });
+    });
+
+    it('answers null for a property of another company', async () => {
+      await expect(read('4343')).resolves.toBeNull();
+    });
+
+    it('answers null for a property id that is not numeric', async () => {
+      await expect(read(randomUUID())).resolves.toBeNull();
+    });
   });
 });

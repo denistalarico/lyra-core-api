@@ -115,18 +115,26 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
   let productStatus = 'active';
   let planner: Record<string, jest.Mock>;
   let production: Record<string, jest.Mock>;
+  // G3: GA4 property ids are numeric, not uuids.
+  const GA4_OWN = '111';
+  const GA4_FOREIGN = '999';
   const fakeQuery = jest.fn(
     (sql: string, values: [string, string, string[]]) => {
       const [t, w, ids] = values;
       if (t !== tenant || w !== workspace) return Promise.resolve([]);
       return Promise.resolve(
         ids.flatMap((id) =>
-          ([own, alien, foreign, otherOwned] as string[]).includes(id)
+          (
+            [own, alien, foreign, otherOwned, GA4_OWN, GA4_FOREIGN] as string[]
+          ).includes(id)
             ? [
                 {
                   id,
                   client,
-                  company: id === foreign ? randomUUID() : company,
+                  company:
+                    id === foreign || id === GA4_FOREIGN
+                      ? randomUUID()
+                      : company,
                   creator: id === alien ? randomUUID() : user,
                   parent: own,
                   owner: id === otherOwned ? randomUUID() : null,
@@ -337,7 +345,7 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
       : fill(route.path);
 
   it('checks company, live session and Viewer mutation level on every Social opt-in', async () => {
-    expect(exposed).toHaveLength(125);
+    expect(exposed).toHaveLength(126);
     levels('viewer');
     for (const route of exposed) {
       const at = `${route.verb} ${route.path}`;
@@ -550,7 +558,7 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
       context.analyticsProducts = products;
     };
     const query = (id = own) =>
-      `connectionId=${id}&assetId=${id}&paidConnectionId=${id}&organicAssetId=${id}&publicationIds=${own},${id}`;
+      `connectionId=${id}&assetId=${id}&paidConnectionId=${id}&organicAssetId=${id}&publicationIds=${own},${id}&propertyId=${id === own || id === alien ? GA4_OWN : GA4_FOREIGN}`;
     const target = (route: { verb: string; path: string }, id = own) =>
       route.verb === 'GET'
         ? `${fill(route.path, id)}?${query(id)}`
@@ -567,7 +575,7 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
       );
 
     it('refuses a Viewer on every Analytics route (D-AN-13)', async () => {
-      expect(analytics).toHaveLength(30);
+      expect(analytics).toHaveLength(35);
       access('viewer');
       expect(context.memberAccess!.analytics).toMatchObject({
         available: false,
@@ -612,7 +620,9 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
         const names =
           route.path.includes('/:') ||
           (route.verb === 'GET' &&
-            !/\/(connections|assets|dashboards|reports)$/.test(route.path));
+            !/\/(connections|assets|dashboards|reports|properties)$/.test(
+              route.path,
+            ));
         if (names)
           expect([
             at,
