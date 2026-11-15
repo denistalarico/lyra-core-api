@@ -317,7 +317,8 @@ export function metricShape(metric: MetricDefinition): MetricShape {
   return metric.shape ?? "scalar";
 }
 
-const PAID_CHANNELS: ChannelId[] = ["meta_ads"];
+const PAID_CHANNELS: ChannelId[] = ["meta_ads", "google_ads"];
+const META_ADS_ONLY: ChannelId[] = ["meta_ads"];
 const META_SURFACES: ChannelId[] = ["facebook", "instagram"];
 /**
  * Metrics only Instagram can answer.
@@ -404,7 +405,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "link_clicks",
     label: "Cliques no link",
     description: "Cliques que levaram ao destino do anúncio.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -416,7 +417,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "leads",
     label: "Leads",
     description: "Contatos gerados pelos anúncios no período.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -501,7 +502,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "cpl",
     label: "CPL",
     description: "Custo médio por lead.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "currency",
     polarity: "lower_is_better",
     additive: false,
@@ -514,7 +515,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Conversas iniciadas",
     description:
       "Conversas por mensagem iniciadas a partir dos anúncios. Não somar com Cadastros: numa campanha de mensagens a mesma pessoa costuma aparecer nas duas.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -527,7 +528,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Custo por conversa",
     description:
       "Investimento dividido pelas conversas iniciadas. Não é uma variação do CPR — o denominador é outro.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "currency",
     polarity: "lower_is_better",
     additive: false,
@@ -564,7 +565,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Alcance",
     description:
       "Pessoas únicas alcançadas no período, medido pela própria Meta. Não é a soma dos alcances diários.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "higher_is_better",
     additive: false,
@@ -577,7 +578,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Frequência",
     description:
       "Quantas vezes, em média, cada pessoa alcançada viu os anúncios. Só é calculada nos períodos em que a Meta mediu o alcance.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "ratio",
     polarity: "neutral",
     additive: false,
@@ -592,7 +593,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Custo por pessoa",
     description:
       "Quanto custou alcançar cada pessoa. Diferente do CPM, que divide por mil exibições e conta a mesma pessoa várias vezes.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "currency",
     polarity: "lower_is_better",
     additive: false,
@@ -1221,7 +1222,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     // Ads only: the conversations come from ads with a messaging destination,
     // so on a Facebook or Instagram block it would be paid data under an
     // organic heading.
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1233,7 +1234,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "audience_age_gender",
     label: "Audiência por idade e gênero",
     description: "Distribuição do público alcançado por faixa etária e gênero.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: false,
@@ -1266,7 +1267,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Impressões por idade",
     description:
       "Distribuição das impressões por faixa etária, somando os gêneros.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: false,
@@ -1281,7 +1282,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Impressões por gênero",
     description:
       "Distribuição das impressões por gênero, somando as faixas etárias.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: false,
@@ -1313,7 +1314,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Impressões por hora",
     description:
       "Distribuição das impressões por hora do dia, no fuso de quem viu o anúncio.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: false,
@@ -1336,7 +1337,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Investimento por hora",
     description:
       "Distribuição do valor investido por hora do dia, no fuso de quem viu o anúncio.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "currency",
     polarity: "neutral",
     additive: false,
@@ -1468,7 +1469,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "reach_by_device",
     label: "Alcance por dispositivo",
     description: "Pessoas alcançadas em cada tipo de dispositivo.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: false,
@@ -1481,7 +1482,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "spend_by_publisher",
     label: "Valor gasto por rede",
     description: "Como o investimento se dividiu entre Facebook e Instagram.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "currency",
     polarity: "neutral",
     additive: true,
@@ -1495,7 +1496,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Alcance por rede",
     description:
       "Pessoas alcançadas em cada rede. Alcance não é somável entre redes nem entre dias — a mesma pessoa pode ter sido alcançada nas duas, então as fatias não formam um total.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     // The ingest has been storing this since the breakdown slice shipped; the
@@ -1511,7 +1512,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "clicks_by_publisher",
     label: "Cliques por rede",
     description: "Como os cliques se dividiram entre Facebook e Instagram.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: true,
@@ -1524,7 +1525,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "impressions_by_publisher",
     label: "Impressões por rede",
     description: "Como as exibições se dividiram entre Facebook e Instagram.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: true,
@@ -1538,7 +1539,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "ThruPlays",
     description:
       "Reproduções até o fim ou por pelo menos 15 segundos. Diferente de “Visualizações de vídeo”, que conta 3 segundos — o mesmo anúncio costuma ter cerca de 5x mais visualizações do que ThruPlays.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1551,7 +1552,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Tempo médio de exibição",
     description:
       "Quantos segundos, em média, cada visualização durou. É uma média do período inteiro, ponderada por visualizações — não a média das médias diárias.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "ratio",
     polarity: "higher_is_better",
     // A mean. Summing it is meaningless and averaging it again is wrong unless
@@ -1569,7 +1570,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     // Read from the ad account's counts (`readPaid`), so it belongs to the
     // Meta Ads block. It used to be offered on all three and was sitting on
     // every Facebook and Instagram block, reading the ad account there.
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: true,
@@ -1683,7 +1684,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Campanhas",
     description:
       "Campanhas que tiveram veiculação no período — não o total da conta, que inclui tudo o que já existiu.",
-    channels: PAID_CHANNELS,
+    channels: META_ADS_ONLY,
     format: "integer",
     polarity: "neutral",
     additive: false,
