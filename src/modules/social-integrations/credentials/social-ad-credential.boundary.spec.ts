@@ -147,6 +147,8 @@ describe('social ad credential boundary', () => {
         'modules/social-google/social-google-selection.service.ts',
         // G3: the GA4 sync, the only reader of the GA4 Data API.
         'modules/social-ga4/ga4-sync.service.ts',
+        // OR0 (D-I1): `google_oauth` organic connections (YouTube).
+        'modules/social-organic/credentials/social-organic-credential.resolver.ts',
       ].sort(),
     );
   });
