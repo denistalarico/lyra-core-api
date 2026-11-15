@@ -40,7 +40,7 @@ const ACCOUNT_QUERY =
   'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone FROM customer';
 
 const CAMPAIGN_QUERY =
-  'SELECT campaign.id, campaign.name, campaign.status, campaign.serving_status, campaign.advertising_channel_type, campaign.start_date, campaign.end_date, campaign_budget.amount_micros, campaign_budget.period FROM campaign';
+  'SELECT campaign.id, campaign.name, campaign.status, campaign.serving_status, campaign.advertising_channel_type, campaign.start_date_time, campaign.end_date_time, campaign_budget.amount_micros, campaign_budget.period FROM campaign';
 
 const AD_GROUP_QUERY =
   'SELECT ad_group.id, ad_group.name, ad_group.status, campaign.id FROM ad_group';
@@ -49,7 +49,7 @@ const AD_QUERY =
   'SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status, ad_group.id, campaign.id FROM ad_group_ad';
 
 const METRIC_FIELDS =
-  'segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, metrics.video_views, metrics.interactions, metrics.all_conversions';
+  'segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, metrics.video_trueview_views, metrics.interactions, metrics.all_conversions';
 
 /** Insights level → the GAQL resource and the id fields that name the row. */
 const METRIC_QUERY_BY_LEVEL: Record<SocialAdInsightsLevel, string> = {
@@ -167,16 +167,24 @@ export class GoogleAdsReaderService {
         },
       );
     } catch {
-      throw new GoogleAdsError('transient', 'google_ads_transient');
+      throw new GoogleAdsError('transient', 'google_ads_transient', null, 1);
     }
 
-    if (!response.ok) throw await this.failure(response);
+    // The request reached Google: the quota is spent even though it failed (B3).
+    if (!response.ok) {
+      throw Object.assign(await this.failure(response), { apiCalls: 1 });
+    }
 
     let body: unknown;
     try {
       body = await response.json();
     } catch {
-      throw new GoogleAdsError('transient', 'google_ads_invalid_response');
+      throw new GoogleAdsError(
+        'transient',
+        'google_ads_invalid_response',
+        null,
+        1,
+      );
     }
 
     const rows: GoogleAdsRawRow[] = [];

@@ -169,6 +169,39 @@ describe('GoogleAdsReaderService', () => {
     ]);
   });
 
+  // Field list reviewed against https://developers.google.com/google-ads/api/fields/v25
+  it('only asks for fields that exist in v25', async () => {
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(
+        async () => new Response(JSON.stringify([{ results: [] }])),
+      );
+    const reader = build();
+
+    await reader.readHierarchy(CREDENTIAL);
+    for (const level of ['account', 'campaign', 'adset', 'ad'] as const) {
+      await reader.readDailyMetrics(CREDENTIAL, level, WINDOW);
+    }
+
+    const queries = fetchSpy.mock.calls
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)).query)
+      .join('\n');
+
+    expect(queries).toContain('campaign.start_date_time');
+    expect(queries).toContain('campaign.end_date_time');
+    expect(queries).toContain('metrics.video_trueview_views');
+    expect(queries).not.toMatch(/campaign\.(start|end)_date\b/);
+    expect(queries).not.toContain('metrics.video_views');
+  });
+
+  it('counts the request that failed against the quota', async () => {
+    respond(400, {});
+
+    await expect(
+      build().readDailyMetrics(CREDENTIAL, 'campaign', WINDOW),
+    ).rejects.toMatchObject({ code: 'google_ads_bad_request', apiCalls: 1 });
+  });
+
   it('treats 429 as rate limited and honours Retry-After', async () => {
     respond(429, {}, { 'retry-after': '120' });
 

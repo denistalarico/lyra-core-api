@@ -84,11 +84,29 @@ describe('Google Ads entity normalizer', () => {
 
   it('treats the 2037-12-30 sentinel as no end date', () => {
     const [campaign] = normalizeGoogleAdsCampaigns(
-      page([{ campaign: { id: '11', endDate: '2037-12-30' } }]),
+      page([{ campaign: { id: '11', endDateTime: '2037-12-30 23:59:59' } }]),
       entityContext,
     ).rows;
 
     expect(campaign.stopTime).toBeNull();
+  });
+
+  it('reads the v25 start and end date-times as calendar days', () => {
+    const [campaign] = normalizeGoogleAdsCampaigns(
+      page([
+        {
+          campaign: {
+            id: '11',
+            startDateTime: '2026-11-01 00:00:00',
+            endDateTime: '2026-12-31 23:59:59',
+          },
+        },
+      ]),
+      entityContext,
+    ).rows;
+
+    expect(campaign.startTime?.toISOString()).toBe('2026-11-01T00:00:00.000Z');
+    expect(campaign.stopTime?.toISOString().slice(0, 10)).toBe('2026-12-31');
   });
 
   it('counts a campaign without an id as skipped', () => {

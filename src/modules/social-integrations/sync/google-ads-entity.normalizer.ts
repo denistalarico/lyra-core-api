@@ -54,7 +54,8 @@ function objectId(value: unknown): string | null {
 }
 
 function day(value: unknown): Date | null {
-  const candidate = text(value);
+  // v25 answers `yyyy-MM-dd HH:mm:ss`; only the calendar day is kept.
+  const candidate = text(value)?.slice(0, 10);
 
   if (!candidate || !DAY_PATTERN.test(candidate)) return null;
 
@@ -154,7 +155,7 @@ export function normalizeGoogleAdsCampaigns(
     const status = text(campaign.status);
     const period = text(budget.period);
     const budgetMinor = microsToMinor(budget.amountMicros);
-    const endDate = text(campaign.endDate);
+    const endDate = day(campaign.endDateTime);
 
     rows.push({
       ...BASE,
@@ -170,9 +171,11 @@ export function normalizeGoogleAdsCampaigns(
       dailyBudgetMinor: period === 'DAILY' ? budgetMinor : null,
       lifetimeBudgetMinor: period === 'CUSTOM_PERIOD' ? budgetMinor : null,
       currency: context.currency,
-      startTime: day(campaign.startDate),
+      startTime: day(campaign.startDateTime),
       stopTime:
-        endDate && endDate !== NO_END_DATE ? endOfDay(day(endDate)) : null,
+        endDate && endDate.toISOString().slice(0, 10) !== NO_END_DATE
+          ? endOfDay(endDate)
+          : null,
       metadata: {
         channelType: text(campaign.advertisingChannelType),
         googleStatus: status,

@@ -24,6 +24,8 @@ export class GoogleAdsError extends Error {
     public readonly kind: GoogleAdsErrorKind,
     public readonly code: string,
     public readonly retryAfterMs: number | null = null,
+    /** Requests that reached Google before this failure (quota is spent). */
+    public readonly apiCalls: number = 0,
   ) {
     super(code);
     this.name = 'GoogleAdsError';

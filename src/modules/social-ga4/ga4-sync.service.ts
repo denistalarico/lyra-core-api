@@ -370,6 +370,8 @@ export class Ga4SyncService {
     });
     ctx.counters.calls += report.apiCalls;
     const rows = normalizeDailyRows(report.rows);
+    // L8: tells "no traffic" from a silent failure (counts only, no provider data).
+    this.logger.log(`ga4 report daily rows=${rows.length}`);
 
     await this.dataSource.transaction(async (manager) => {
       await this.upsert(
@@ -422,6 +424,7 @@ export class Ga4SyncService {
     });
     ctx.counters.calls += report.apiCalls;
     const rows = normalizeDimensionRows(dimension, report.rows);
+    this.logger.log(`ga4 report ${dimension} rows=${rows.length}`);
 
     await this.dataSource.transaction(async (manager) => {
       await this.upsert(

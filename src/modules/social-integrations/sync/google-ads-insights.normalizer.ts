@@ -126,7 +126,7 @@ function normalizeRow(
   const clicks = readCount(metrics.clicks);
   const conversions = readDouble(metrics.conversions);
   const conversionValue = readDouble(metrics.conversionsValue);
-  const videoViews = readCount(metrics.videoViews);
+  const videoViews = readCount(metrics.videoTrueviewViews);
 
   if (
     spend === null ||

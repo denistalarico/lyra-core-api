@@ -29,6 +29,7 @@ import {
   advancesBackfillChain,
 } from './social-ad-backfill-planner.service';
 import { GoogleAdsSyncService } from './google-ads-sync.service';
+import { GoogleAdsError } from '../sync/google-ads-error';
 import { SocialAdConnectionService } from './social-ad-connection.service';
 import { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './social-ad-insights-sync.service';
@@ -195,6 +196,10 @@ export class SocialAdSyncWorker {
         });
         completed.push(segment);
       } catch (error) {
+        // A failed Google request still spent quota (B3).
+        if (error instanceof GoogleAdsError)
+          counters.apiCalls += error.apiCalls;
+
         /**
          * Stops at the first failure rather than trying the rest.
          *
