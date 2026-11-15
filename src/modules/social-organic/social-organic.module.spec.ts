@@ -23,8 +23,11 @@ import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.en
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import { SocialPlannerModule } from '../social-planner/social-planner.module';
 import {
+  MetaOrganicAnalyticsProvider,
   MetaOrganicAudienceService,
   MetaOrganicOnlineFollowersService,
+  SOCIAL_ORGANIC_ANALYTICS_PROVIDERS,
+  SocialOrganicAnalyticsProviderRegistry,
   MetaOrganicFacebookReelsService,
   MetaOrganicStoriesService,
   SocialOrganicFacebookReelWriterService,
@@ -59,6 +62,7 @@ import { SocialContentDestinationEntity } from '../social-planner/entities/socia
 import { SocialDestinationCreativeEntity } from '../social-planner/entities/social-destination-creative.entity';
 import { SocialContentItemEntity } from '../social-planner/entities/social-content-item.entity';
 import {
+  SOCIAL_ORGANIC_HEALTH_PROVIDERS,
   SOCIAL_ORGANIC_OAUTH_PROVIDERS,
   SocialOrganicController,
   SocialOrganicConnectionService,
@@ -112,8 +116,11 @@ import {
   SocialOrganicWebhookService,
   SocialOrganicWebhookWorker,
 } from './webhooks';
+import { SocialGoogleModule } from '../social-google/social-google.module';
 import {
   createMetaOrganicOAuthProviders,
+  createOrganicAnalyticsProviders,
+  createOrganicHealthProviders,
   SocialOrganicModule,
 } from './social-organic.module';
 
@@ -169,6 +176,10 @@ describe('SocialOrganicModule', () => {
     expect(
       Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
     ).toContain(SocialPlannerModule);
+    // D-I1: `google_oauth` tokens come only from the Google module (one-way).
+    expect(
+      Reflect.getMetadata(MODULE_METADATA.IMPORTS, SocialOrganicModule),
+    ).toContain(SocialGoogleModule);
     expect(
       Reflect.getMetadata(MODULE_METADATA.CONTROLLERS, SocialOrganicModule),
     ).toEqual([
@@ -211,8 +222,20 @@ describe('SocialOrganicModule', () => {
       DirectInstagramPublisherAdapter,
       MetaPublisherRegistration,
       MetaOrganicHealthService,
+      {
+        provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,
+        useFactory: createOrganicHealthProviders,
+        inject: [MetaOrganicHealthService],
+      },
       SocialOrganicHealthScheduler,
       MetaOrganicInsightsService,
+      MetaOrganicAnalyticsProvider,
+      {
+        provide: SOCIAL_ORGANIC_ANALYTICS_PROVIDERS,
+        useFactory: createOrganicAnalyticsProviders,
+        inject: [MetaOrganicAnalyticsProvider],
+      },
+      SocialOrganicAnalyticsProviderRegistry,
       SocialOrganicMetricsWriterService,
       SocialOrganicAudienceConfigService,
       MetaOrganicAudienceService,

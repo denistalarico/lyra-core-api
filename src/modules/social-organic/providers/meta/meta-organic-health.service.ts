@@ -7,7 +7,12 @@ import {
 } from '../../entities';
 import { SocialOrganicCredentialResolver } from '../../credentials/social-organic-credential.resolver';
 import { SocialOrganicCredentialError } from '../../credentials/social-organic-credential.error';
+import type { SocialOrganicHealthProvider } from '../../connections/social-organic-health.provider';
 import { MetaOrganicGraphService } from './meta-organic-graph.service';
+import {
+  META_INSTAGRAM_PROVIDER,
+  META_ORGANIC_PROVIDER,
+} from './meta-organic-oauth.support';
 import { MetaOrganicGraphError } from './meta-organic-graph.error';
 import {
   HEALTH_NEAR_EXPIRY_MS,
@@ -43,7 +48,10 @@ export type MetaOrganicHealthResult = {
  * `authorizationMethod` a second time here.
  */
 @Injectable()
-export class MetaOrganicHealthService {
+export class MetaOrganicHealthService implements SocialOrganicHealthProvider {
+  /** OR0: the scheduler hands this service only Meta assets. */
+  readonly providers = [META_ORGANIC_PROVIDER, META_INSTAGRAM_PROVIDER];
+
   constructor(
     @InjectRepository(SocialOrganicAssetEntity, 'agency')
     private readonly assetsRepository: Repository<SocialOrganicAssetEntity>,

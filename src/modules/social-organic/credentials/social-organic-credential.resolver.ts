@@ -1,7 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
+import {
+  GoogleCredentialError,
+  SocialGoogleAuthorizationService,
+} from '../../social-google/social-google-authorization.service';
+import {
+  type SocialOrganicOAuthProviderHooks,
+  type SocialOrganicOAuthTokenGrant,
+  SocialOrganicOAuthProviderRegistry,
+  SocialOrganicOAuthRefreshError,
+} from '../connections/social-organic-oauth.provider';
 import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
@@ -11,9 +21,22 @@ import {
   ResolvedOrganicCredential,
   createResolvedOrganicCredential,
 } from './resolved-organic-credential';
-import { SocialOrganicCredentialError } from './social-organic-credential.error';
+import {
+  SocialOrganicCredentialError,
+  type SocialOrganicCredentialErrorCode,
+} from './social-organic-credential.error';
+import { googleProductForOrganicProvider } from './social-organic-google-products';
 
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
+/** D-I5: a refreshable connection token is renewed this close to expiry. */
+export const ORGANIC_REFRESH_WINDOW_MS = 5 * 60_000;
+/** Bounded wait behind another refresh; mirrors the Google lock timeout. */
+const ORGANIC_REFRESH_LOCK_TIMEOUT_MS = 15_000;
+
+type ConnectionToken = { accessToken: string; credentialVersion: number };
+type RefreshOutcome =
+  | ConnectionToken
+  | { refused: SocialOrganicCredentialErrorCode };
 
 export type SocialOrganicCredentialScope = {
   tenantId: string;
@@ -47,6 +70,12 @@ export class SocialOrganicCredentialResolver {
     @InjectRepository(SocialOrganicConnectionEntity, 'agency')
     private readonly connectionsRepository: Repository<SocialOrganicConnectionEntity>,
     private readonly cryptoService: SettingsCryptoService,
+    /** D-I5: source of the optional `refreshAccessToken` hook per provider. */
+    @Optional()
+    private readonly oauthProviders?: SocialOrganicOAuthProviderRegistry,
+    /** D-I1: the only way a `google_oauth` connection gets a token. */
+    @Optional()
+    private readonly googleAuthorization?: SocialGoogleAuthorizationService,
   ) {}
 
   async resolve(
@@ -156,20 +185,28 @@ export class SocialOrganicCredentialResolver {
     };
 
     let accessToken: string;
+    let credentialVersion = connection.credentialVersion;
 
     // The only runtime branch on authorization_method in the organic module.
     switch (connection.authorizationMethod) {
-      case 'oauth_user':
-        accessToken = await this.resolveConnectionToken(
+      case 'oauth_user': {
+        const token = await this.resolveConnectionToken(
           connection,
           asset.id,
           scope,
         );
+        accessToken = token.accessToken;
+        credentialVersion = token.credentialVersion;
         break;
+      }
 
       case 'oauth_business':
       case 'internal_system_user':
         accessToken = await this.resolveAssetToken(asset, scope);
+        break;
+
+      case 'google_oauth':
+        accessToken = await this.resolveGoogleToken(connection, scope);
         break;
 
       default:
@@ -189,7 +226,7 @@ export class SocialOrganicCredentialResolver {
       assetType: asset.assetType,
       externalAssetId: asset.externalAssetId,
       scopes: connection.scopes,
-      credentialVersion: connection.credentialVersion,
+      credentialVersion,
       accessToken,
     });
 
@@ -233,13 +270,211 @@ export class SocialOrganicCredentialResolver {
     connection: SocialOrganicConnectionEntity,
     assetId: string,
     scope: SocialOrganicCredentialScope,
-  ): Promise<string> {
+  ): Promise<ConnectionToken> {
+    const hooks = this.oauthProviders?.find(connection.provider);
+    if (
+      hooks?.refreshAccessToken &&
+      this.isDueForRefresh(connection.tokenExpiresAt)
+    ) {
+      return this.refreshConnectionToken(connection.id, assetId, scope, hooks);
+    }
+
     this.assertUsableExpiry(connection.tokenExpiresAt);
 
-    const row = await this.connectionsRepository
-      .createQueryBuilder('connection')
-      .select('connection.accessTokenEncrypted')
-      .where('connection.id = :id', { id: connection.id })
+    const row = await this.whereConnectionInScope(
+      this.connectionsRepository
+        .createQueryBuilder('connection')
+        .select('connection.accessTokenEncrypted'),
+      connection.id,
+      assetId,
+      scope,
+    ).getOne();
+
+    return {
+      accessToken: this.decryptOrRefuse(row?.accessTokenEncrypted),
+      credentialVersion: connection.credentialVersion,
+    };
+  }
+
+  /**
+   * D-I5, molded on `SocialGoogleAuthorizationService.getAccessToken`: the row
+   * lock serializes concurrent refreshes. The second caller blocks on it, then
+   * re-reads the row and finds the token the first one stored, so one grant
+   * is spent per expiry. Everything is re-checked under the lock because a
+   * disconnect may have won the race.
+   */
+  private async refreshConnectionToken(
+    connectionId: string,
+    assetId: string,
+    scope: SocialOrganicCredentialScope,
+    hooks: SocialOrganicOAuthProviderHooks,
+  ): Promise<ConnectionToken> {
+    let outcome: RefreshOutcome;
+    try {
+      outcome = await this.connectionsRepository.manager.transaction(
+        async (manager): Promise<RefreshOutcome> => {
+          // SET LOCAL dies with the transaction; never queue forever behind a
+          // slow provider call held by another worker.
+          await manager.query(
+            `SET LOCAL lock_timeout = ${ORGANIC_REFRESH_LOCK_TIMEOUT_MS}`,
+          );
+          const repository = manager.getRepository(
+            SocialOrganicConnectionEntity,
+          );
+          const locked = await this.whereConnectionInScope(
+            this.includeLifecycleConnectionCredentials(
+              repository.createQueryBuilder('connection'),
+            ),
+            connectionId,
+            assetId,
+            scope,
+          )
+            .setLock('pessimistic_write')
+            .getOne();
+
+          if (!locked || locked.credentialRemovedAt) {
+            return { refused: 'credential_removed' };
+          }
+          if (locked.connectionStatus !== 'connected') {
+            return { refused: 'connection_not_connected' };
+          }
+          if (!this.isDueForRefresh(locked.tokenExpiresAt)) {
+            return {
+              accessToken: this.decryptOrRefuse(locked.accessTokenEncrypted),
+              credentialVersion: locked.credentialVersion,
+            };
+          }
+
+          const refreshToken = this.decryptOptional(
+            locked.refreshTokenEncrypted,
+          );
+          if (!refreshToken) {
+            await this.markCredentialExpired(repository, locked);
+            // Returned, not thrown: a throw would roll the new state back.
+            return { refused: 'credential_expired' };
+          }
+
+          if (!hooks.refreshAccessToken) {
+            return { refused: 'credential_refresh_failed' };
+          }
+          let grant: SocialOrganicOAuthTokenGrant;
+          try {
+            grant = await hooks.refreshAccessToken({
+              loginConfig: hooks.configuration.loginConfig,
+              refreshToken,
+            });
+          } catch (error) {
+            if (
+              error instanceof SocialOrganicOAuthRefreshError &&
+              error.kind === 'permanent'
+            ) {
+              await this.markCredentialExpired(repository, locked);
+              return { refused: 'credential_expired' };
+            }
+            // Transient: the stored credential is left exactly as it was.
+            return { refused: 'credential_refresh_failed' };
+          }
+          if (!grant.accessToken) {
+            return { refused: 'credential_refresh_failed' };
+          }
+
+          locked.accessTokenEncrypted = this.cryptoService.encrypt(
+            grant.accessToken,
+          );
+          // Keep the stored refresh token unless the provider rotated it.
+          if (grant.refreshToken) {
+            locked.refreshTokenEncrypted = this.cryptoService.encrypt(
+              grant.refreshToken,
+            );
+          }
+          locked.tokenExpiresAt = grant.tokenExpiresAt ?? null;
+          if (grant.scopes?.length) locked.scopes = [...grant.scopes];
+          locked.credentialVersion += 1;
+          locked.lastError = null;
+          await repository.save(locked);
+
+          return {
+            accessToken: grant.accessToken,
+            credentialVersion: locked.credentialVersion,
+          };
+        },
+      );
+    } catch (error) {
+      if (error instanceof SocialOrganicCredentialError) throw error;
+      // Lock wait timeout (55P03) or any database failure: transient, and
+      // never with driver or provider detail attached.
+      throw new SocialOrganicCredentialError('credential_refresh_failed');
+    }
+
+    if ('refused' in outcome) {
+      throw new SocialOrganicCredentialError(outcome.refused);
+    }
+    return outcome;
+  }
+
+  /** The grant is gone: wipe it so nothing retries a dead refresh token. */
+  private async markCredentialExpired(
+    repository: Repository<SocialOrganicConnectionEntity>,
+    connection: SocialOrganicConnectionEntity,
+  ): Promise<void> {
+    connection.connectionStatus = 'error';
+    connection.lastError = 'credential_expired';
+    connection.accessTokenEncrypted = null;
+    connection.refreshTokenEncrypted = null;
+    connection.tokenExpiresAt = null;
+    await repository.save(connection);
+  }
+
+  /**
+   * D-I1: a `google_oauth` connection stores no token; the shared Google
+   * authorization refreshes and serializes it. Google codes are mapped to the
+   * organic vocabulary so no Google detail escapes this boundary.
+   */
+  private async resolveGoogleToken(
+    connection: SocialOrganicConnectionEntity,
+    scope: SocialOrganicCredentialScope,
+  ): Promise<string> {
+    const product = googleProductForOrganicProvider(connection.provider);
+    if (!product || !this.googleAuthorization) {
+      throw new SocialOrganicCredentialError(
+        'unsupported_authorization_method',
+      );
+    }
+
+    try {
+      const token = await this.googleAuthorization.getAccessToken({
+        scope: {
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          agencyClientId: scope.agencyClientId,
+          companyContextId: scope.companyContextId ?? null,
+        },
+        product,
+      });
+      return token.accessToken;
+    } catch (error) {
+      throw new SocialOrganicCredentialError(
+        organicCodeForGoogleFailure(error),
+      );
+    }
+  }
+
+  private isDueForRefresh(expiresAt: Date | null): boolean {
+    // Unknown expiry keeps today's meaning: a token that does not expire.
+    return (
+      expiresAt !== null &&
+      expiresAt.getTime() - ORGANIC_REFRESH_WINDOW_MS <= Date.now()
+    );
+  }
+
+  private whereConnectionInScope(
+    query: SelectQueryBuilder<SocialOrganicConnectionEntity>,
+    connectionId: string,
+    assetId: string,
+    scope: SocialOrganicCredentialScope,
+  ): SelectQueryBuilder<SocialOrganicConnectionEntity> {
+    return query
+      .where('connection.id = :id', { id: connectionId })
       .andWhere('connection.tenantId = :tenantId', {
         tenantId: scope.tenantId,
       })
@@ -264,10 +499,7 @@ export class SocialOrganicCredentialResolver {
               companyContextId: scope.companyContextId,
               assetId,
             },
-      )
-      .getOne();
-
-    return this.decryptOrRefuse(row?.accessTokenEncrypted);
+      );
   }
 
   private async resolveAssetToken(
@@ -373,5 +605,24 @@ export class SocialOrganicCredentialResolver {
           'unsupported_analytics_asset_type',
         );
     }
+  }
+}
+
+function organicCodeForGoogleFailure(
+  error: unknown,
+): SocialOrganicCredentialErrorCode {
+  if (!(error instanceof GoogleCredentialError)) {
+    return 'credential_refresh_failed';
+  }
+  switch (error.code) {
+    case 'not_connected':
+    case 'product_not_connected':
+      return 'connection_not_connected';
+    case 'reauth_required':
+    case 'scope_not_granted':
+      return 'credential_expired';
+    case 'refresh_failed':
+    default:
+      return 'credential_refresh_failed';
   }
 }

@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/require-await -- health service doubles intentionally return resolved async values. */
-import type { MetaOrganicHealthService } from '../providers/meta/meta-organic-health.service';
+import type { SocialOrganicAssetEntity } from '../entities';
+import type { SocialOrganicHealthProvider } from './social-organic-health.provider';
 import { SocialOrganicHealthScheduler } from './social-organic-health.scheduler';
 
-function asset(id: string) {
-  return { id } as never;
+function asset(id: string, provider = 'meta') {
+  return { id, provider } as SocialOrganicAssetEntity;
 }
 
 function harness(
@@ -26,9 +27,13 @@ function harness(
 
   return {
     health,
-    scheduler: new SocialOrganicHealthScheduler(
-      health as unknown as MetaOrganicHealthService,
-    ),
+    scheduler: new SocialOrganicHealthScheduler([
+      Object.defineProperty(health, 'providers', {
+        // Non-enumerable so test 40 still sees only the two methods.
+        value: ['meta', 'instagram'],
+        enumerable: false,
+      }) as unknown as SocialOrganicHealthProvider,
+    ]),
   };
 }
 
@@ -123,5 +128,36 @@ describe('SocialOrganicHealthScheduler', () => {
     resolveFirst();
     await first;
     expect(health.listEligibleForScheduledCheck).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SocialOrganicHealthScheduler provider dispatch (OR0)', () => {
+  function provider(keys: string[], listed: SocialOrganicAssetEntity[]) {
+    return {
+      providers: keys,
+      listEligibleForScheduledCheck: jest.fn(async () => listed),
+      runCheck: jest.fn(async () => undefined),
+    };
+  }
+
+  it('hands each implementation only the assets of its own providers', async () => {
+    const meta = provider(['meta'], [asset('a'), asset('y', 'network_alpha')]);
+    const scheduler = new SocialOrganicHealthScheduler([meta]);
+
+    await scheduler.runDue();
+
+    expect(meta.runCheck.mock.calls).toEqual([[asset('a')]]);
+  });
+
+  it('runs every registered implementation in one pass', async () => {
+    const meta = provider(['meta'], [asset('a')]);
+    const other = provider(['network_alpha'], [asset('y', 'network_alpha')]);
+    const scheduler = new SocialOrganicHealthScheduler([meta, other]);
+
+    await expect(scheduler.runDue()).resolves.toBe(2);
+  });
+
+  it('checks nothing when no implementation is registered', async () => {
+    await expect(new SocialOrganicHealthScheduler().runDue()).resolves.toBe(0);
   });
 });

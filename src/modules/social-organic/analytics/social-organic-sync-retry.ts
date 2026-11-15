@@ -20,7 +20,12 @@ export function classifyOrganicSyncFailure(
     };
   }
   if (error instanceof SocialOrganicCredentialError) {
-    return { retry: false, rateLimited: false, code: error.code };
+    // OR0: a refresh that could not complete now is the only transient refusal.
+    return {
+      retry: error.code === 'credential_refresh_failed',
+      rateLimited: false,
+      code: error.code,
+    };
   }
   if (error instanceof SocialOrganicSyncError) {
     return { retry: false, rateLimited: false, code: error.code };

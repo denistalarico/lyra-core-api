@@ -62,5 +62,14 @@ describe('social organic credential boundary', () => {
     expect(filesContaining(/case\s+['"]internal_system_user['"]/)).toEqual([
       RESOLVER,
     ]);
+    expect(filesContaining(/case\s+['"]google_oauth['"]/)).toEqual([RESOLVER]);
+  });
+
+  it('takes Google tokens only in the resolver (D-I1)', () => {
+    expect(filesContaining(/\.getAccessToken\s*\(/)).toEqual([RESOLVER]);
+  });
+
+  it('calls the refresh hook only from the resolver (D-I5)', () => {
+    expect(filesContaining(/\.refreshAccessToken\s*\(/)).toEqual([RESOLVER]);
   });
 });

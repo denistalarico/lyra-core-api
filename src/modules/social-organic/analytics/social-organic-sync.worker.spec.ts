@@ -10,6 +10,11 @@ import type { MetaOrganicStoriesService } from './meta/meta-organic-stories.serv
 import type { SocialOrganicReachPeriodWriterService } from './social-organic-reach-period-writer.service';
 import type { MetaOrganicAudienceService } from './meta/meta-organic-audience.service';
 import type { MetaOrganicInsightsService } from './meta/meta-organic-insights.service';
+import { MetaOrganicAnalyticsProvider } from './meta/meta-organic-analytics.provider';
+import {
+  SocialOrganicAnalyticsProviderRegistry,
+  type SocialOrganicAnalyticsProvider,
+} from './social-organic-analytics.provider';
 import type { SocialOrganicSyncRunService } from './social-organic-sync-run.service';
 import { SocialOrganicSyncWorker } from './social-organic-sync.worker';
 
@@ -68,7 +73,7 @@ function measurement(
   };
 }
 
-function harness() {
+function harness(extraProviders: SocialOrganicAnalyticsProvider[] = []) {
   const claimed = run();
   const runs = {
     claim: jest.fn(async () => [claimed]),
@@ -80,7 +85,7 @@ function harness() {
   };
   const resolved = {
     assetTimezone: 'America/Sao_Paulo',
-    credential: { assetId: 'asset-1' },
+    credential: { assetId: 'asset-1', provider: 'instagram' },
   };
   const credentials = {
     resolvePersistedForAnalytics: jest.fn(async () => resolved),
@@ -162,16 +167,22 @@ function harness() {
     reachWriter,
     stories,
     facebookReels,
+    resolved,
     worker: new SocialOrganicSyncWorker(
       runs as unknown as SocialOrganicSyncRunService,
       credentials as unknown as SocialOrganicCredentialResolver,
-      insights as unknown as MetaOrganicInsightsService,
-      audience as unknown as MetaOrganicAudienceService,
-      onlineFollowers as unknown as MetaOrganicOnlineFollowersService,
-      periodReach as unknown as MetaOrganicPeriodReachService,
-      reachWriter as unknown as SocialOrganicReachPeriodWriterService,
-      stories as unknown as MetaOrganicStoriesService,
-      facebookReels as unknown as MetaOrganicFacebookReelsService,
+      new SocialOrganicAnalyticsProviderRegistry([
+        new MetaOrganicAnalyticsProvider(
+          insights as unknown as MetaOrganicInsightsService,
+          audience as unknown as MetaOrganicAudienceService,
+          onlineFollowers as unknown as MetaOrganicOnlineFollowersService,
+          periodReach as unknown as MetaOrganicPeriodReachService,
+          reachWriter as unknown as SocialOrganicReachPeriodWriterService,
+          stories as unknown as MetaOrganicStoriesService,
+          facebookReels as unknown as MetaOrganicFacebookReelsService,
+        ),
+        ...extraProviders,
+      ]),
     ),
   };
 }
@@ -376,5 +387,95 @@ describe('online followers', () => {
 
     expect(context.runs.markSucceeded).toHaveBeenCalledTimes(1);
     expect(context.runs.markFailed).not.toHaveBeenCalled();
+  });
+});
+
+describe('provider dispatch (OR0)', () => {
+  it('routes a Meta asset to the Meta analytics provider', async () => {
+    const context = harness();
+
+    await context.worker.processDue(1);
+
+    expect(context.insights.sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes another provider to its own implementation, not to Meta', async () => {
+    const other: SocialOrganicAnalyticsProvider = {
+      providers: ['network_alpha'],
+      sync: jest.fn(({ counters }) => {
+        counters.rowsWritten += 5;
+        counters.apiCalls += 2;
+        return Promise.resolve();
+      }),
+    };
+    const context = harness([other]);
+    context.resolved.credential.provider = 'network_alpha';
+
+    await context.worker.processDue(1);
+
+    expect(context.insights.sync).not.toHaveBeenCalled();
+  });
+
+  it('settles the counters the other provider reported', async () => {
+    const other: SocialOrganicAnalyticsProvider = {
+      providers: ['network_alpha'],
+      sync: jest.fn(({ counters }) => {
+        counters.rowsWritten += 5;
+        counters.apiCalls += 2;
+        return Promise.resolve();
+      }),
+    };
+    const context = harness([other]);
+    context.resolved.credential.provider = 'network_alpha';
+
+    await context.worker.processDue(1);
+
+    expect(context.runs.markSucceeded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        counters: { rowsWritten: 5, rowsSkipped: 0, apiCalls: 2 },
+      }),
+    );
+  });
+
+  it('keeps the calls a failing provider already spent on the run', async () => {
+    const other: SocialOrganicAnalyticsProvider = {
+      providers: ['network_alpha'],
+      sync: jest.fn(({ counters }) => {
+        counters.apiCalls += 1;
+        return Promise.reject(new Error('provider_down'));
+      }),
+    };
+    const context = harness([other]);
+    context.resolved.credential.provider = 'network_alpha';
+
+    await context.worker.processDue(1);
+
+    expect(context.runs.reschedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        counters: { rowsWritten: 0, rowsSkipped: 0, apiCalls: 1 },
+      }),
+    );
+  });
+
+  it('fails a run whose provider has no implementation, without calling Meta', async () => {
+    const context = harness();
+    context.resolved.credential.provider = 'unregistered';
+
+    await context.worker.processDue(1);
+
+    expect(context.runs.markFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ lastError: 'unsupported_analytics_provider' }),
+    );
+  });
+
+  it('refuses two implementations claiming the same provider', () => {
+    const duplicate: SocialOrganicAnalyticsProvider = {
+      providers: ['instagram'],
+      sync: jest.fn(),
+    };
+
+    expect(() => harness([duplicate])).toThrow(
+      'Organic analytics provider keys must be unique.',
+    );
   });
 });

@@ -19,7 +19,12 @@ export type SocialOrganicConnectionStatus =
 export type SocialOrganicAuthorizationMethod =
   | 'oauth_user'
   | 'oauth_business'
-  | 'internal_system_user';
+  | 'internal_system_user'
+  /**
+   * D-I1: the token lives in the shared Google authorization (`social-google`)
+   * and is taken through `getAccessToken`; the organic row stores none.
+   */
+  | 'google_oauth';
 
 /** One provider authorization. Publishable identities live in the asset table. */
 @Entity('social_organic_connections')

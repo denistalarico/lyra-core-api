@@ -14,7 +14,9 @@ import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications';
 import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
+import { SocialGoogleModule } from '../social-google/social-google.module';
 import {
+  MetaOrganicAnalyticsProvider,
   MetaOrganicAudienceService,
   MetaOrganicOnlineFollowersService,
   MetaOrganicPeriodReachService,
@@ -22,6 +24,8 @@ import {
   MetaOrganicStoriesService,
   MetaOrganicInsightsService,
   SocialConsolidatedAnalyticsService,
+  SOCIAL_ORGANIC_ANALYTICS_PROVIDERS,
+  SocialOrganicAnalyticsProviderRegistry,
   SocialOrganicAccountMetricDailyEntity,
   SocialOrganicReachPeriodEntity,
   SocialOrganicReachPeriodWriterService,
@@ -52,6 +56,7 @@ import { SocialContentItemEntity } from '../social-planner/entities/social-conte
 import { SocialDestinationCreativeEntity } from '../social-planner/entities/social-destination-creative.entity';
 import { SocialPlannerModule } from '../social-planner/social-planner.module';
 import {
+  SOCIAL_ORGANIC_HEALTH_PROVIDERS,
   SOCIAL_ORGANIC_OAUTH_PROVIDERS,
   SocialOrganicController,
   SocialOrganicConnectionService,
@@ -112,6 +117,18 @@ export function createMetaOrganicOAuthProviders(
   return [meta, instagram];
 }
 
+/** D-I4 (b): one analytics implementation per provider; YT/TT/LI plug here. */
+export function createOrganicAnalyticsProviders(
+  meta: MetaOrganicAnalyticsProvider,
+) {
+  return [meta];
+}
+
+/** D-I4 (c): one health implementation per provider; YT/TT/LI plug here. */
+export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
+  return [meta];
+}
+
 @Module({
   imports: [
     CompanyProductsModule,
@@ -136,6 +153,12 @@ export function createMetaOrganicOAuthProviders(
      * there is no cycle to break here.
      */
     SocialPlannerModule,
+    /**
+     * D-I1: a `google_oauth` organic connection (YouTube) takes its token only
+     * through `SocialGoogleAuthorizationService.getAccessToken`. One-way:
+     * `SocialGoogleModule` imports only `PermissionsModule`, so no cycle.
+     */
+    SocialGoogleModule,
     TypeOrmModule.forFeature(
       [
         SocialOrganicConnectionEntity,
@@ -209,8 +232,20 @@ export function createMetaOrganicOAuthProviders(
     DirectInstagramPublisherAdapter,
     MetaPublisherRegistration,
     MetaOrganicHealthService,
+    {
+      provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,
+      useFactory: createOrganicHealthProviders,
+      inject: [MetaOrganicHealthService],
+    },
     SocialOrganicHealthScheduler,
     MetaOrganicInsightsService,
+    MetaOrganicAnalyticsProvider,
+    {
+      provide: SOCIAL_ORGANIC_ANALYTICS_PROVIDERS,
+      useFactory: createOrganicAnalyticsProviders,
+      inject: [MetaOrganicAnalyticsProvider],
+    },
+    SocialOrganicAnalyticsProviderRegistry,
     SocialOrganicMetricsWriterService,
     // Audience snapshots: a gate that is off by default, a reader that measures
     // a stock once rather than iterating days, a writer that owns one table, and

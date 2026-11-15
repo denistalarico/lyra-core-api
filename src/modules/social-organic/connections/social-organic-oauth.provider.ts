@@ -92,6 +92,28 @@ export interface SocialOrganicOAuthProviderHooks {
   }): Promise<SocialOrganicPreparedAsset>;
 
   revokeAuthorization?(input: SocialOrganicRevocationInput): Promise<void>;
+
+  /**
+   * D-I5: renews an `oauth_user` connection token. Called only by the
+   * credential resolver, under the connection row lock. A provider without
+   * this hook keeps the plain expiry check. Throw
+   * `SocialOrganicOAuthRefreshError('permanent')` when the grant is gone
+   * (the connection then needs a reconnect); any other failure is transient.
+   * The returned grant replaces the stored one; an absent `refreshToken`
+   * keeps the stored refresh token.
+   */
+  refreshAccessToken?(input: {
+    loginConfig: unknown;
+    refreshToken: string;
+  }): Promise<SocialOrganicOAuthTokenGrant>;
+}
+
+/** Raised by `refreshAccessToken`. Carries no provider detail. */
+export class SocialOrganicOAuthRefreshError extends Error {
+  constructor(readonly kind: 'permanent' | 'transient') {
+    super(`organic_refresh_${kind}`);
+    this.name = 'SocialOrganicOAuthRefreshError';
+  }
 }
 
 @Injectable()

@@ -11,6 +11,8 @@ export * from './social-organic-stories.scheduler';
 export * from './social-organic-reach-period-writer.service';
 export * from './meta/meta-organic-insights.service';
 export * from './meta/meta-organic-insights.types';
+export * from './meta/meta-organic-analytics.provider';
+export * from './social-organic-analytics.provider';
 export * from './social-organic-analytics.controller';
 export * from './social-organic-analytics-read.service';
 export * from './social-organic-audience-config.service';
