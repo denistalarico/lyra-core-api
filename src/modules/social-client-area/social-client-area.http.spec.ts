@@ -106,6 +106,11 @@ function controllerDependencies() {
   }));
 }
 
+// The route sweeps below make ~300 sequential HTTP calls (1.5 s alone). Under
+// the full deploy suite they outgrew Jest's 5 s default and the timed-out sweep
+// kept firing into the next test (ECONNRESET), so the budget is explicit.
+jest.setTimeout(30_000);
+
 describe('CA10 Social controllers through the real HTTP bridge', () => {
   let app: INestApplication, jwt: JwtService;
   const saved = { ...process.env };
