@@ -151,10 +151,10 @@ describe('SocialOrganicSyncRunService', () => {
       expect.objectContaining({
         take: 20,
         where: expect.objectContaining({
-          provider: In(['meta', 'youtube', 'tiktok']),
+          provider: In(['meta', 'youtube', 'tiktok', 'linkedin']),
           status: 'active',
           connection: expect.objectContaining({
-            provider: In(['meta', 'youtube', 'tiktok']),
+            provider: In(['meta', 'youtube', 'tiktok', 'linkedin']),
             connectionStatus: 'connected',
           }),
         }),

@@ -30,6 +30,7 @@ export const DASHBOARD_CHANNEL_IDS = [
   'ga4',
   'youtube',
   'tiktok',
+  'linkedin',
 ] as const;
 
 export type DashboardChannelId = (typeof DASHBOARD_CHANNEL_IDS)[number];
@@ -143,6 +144,7 @@ const DEFAULT_SECTION_TITLES: Record<DashboardChannelId, string> = {
   ga4: 'Google Analytics',
   youtube: 'YouTube',
   tiktok: 'TikTok',
+  linkedin: 'LinkedIn',
 };
 
 export class DashboardLayoutError extends Error {}

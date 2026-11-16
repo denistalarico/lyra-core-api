@@ -11,6 +11,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyProductsModule } from '../../common/company-products/company-products.module';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesModule } from '../../common/files/files.module';
+import { LinkedInOrganicAnalyticsProvider } from './analytics/linkedin/linkedin-organic-analytics.provider';
 import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
@@ -109,6 +110,11 @@ import {
   MetaOrganicHealthService,
   MetaOrganicOAuthProvider,
   MetaPublisherRegistration,
+  LinkedInCallBudget,
+  LinkedInOrganicApiClient,
+  LinkedInOrganicOAuthProvider,
+  LinkedInPublisherAdapter,
+  LinkedInPublisherRegistration,
   TiktokApiClient,
   TiktokCreatorInfoService,
   TiktokOrganicOAuthProvider,
@@ -219,6 +225,7 @@ describe('SocialOrganicModule', () => {
           MetaOrganicOAuthProvider,
           MetaInstagramOAuthProvider,
           TiktokOrganicOAuthProvider,
+          LinkedInOrganicOAuthProvider,
         ],
       },
       SocialOrganicCredentialResolver,
@@ -248,6 +255,11 @@ describe('SocialOrganicModule', () => {
       TiktokPublisherAdapter,
       TiktokPublisherRegistration,
       TiktokCreatorInfoService,
+      LinkedInCallBudget,
+      LinkedInOrganicApiClient,
+      LinkedInOrganicOAuthProvider,
+      LinkedInPublisherAdapter,
+      LinkedInPublisherRegistration,
       MetaOrganicHealthService,
       {
         provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,
@@ -264,11 +276,13 @@ describe('SocialOrganicModule', () => {
           MetaOrganicAnalyticsProvider,
           YoutubeOrganicAnalyticsProvider,
           TiktokOrganicAnalyticsProvider,
+          LinkedInOrganicAnalyticsProvider,
         ],
       },
       YoutubeAnalyticsClient,
       YoutubeOrganicAnalyticsProvider,
       TiktokOrganicAnalyticsProvider,
+      LinkedInOrganicAnalyticsProvider,
       SocialOrganicAnalyticsProviderRegistry,
       SocialOrganicMetricsWriterService,
       SocialOrganicAudienceConfigService,

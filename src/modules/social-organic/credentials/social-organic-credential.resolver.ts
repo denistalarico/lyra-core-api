@@ -619,6 +619,8 @@ export class SocialOrganicCredentialResolver {
         return 'https://www.googleapis.com/auth/yt-analytics.readonly';
       case 'tiktok_account':
         return 'video.list';
+      case 'linkedin_organization':
+        return 'rw_organization_admin';
       default:
         throw new SocialOrganicCredentialError(
           'unsupported_analytics_asset_type',

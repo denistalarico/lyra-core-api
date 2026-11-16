@@ -1,5 +1,6 @@
 import { SocialOrganicCredentialError } from '../credentials/social-organic-credential.error';
 import { YoutubeApiError } from '../providers/youtube/youtube-api.client';
+import { LinkedInOrganicApiError } from '../providers/linkedin/linkedin-organic-api.client';
 import { TiktokApiError } from '../providers/tiktok/tiktok-api.client';
 import { MetaOrganicGraphError } from '../providers/meta/meta-organic-graph.error';
 import { MetaOrganicInsightsNormalizationError } from './meta/meta-organic-insights.normalizer';
@@ -41,6 +42,15 @@ export function classifyOrganicSyncFailure(
       retry: rateLimited || error.status >= 500,
       rateLimited,
       code: `tiktok_${error.code ?? error.status}`,
+    };
+  }
+  if (error instanceof LinkedInOrganicApiError) {
+    const rateLimited =
+      error.status === 429 || error.code === 'daily_budget_exhausted';
+    return {
+      retry: rateLimited || error.status >= 500 || error.status === 409,
+      rateLimited,
+      code: `linkedin_${error.code ?? error.status}`,
     };
   }
   if (error instanceof SocialOrganicCredentialError) {

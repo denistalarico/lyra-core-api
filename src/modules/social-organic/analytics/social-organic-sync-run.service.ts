@@ -102,10 +102,10 @@ export class SocialOrganicSyncRunService {
     const assets = await this.assets.find({
       relations: { connection: true },
       where: {
-        provider: In(['meta', 'youtube', 'tiktok']),
+        provider: In(['meta', 'youtube', 'tiktok', 'linkedin']),
         status: 'active',
         connection: {
-          provider: In(['meta', 'youtube', 'tiktok']),
+          provider: In(['meta', 'youtube', 'tiktok', 'linkedin']),
           connectionStatus: 'connected',
           credentialRemovedAt: IsNull(),
         },

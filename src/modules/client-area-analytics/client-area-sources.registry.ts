@@ -17,7 +17,8 @@ export type AnalyticsReadQuery = {
     | 'tiktok_ads'
     | 'ga4'
     | 'youtube'
-    | 'tiktok';
+    | 'tiktok'
+    | 'linkedin';
   from?: string;
   to?: string;
   connectionId?: string;

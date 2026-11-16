@@ -57,6 +57,10 @@ export const CONNECTION_MODES: Record<
   },
   // D-I9: the generic `oauth/:provider/*` routes carry TikTok as well.
   tiktok: { provider: 'tiktok', allowedAssetTypes: ['tiktok_account'] },
+  linkedin: {
+    provider: 'linkedin',
+    allowedAssetTypes: ['linkedin_organization'],
+  },
 };
 
 @Controller('social/organic')

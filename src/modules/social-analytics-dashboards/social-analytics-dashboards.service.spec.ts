@@ -300,6 +300,7 @@ describe('SocialAnalyticsDashboardsService', () => {
         'ga4',
         'youtube',
         'tiktok',
+        'linkedin',
       ]);
     });
 

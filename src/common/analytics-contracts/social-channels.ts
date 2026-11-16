@@ -38,6 +38,7 @@ export const ANALYTICS_CHANNEL_IDS = [
   "ga4",
   "youtube",
   "tiktok",
+  "linkedin",
 ] as const;
 
 export type ChannelId = (typeof ANALYTICS_CHANNEL_IDS)[number];
@@ -117,6 +118,12 @@ export const ANALYTICS_CHANNELS: AnalyticsChannel[] = [
     id: "tiktok",
     label: "TikTok",
     icon: "/integrations/webp/tiktok.webp",
+    integrated: true,
+  },
+  {
+    id: "linkedin",
+    label: "LinkedIn",
+    icon: "/integrations/webp/linkedin.webp",
     integrated: true,
   },
 ];

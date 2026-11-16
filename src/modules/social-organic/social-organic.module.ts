@@ -14,6 +14,7 @@ import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications';
 import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
+import { LinkedInOrganicAnalyticsProvider } from './analytics/linkedin/linkedin-organic-analytics.provider';
 import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
@@ -103,6 +104,11 @@ import {
   MetaOrganicOAuthProvider,
   MetaPublisherRegistration,
   SocialPublisherRegistry,
+  LinkedInCallBudget,
+  LinkedInOrganicApiClient,
+  LinkedInOrganicOAuthProvider,
+  LinkedInPublisherAdapter,
+  LinkedInPublisherRegistration,
   TiktokApiClient,
   TiktokCreatorInfoService,
   TiktokOrganicOAuthProvider,
@@ -127,8 +133,9 @@ export function createMetaOrganicOAuthProviders(
   meta: MetaOrganicOAuthProvider,
   instagram: MetaInstagramOAuthProvider,
   tiktok: TiktokOrganicOAuthProvider,
+  linkedin: LinkedInOrganicOAuthProvider,
 ) {
-  return [meta, instagram, tiktok];
+  return [meta, instagram, tiktok, linkedin];
 }
 
 /** D-I4 (b): one analytics implementation per provider; YT/TT/LI plug here. */
@@ -136,8 +143,9 @@ export function createOrganicAnalyticsProviders(
   meta: MetaOrganicAnalyticsProvider,
   youtube: YoutubeOrganicAnalyticsProvider,
   tiktok: TiktokOrganicAnalyticsProvider,
+  linkedin: LinkedInOrganicAnalyticsProvider,
 ) {
-  return [meta, youtube, tiktok];
+  return [meta, youtube, tiktok, linkedin];
 }
 
 /** D-I4 (c): one health implementation per provider; YT/TT/LI plug here. */
@@ -228,6 +236,7 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
         MetaOrganicOAuthProvider,
         MetaInstagramOAuthProvider,
         TiktokOrganicOAuthProvider,
+        LinkedInOrganicOAuthProvider,
       ],
     },
     SocialOrganicCredentialResolver,
@@ -264,6 +273,12 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     TiktokPublisherAdapter,
     TiktokPublisherRegistration,
     TiktokCreatorInfoService,
+    // LI-ORG-BE: LinkedIn Pages (`oauth_user`, 500 calls/day while Development).
+    LinkedInCallBudget,
+    LinkedInOrganicApiClient,
+    LinkedInOrganicOAuthProvider,
+    LinkedInPublisherAdapter,
+    LinkedInPublisherRegistration,
     MetaOrganicHealthService,
     {
       provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,
@@ -280,11 +295,13 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
         MetaOrganicAnalyticsProvider,
         YoutubeOrganicAnalyticsProvider,
         TiktokOrganicAnalyticsProvider,
+        LinkedInOrganicAnalyticsProvider,
       ],
     },
     YoutubeAnalyticsClient,
     YoutubeOrganicAnalyticsProvider,
     TiktokOrganicAnalyticsProvider,
+    LinkedInOrganicAnalyticsProvider,
     SocialOrganicAnalyticsProviderRegistry,
     SocialOrganicMetricsWriterService,
     // Audience snapshots: a gate that is off by default, a reader that measures
