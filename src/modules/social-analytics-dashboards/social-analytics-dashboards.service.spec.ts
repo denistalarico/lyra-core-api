@@ -296,6 +296,7 @@ describe('SocialAnalyticsDashboardsService', () => {
         'meta_ads',
         'google_ads',
         'ga4',
+        'youtube',
       ]);
     });
 

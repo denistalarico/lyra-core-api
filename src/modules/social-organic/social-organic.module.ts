@@ -14,6 +14,8 @@ import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications';
 import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
+import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
+import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
 import { SocialOrganicYoutubeService } from './connections/social-organic-youtube.service';
 import { SocialGoogleModule } from '../social-google/social-google.module';
 import {
@@ -125,8 +127,9 @@ export function createMetaOrganicOAuthProviders(
 /** D-I4 (b): one analytics implementation per provider; YT/TT/LI plug here. */
 export function createOrganicAnalyticsProviders(
   meta: MetaOrganicAnalyticsProvider,
+  youtube: YoutubeOrganicAnalyticsProvider,
 ) {
-  return [meta];
+  return [meta, youtube];
 }
 
 /** D-I4 (c): one health implementation per provider; YT/TT/LI plug here. */
@@ -253,8 +256,10 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     {
       provide: SOCIAL_ORGANIC_ANALYTICS_PROVIDERS,
       useFactory: createOrganicAnalyticsProviders,
-      inject: [MetaOrganicAnalyticsProvider],
+      inject: [MetaOrganicAnalyticsProvider, YoutubeOrganicAnalyticsProvider],
     },
+    YoutubeAnalyticsClient,
+    YoutubeOrganicAnalyticsProvider,
     SocialOrganicAnalyticsProviderRegistry,
     SocialOrganicMetricsWriterService,
     // Audience snapshots: a gate that is off by default, a reader that measures

@@ -50,11 +50,11 @@ export class SocialOrganicMetricsWriterService {
          total_interactions, accounts_engaged, likes, comments, shares,
          saves, replies, views_total, reach_total,
          page_follows, page_daily_follows, page_daily_unfollows,
-         views_organic, views_paid, new_conversations
+         views_organic, views_paid, new_conversations, watch_time_seconds
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
          $15, $16, $17, $18::jsonb, $19, $20, $21, $22, $23, $24, $25,
-         $26, $27, $28, $29, $30, $31, $32, $33
+         $26, $27, $28, $29, $30, $31, $32, $33, $34
        )
        ON CONFLICT (asset_id, metric_date, source) DO UPDATE SET
          followers_count = COALESCE(EXCLUDED.followers_count, social_organic_account_metrics_daily.followers_count),
@@ -78,6 +78,7 @@ export class SocialOrganicMetricsWriterService {
          views_organic = COALESCE(EXCLUDED.views_organic, social_organic_account_metrics_daily.views_organic),
          views_paid = COALESCE(EXCLUDED.views_paid, social_organic_account_metrics_daily.views_paid),
          new_conversations = COALESCE(EXCLUDED.new_conversations, social_organic_account_metrics_daily.new_conversations),
+         watch_time_seconds = COALESCE(EXCLUDED.watch_time_seconds, social_organic_account_metrics_daily.watch_time_seconds),
          is_partial = EXCLUDED.is_partial,
          synced_at = EXCLUDED.synced_at,
          sync_run_id = EXCLUDED.sync_run_id,
@@ -117,6 +118,7 @@ export class SocialOrganicMetricsWriterService {
         row.viewsOrganic,
         row.viewsPaid,
         row.newConversations,
+        row.watchTimeSeconds ?? null,
       ],
     );
   }

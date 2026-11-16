@@ -177,6 +177,8 @@ type AggregateRow = {
    */
   accounts_engaged: string | null;
   accounts_engaged_days: string | null;
+  channel_views: string | null;
+  channel_watch_time_seconds: string | null;
 };
 
 /**
@@ -602,6 +604,11 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.views_organic)', 'views_organic')
       .addSelect('SUM(fact.views_paid)', 'views_paid')
       .addSelect('SUM(fact.new_conversations)', 'new_conversations')
+      .addSelect(
+        `SUM(fact.views_total) FILTER (WHERE fact.provider = 'youtube')`,
+        'channel_views',
+      )
+      .addSelect('SUM(fact.watch_time_seconds)', 'channel_watch_time_seconds')
       .addSelect('bool_or(fact.is_partial)', 'is_partial')
       .where('fact.asset_id = :assetId', { assetId: asset.id })
       .andWhere('fact.metric_date BETWEEN :since AND :until', {
@@ -632,6 +639,8 @@ export class SocialOrganicAnalyticsReadService {
         views_organic: string | null;
         views_paid: string | null;
         new_conversations: string | null;
+        channel_views: string | null;
+        channel_watch_time_seconds: string | null;
         is_partial: boolean;
       }>();
 
@@ -679,6 +688,10 @@ export class SocialOrganicAnalyticsReadService {
         viewsOrganic: readNullableCount(row.views_organic),
         viewsPaid: readNullableCount(row.views_paid),
         newConversations: readNullableCount(row.new_conversations),
+        channelViews: readNullableCount(row.channel_views),
+        channelWatchTimeSeconds: readNullableCount(
+          row.channel_watch_time_seconds,
+        ),
         isPartial: row.is_partial === true,
       });
     }
@@ -1283,6 +1296,11 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.replies)', 'replies')
       .addSelect('SUM(fact.accounts_engaged)', 'accounts_engaged')
       .addSelect('COUNT(fact.accounts_engaged)', 'accounts_engaged_days')
+      .addSelect(
+        `SUM(fact.views_total) FILTER (WHERE fact.provider = 'youtube')`,
+        'channel_views',
+      )
+      .addSelect('SUM(fact.watch_time_seconds)', 'channel_watch_time_seconds')
       .where('fact.asset_id = :assetId', { assetId })
       .andWhere('fact.metric_date BETWEEN :since AND :until', {
         since,
@@ -1489,6 +1507,10 @@ export class SocialOrganicAnalyticsReadService {
       pageReelReactions: counts.pageReelReactions,
       pageReelComments: counts.pageReelComments,
       pageReelShares: counts.pageReelShares,
+      channelViews: readNullableCount(row.channel_views),
+      channelWatchTimeSeconds: readNullableCount(
+        row.channel_watch_time_seconds,
+      ),
       feedInteractions: counts.feedInteractions,
       reelInteractions: counts.reelInteractions,
       periodViews: measurement?.views ?? null,

@@ -223,6 +223,10 @@ export class SocialOrganicAccountMetricDailyEntity {
   replies!: string | null;
 
   /** True for same-day or provider-incomplete facts. */
+  /** YouTube channel watch time for the day (D-I3), in seconds. */
+  @Column({ name: 'watch_time_seconds', type: 'bigint', nullable: true })
+  watchTimeSeconds!: string | null;
+
   @Column({ name: 'is_partial', type: 'boolean', default: false })
   isPartial!: boolean;
 

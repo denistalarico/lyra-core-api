@@ -13,7 +13,8 @@ export type AnalyticsReadQuery = {
     | 'meta_ads'
     | 'summary'
     | 'google_ads'
-    | 'ga4';
+    | 'ga4'
+    | 'youtube';
   from?: string;
   to?: string;
   connectionId?: string;

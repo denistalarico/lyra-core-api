@@ -1,4 +1,5 @@
 import { SocialOrganicCredentialError } from '../credentials/social-organic-credential.error';
+import { YoutubeApiError } from '../providers/youtube/youtube-api.client';
 import { MetaOrganicGraphError } from '../providers/meta/meta-organic-graph.error';
 import { MetaOrganicInsightsNormalizationError } from './meta/meta-organic-insights.normalizer';
 import { SocialOrganicSyncError } from './social-organic-sync.error';
@@ -17,6 +18,17 @@ export function classifyOrganicSyncFailure(
       retry: error.kind === 'transient' || error.kind === 'rate_limited',
       rateLimited: error.kind === 'rate_limited',
       code: error.code,
+    };
+  }
+  if (error instanceof YoutubeApiError) {
+    const rateLimited =
+      error.status === 429 ||
+      error.reason === 'quotaExceeded' ||
+      error.reason === 'rateLimitExceeded';
+    return {
+      retry: rateLimited || error.status >= 500,
+      rateLimited,
+      code: `youtube_${error.reason ?? error.status}`,
     };
   }
   if (error instanceof SocialOrganicCredentialError) {

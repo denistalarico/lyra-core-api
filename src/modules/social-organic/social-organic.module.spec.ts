@@ -11,6 +11,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyProductsModule } from '../../common/company-products/company-products.module';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesModule } from '../../common/files/files.module';
+import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
+import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
 import {
   MEDIA_ASSET_METADATA_READER,
   MediaAssetController,
@@ -243,8 +245,10 @@ describe('SocialOrganicModule', () => {
       {
         provide: SOCIAL_ORGANIC_ANALYTICS_PROVIDERS,
         useFactory: createOrganicAnalyticsProviders,
-        inject: [MetaOrganicAnalyticsProvider],
+        inject: [MetaOrganicAnalyticsProvider, YoutubeOrganicAnalyticsProvider],
       },
+      YoutubeAnalyticsClient,
+      YoutubeOrganicAnalyticsProvider,
       SocialOrganicAnalyticsProviderRegistry,
       SocialOrganicMetricsWriterService,
       SocialOrganicAudienceConfigService,

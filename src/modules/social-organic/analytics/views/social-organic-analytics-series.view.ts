@@ -60,6 +60,9 @@ export type SocialOrganicSeriesPoint = {
   viewsPaid: string | null;
   /** Messenger threads opened by a first-time sender. Null for Instagram. */
   newConversations: string | null;
+  /** YouTube only: additive daily views and watch time. Null elsewhere. */
+  channelViews: string | null;
+  channelWatchTimeSeconds: string | null;
 
   /** True while the day is still accumulating; see the sync's `is_partial` flag. */
   isPartial: boolean;
@@ -91,6 +94,8 @@ export function emptyOrganicSeriesPoint(
     viewsOrganic: null,
     viewsPaid: null,
     newConversations: null,
+    channelViews: null,
+    channelWatchTimeSeconds: null,
     isPartial: false,
   };
 }

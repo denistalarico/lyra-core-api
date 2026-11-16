@@ -191,6 +191,9 @@ export type SocialOrganicAnalyticsTotals = {
   pageReelReactions: string;
   pageReelComments: string;
   pageReelShares: string;
+  /** YouTube only (null elsewhere): views and watch time are additive daily flows. */
+  channelViews: string | null;
+  channelWatchTimeSeconds: string | null;
 
   /**
    * Views, likes, comments, shares and saves of the posts published in the

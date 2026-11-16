@@ -135,6 +135,8 @@ export type NormalizedOrganicAccountMetricDaily = {
   viewsOrganic: string | null;
   viewsPaid: string | null;
   newConversations: string | null;
+  /** YouTube channel watch time in seconds; absent on the Meta rows. */
+  watchTimeSeconds?: string | null;
   isPartial: boolean;
   syncedAt: Date;
   syncRunId: string;

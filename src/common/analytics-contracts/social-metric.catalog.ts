@@ -110,6 +110,11 @@ export const METRIC_IDS = [
   "organic_replies",
   // Derived, not stored — see `DERIVED_METRICS`.
   "followers_delta",
+  // YouTube (YT3): the only two figures with no Meta equivalent. Views reuse
+  // `yt_views` rather than `total_views`, which Meta measures per period.
+  "yt_views",
+  "yt_watch_time",
+  "yt_avg_view_duration",
   // Breakdowns. The paid three are ingesting today; the organic three were
   // gated off by a variable that was never set, and are on as of 2026-09-23.
   "audience_age_gender",
@@ -362,7 +367,55 @@ const SUMMARY_ONLY: ChannelId[] = ["summary"];
 /** Metrics only a GA4 property answers. */
 const GA4_ONLY: ChannelId[] = ["ga4"];
 
+/** Metrics only a YouTube channel answers. */
+const YOUTUBE_ONLY: ChannelId[] = ["youtube"];
+
+/**
+ * Organic figures a YouTube channel answers with the same meaning as Meta's:
+ * subscribers are followers, and likes, comments and shares are daily flows.
+ */
+const ORGANIC_FOLLOWER_CHANNELS: ChannelId[] = [...META_SURFACES, "youtube"];
+
 export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
+  {
+    id: "yt_views",
+    label: "Visualizações",
+    description:
+      "Quantas vezes os vídeos do canal foram vistos no período. O YouTube informa por dia, então a soma dos dias é o total do período.",
+    channels: YOUTUBE_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "organic",
+    availability: "available",
+    grain: "organic_period",
+  },
+  {
+    id: "yt_watch_time",
+    label: "Tempo de exibição (segundos)",
+    description:
+      "Tempo total que as pessoas passaram assistindo aos vídeos do canal no período, em segundos.",
+    channels: YOUTUBE_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "organic",
+    availability: "available",
+    grain: "organic_period",
+  },
+  {
+    id: "yt_avg_view_duration",
+    label: "Duração média da visualização (segundos)",
+    description:
+      "Tempo de exibição dividido pelas visualizações do período. Uma média não se soma entre dias: o card sempre recalcula a partir dos dois totais.",
+    channels: YOUTUBE_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "organic",
+    availability: "available",
+    grain: "organic_period",
+  },
   {
     id: "spend",
     label: "Valor gasto",
@@ -1158,7 +1211,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "followers_count",
     label: "Seguidores",
     description: "Total de seguidores no fim do período.",
-    channels: META_SURFACES,
+    channels: ORGANIC_FOLLOWER_CHANNELS,
     format: "integer",
     polarity: "higher_is_better",
     additive: false,
@@ -1170,7 +1223,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "followers_gained",
     label: "Seguidores ganhos",
     description: "Novos seguidores no período.",
-    channels: META_SURFACES,
+    channels: ORGANIC_FOLLOWER_CHANNELS,
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1182,7 +1235,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "followers_lost",
     label: "Seguidores perdidos",
     description: "Contas que deixaram de seguir no período.",
-    channels: META_SURFACES,
+    channels: ORGANIC_FOLLOWER_CHANNELS,
     format: "integer",
     polarity: "lower_is_better",
     additive: true,
@@ -1610,7 +1663,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "organic_likes",
     label: "Curtidas",
     description: "Curtidas recebidas no período, somando todas as publicações.",
-    channels: ["instagram"],
+    channels: ["instagram", "youtube"],
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1622,7 +1675,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "organic_comments",
     label: "Comentários",
     description: "Comentários recebidos no período.",
-    channels: ["instagram"],
+    channels: ["instagram", "youtube"],
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1634,7 +1687,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "organic_shares",
     label: "Compartilhamentos",
     description: "Compartilhamentos das publicações no período.",
-    channels: ["instagram"],
+    channels: ["instagram", "youtube"],
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1671,7 +1724,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     label: "Variação de seguidores",
     description:
       "Seguidores ganhos menos perdidos. Fica negativo quando o perfil perde mais do que ganha — e esse é o número que importa, não só os ganhos.",
-    channels: META_SURFACES,
+    channels: ORGANIC_FOLLOWER_CHANNELS,
     format: "integer",
     polarity: "higher_is_better",
     additive: true,

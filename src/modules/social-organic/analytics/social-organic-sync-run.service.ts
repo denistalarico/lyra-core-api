@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, In, IsNull, QueryFailedError, Repository } from 'typeorm';
 import type { ResolvedOrganicAnalyticsCredential } from '../credentials/social-organic-credential.resolver';
 import { SocialOrganicCredentialResolver } from '../credentials/social-organic-credential.resolver';
 import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
@@ -102,10 +102,10 @@ export class SocialOrganicSyncRunService {
     const assets = await this.assets.find({
       relations: { connection: true },
       where: {
-        provider: 'meta',
+        provider: In(['meta', 'youtube']),
         status: 'active',
         connection: {
-          provider: 'meta',
+          provider: In(['meta', 'youtube']),
           connectionStatus: 'connected',
           credentialRemovedAt: IsNull(),
         },

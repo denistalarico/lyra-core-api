@@ -712,6 +712,9 @@ export type SocialOrganicAnalyticsTotals = {
   pageReelReactions: string;
   pageReelComments: string;
   pageReelShares: string;
+  /** YouTube only (null elsewhere): views and watch time are additive daily flows. */
+  channelViews: string | null;
+  channelWatchTimeSeconds: string | null;
 
   /**
    * The range the period figures above actually describe.
@@ -816,6 +819,8 @@ export type SocialOrganicAnalyticsSeriesPoint = {
   viewsPaid: string | null;
   /** Messenger threads opened by a first-time sender. Null for Instagram. */
   newConversations: string | null;
+  channelViews: string | null;
+  channelWatchTimeSeconds: string | null;
   isPartial: boolean;
 };
 

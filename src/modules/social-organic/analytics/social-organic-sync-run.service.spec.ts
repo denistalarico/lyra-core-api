@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access -- repository/data-source doubles and Jest call inspection intentionally cross TypeORM's dynamic query boundary. */
 import type { DataSource, EntityManager, Repository } from 'typeorm';
+import { In } from 'typeorm';
 import type { SocialOrganicCredentialResolver } from '../credentials/social-organic-credential.resolver';
 import type { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entity';
 import type { SocialOrganicSyncRunEntity } from './entities/social-organic-sync-run.entity';
@@ -150,10 +151,10 @@ describe('SocialOrganicSyncRunService', () => {
       expect.objectContaining({
         take: 20,
         where: expect.objectContaining({
-          provider: 'meta',
+          provider: In(['meta', 'youtube']),
           status: 'active',
           connection: expect.objectContaining({
-            provider: 'meta',
+            provider: In(['meta', 'youtube']),
             connectionStatus: 'connected',
           }),
         }),
