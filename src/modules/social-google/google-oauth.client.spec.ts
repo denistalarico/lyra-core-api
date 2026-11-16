@@ -44,7 +44,7 @@ const expected = {
 };
 
 describe('Google OAuth scopes', () => {
-  it('requests only openid + the single product scope', () => {
+  it('requests only openid + the product scopes (YouTube needs three)', () => {
     expect(scopesForProduct('ga4')).toEqual([
       'openid',
       'https://www.googleapis.com/auth/analytics.readonly',
@@ -57,7 +57,7 @@ describe('Google OAuth scopes', () => {
       'openid',
       'https://www.googleapis.com/auth/business.manage',
     ]);
-    expect(Object.keys(GOOGLE_PRODUCT_SCOPES)).toHaveLength(3);
+    expect(Object.keys(GOOGLE_PRODUCT_SCOPES)).toHaveLength(4);
   });
 });
 

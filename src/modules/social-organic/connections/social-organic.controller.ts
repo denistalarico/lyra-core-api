@@ -29,6 +29,8 @@ import {
 } from './dto/start-social-organic-connection.dto';
 import { UpdateSocialOrganicAssetTimezoneDto } from './dto/update-social-organic-asset-timezone.dto';
 import { SocialOrganicConnectionService } from './social-organic-connection.service';
+import { SocialOrganicYoutubeService } from './social-organic-youtube.service';
+import { SelectYoutubeChannelDto } from './dto/select-youtube-channel.dto';
 import { SocialOrganicOAuthService } from './social-organic-oauth.service';
 import { MetaOrganicHealthService } from '../providers/meta/meta-organic-health.service';
 import { RequestSocialOrganicSyncDto } from '../analytics/dto/request-social-organic-sync.dto';
@@ -61,6 +63,7 @@ export class SocialOrganicController {
     private readonly connections: SocialOrganicConnectionService,
     private readonly health: MetaOrganicHealthService,
     private readonly analyticsRuns: SocialOrganicSyncRunService,
+    private readonly youtube: SocialOrganicYoutubeService,
   ) {}
 
   @Get('connections')
@@ -133,6 +136,30 @@ export class SocialOrganicController {
       provider,
       connectionId: dto.connectionId,
       externalAssetIds: dto.externalAssetIds,
+    });
+  }
+
+  /** D-I2: live `channels.list?mine=true` under the Google authorization. */
+  @Get('youtube/channels')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  listYoutubeChannels(@RequestContextData() ctx: RequestContext) {
+    return this.youtube.listChannels(this.requireScope(ctx));
+  }
+
+  @Post('youtube/select')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  selectYoutubeChannel(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SelectYoutubeChannelDto,
+  ) {
+    return this.youtube.select({
+      ...this.requireScope(ctx),
+      userId: ctx.userId ?? null,
+      channelId: dto.channelId,
     });
   }
 

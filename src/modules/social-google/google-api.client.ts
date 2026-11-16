@@ -13,6 +13,7 @@ const GA4_SUMMARY_PAGE_SIZE = 200;
 
 const ADS_HOST = 'https://googleads.googleapis.com';
 const ANALYTICS_ADMIN_HOST = 'https://analyticsadmin.googleapis.com/v1beta';
+const YOUTUBE_HOST = 'https://www.googleapis.com/youtube/v3';
 
 export type GoogleApiErrorCode =
   | 'reauth_required'
@@ -43,6 +44,14 @@ export type GoogleAdsCustomer = {
   status: string;
   /** `direct` or the manager customer id the account was reached through. */
   accessVia: string;
+};
+
+/** A channel owned by the authorized Google identity (`channels.list?mine`). */
+export type YoutubeChannel = {
+  channelId: string;
+  title: string;
+  customUrl: string | null;
+  thumbnailUrl: string | null;
 };
 
 export type Ga4PropertySummary = {
@@ -165,6 +174,45 @@ export class GoogleApiClient {
       (customer) =>
         customer.status !== 'CANCELED' && customer.status !== 'CLOSED',
     );
+  }
+
+  /**
+   * Channels of the authorized identity. Official doc (2026-11-15):
+   * https://developers.google.com/youtube/v3/docs/channels/list (1 quota unit).
+   */
+  async listYoutubeChannels(accessToken: string): Promise<YoutubeChannel[]> {
+    const out: YoutubeChannel[] = [];
+    let pageToken: string | null = null;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        part: 'snippet',
+        mine: 'true',
+        maxResults: '50',
+      });
+      if (pageToken) query.set('pageToken', pageToken);
+      const body = await this.request(
+        `${YOUTUBE_HOST}/channels?${query.toString()}`,
+        { accessToken },
+      );
+      if (!isRecord(body)) throw new GoogleApiError('invalid_response');
+      for (const item of Array.isArray(body.items) ? body.items : []) {
+        if (!isRecord(item)) continue;
+        const channelId = str(item.id);
+        if (!channelId || !/^[\w-]{1,64}$/.test(channelId)) continue;
+        const snippet = isRecord(item.snippet) ? item.snippet : {};
+        const thumbs = isRecord(snippet.thumbnails) ? snippet.thumbnails : {};
+        const thumb = isRecord(thumbs.default) ? str(thumbs.default.url) : null;
+        out.push({
+          channelId,
+          title: str(snippet.title) ?? channelId,
+          customUrl: str(snippet.customUrl),
+          thumbnailUrl: thumb,
+        });
+      }
+      pageToken = str(body.nextPageToken);
+      if (!pageToken) break;
+    }
+    return out;
   }
 
   /** Account summaries (accounts + their GA4 properties) in one listing. */

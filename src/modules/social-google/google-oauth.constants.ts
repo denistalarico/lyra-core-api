@@ -6,17 +6,55 @@
  * and accumulated through incremental authorization, so connecting GA4 never
  * asks for Ads or Business Profile.
  */
-export const GOOGLE_PRODUCTS = ['ga4', 'ads', 'business_profile'] as const;
+export const GOOGLE_PRODUCTS = [
+  'ga4',
+  'ads',
+  'business_profile',
+  'youtube',
+] as const;
 export type GoogleProduct = (typeof GOOGLE_PRODUCTS)[number];
 
 export const GOOGLE_IDENTITY_SCOPE = 'openid';
 
-/** Exactly one scope per product; nothing beyond what each phase justifies. */
+/**
+ * The primary scope of each product (shown in the status view and stored on
+ * the selected resource). Nothing beyond what each phase justifies.
+ */
 export const GOOGLE_PRODUCT_SCOPES: Record<GoogleProduct, string> = {
   ga4: 'https://www.googleapis.com/auth/analytics.readonly',
   ads: 'https://www.googleapis.com/auth/adwords',
   business_profile: 'https://www.googleapis.com/auth/business.manage',
+  youtube: 'https://www.googleapis.com/auth/youtube.readonly',
 };
+
+/**
+ * Every scope a product needs. Only YouTube needs more than one (D-I1):
+ * channel/video reads, upload and Analytics. The consent screen lets the user
+ * untick scopes, so a product counts as granted only when all of them are.
+ */
+export const GOOGLE_PRODUCT_REQUIRED_SCOPES: Record<
+  GoogleProduct,
+  readonly string[]
+> = {
+  ga4: [GOOGLE_PRODUCT_SCOPES.ga4],
+  ads: [GOOGLE_PRODUCT_SCOPES.ads],
+  business_profile: [GOOGLE_PRODUCT_SCOPES.business_profile],
+  youtube: [
+    'https://www.googleapis.com/auth/youtube.upload',
+    GOOGLE_PRODUCT_SCOPES.youtube,
+    'https://www.googleapis.com/auth/yt-analytics.readonly',
+  ],
+};
+
+/** True when `granted` covers every scope the product requires. */
+export function hasProductScopes(
+  granted: readonly string[],
+  product: GoogleProduct,
+): boolean {
+  return GOOGLE_PRODUCT_REQUIRED_SCOPES[product].every((scope) =>
+    granted.includes(scope),
+  );
+}
 
 export function isGoogleProduct(value: unknown): value is GoogleProduct {
   return (
@@ -27,7 +65,7 @@ export function isGoogleProduct(value: unknown): value is GoogleProduct {
 
 /** Scopes requested for one product: identity + that product only. */
 export function scopesForProduct(product: GoogleProduct): string[] {
-  return [GOOGLE_IDENTITY_SCOPE, GOOGLE_PRODUCT_SCOPES[product]];
+  return [GOOGLE_IDENTITY_SCOPE, ...GOOGLE_PRODUCT_REQUIRED_SCOPES[product]];
 }
 
 export const GOOGLE_OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;

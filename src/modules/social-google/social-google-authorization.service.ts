@@ -18,7 +18,7 @@ import {
 import {
   GOOGLE_ACCESS_TOKEN_SKEW_MS,
   GOOGLE_LOCK_TIMEOUT_MS,
-  GOOGLE_PRODUCT_SCOPES,
+  hasProductScopes,
   type GoogleProduct,
 } from './google-oauth.constants';
 import {
@@ -459,8 +459,6 @@ export class SocialGoogleAuthorizationService {
     scope: CompanyAwareScope;
     product: GoogleProduct;
   }): Promise<{ accessToken: string; expiresAt: Date | null }> {
-    const requiredScope = GOOGLE_PRODUCT_SCOPES[input.product];
-
     const result = await this.runRefreshTransaction(async (manager) => {
       // The lock is what serializes concurrent refreshes: the second caller
       // blocks here, then finds the fresh token the first one stored.
@@ -484,7 +482,7 @@ export class SocialGoogleAuthorizationService {
       if (!link || link.status !== 'connected') {
         throw new GoogleCredentialError('product_not_connected');
       }
-      if (!authorization.grantedScopes.includes(requiredScope)) {
+      if (!hasProductScopes(authorization.grantedScopes, input.product)) {
         throw new GoogleCredentialError('scope_not_granted');
       }
 
@@ -546,7 +544,7 @@ export class SocialGoogleAuthorizationService {
       authorization.lastError = null;
       await repo.save(authorization);
 
-      if (!authorization.grantedScopes.includes(requiredScope)) {
+      if (!hasProductScopes(authorization.grantedScopes, input.product)) {
         throw new GoogleCredentialError('scope_not_granted');
       }
       return {

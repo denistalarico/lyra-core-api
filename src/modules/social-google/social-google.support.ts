@@ -4,6 +4,7 @@ import type { CompanyAwareScope } from '../../common/context/company-aware-scope
 import {
   GOOGLE_PRODUCT_SCOPES,
   GOOGLE_PRODUCTS,
+  hasProductScopes,
   type GoogleProduct,
 } from './google-oauth.constants';
 import type {
@@ -117,9 +118,7 @@ export function toGoogleStatusView(
       identityRef: connected
         ? identityRef(auth.tenantId, auth.googleSub)
         : null,
-      scopeGranted:
-        connected &&
-        auth.grantedScopes.includes(GOOGLE_PRODUCT_SCOPES[product]),
+      scopeGranted: connected && hasProductScopes(auth.grantedScopes, product),
       reauthRequired: connected && auth.status === 'reauth_required',
       connectedAt: connected ? (link.connectedAt?.toISOString() ?? null) : null,
       // Connected but empty ⇒ "awaiting selection": nothing is read until the

@@ -10,6 +10,7 @@ import {
 } from '../../permissions/decorators/permissions.decorators';
 import type { SocialOrganicConnectionService } from './social-organic-connection.service';
 import { SocialOrganicController } from './social-organic.controller';
+import { SocialOrganicYoutubeService } from './social-organic-youtube.service';
 import type { SocialOrganicOAuthService } from './social-organic-oauth.service';
 import type { MetaOrganicHealthService } from '../providers/meta/meta-organic-health.service';
 import type { SocialOrganicSyncRunService } from '../analytics/social-organic-sync-run.service';
@@ -65,6 +66,7 @@ function harness() {
       connections as unknown as SocialOrganicConnectionService,
       health as unknown as MetaOrganicHealthService,
       analyticsRuns as unknown as SocialOrganicSyncRunService,
+      {} as unknown as SocialOrganicYoutubeService,
     ),
   };
 }
@@ -107,6 +109,8 @@ describe('SocialOrganicController', () => {
     'disconnect',
     'checkAssetHealth',
     'updateAssetTimezone',
+    'listYoutubeChannels',
+    'selectYoutubeChannel',
   ] as const)(
     '31. guards %s with the Social integrations permission',
     (method) => {

@@ -46,6 +46,10 @@ import { SocialGoogleController } from './social-google.controller';
     SocialGoogleOAuthService,
     SocialGoogleAuthorizationService,
   ],
-  exports: [SocialGoogleAuthorizationService, GoogleAdsCredentialResolver],
+  exports: [
+    SocialGoogleAuthorizationService,
+    GoogleAdsCredentialResolver,
+    GoogleApiClient,
+  ],
 })
 export class SocialGoogleModule {}

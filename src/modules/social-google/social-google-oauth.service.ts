@@ -21,7 +21,7 @@ import {
 } from './google-oauth.client';
 import {
   GOOGLE_OAUTH_SESSION_TTL_MS,
-  GOOGLE_PRODUCT_SCOPES,
+  hasProductScopes,
   SOCIAL_GOOGLE_CHANNEL_PATH,
   scopesForProduct,
   type GoogleProduct,
@@ -238,7 +238,7 @@ export class SocialGoogleOAuthService {
 
       // Google reports what was *actually* granted; the user can untick a
       // scope on the consent screen. Never assume the request was honored.
-      if (!tokens.scopes.includes(GOOGLE_PRODUCT_SCOPES[product])) {
+      if (!hasProductScopes(tokens.scopes, product)) {
         return fail('scope_denied');
       }
 

@@ -459,6 +459,21 @@ export class SocialOrganicCredentialResolver {
     }
   }
 
+  /**
+   * D-I2: token for listing a provider's assets before any organic connection
+   * exists (YouTube channel discovery). Same boundary as `resolveGoogleToken`:
+   * the only caller of `getAccessToken` in this module.
+   */
+  async resolveGoogleDiscoveryToken(
+    scope: SocialOrganicCredentialScope,
+    provider: string,
+  ): Promise<string> {
+    return this.resolveGoogleToken(
+      { provider } as SocialOrganicConnectionEntity,
+      scope,
+    );
+  }
+
   private isDueForRefresh(expiresAt: Date | null): boolean {
     // Unknown expiry keeps today's meaning: a token that does not expire.
     return (

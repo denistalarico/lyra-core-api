@@ -9,6 +9,8 @@ import {
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import type { EntityManager } from 'typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
+import { SocialGoogleAuthorizationService } from '../../social-google/social-google-authorization.service';
+import { googleProductForOrganicProvider } from '../credentials/social-organic-google-products';
 import { SocialOrganicCredentialResolver } from '../credentials';
 import {
   SocialOrganicAssetEntity,
@@ -71,6 +73,8 @@ export class SocialOrganicConnectionService {
     @Optional()
     @Inject(SOCIAL_ORGANIC_PUBLICATION_CANCELLATION_HOOK)
     private readonly publicationCancellation?: SocialOrganicPublicationCancellationHook,
+    @Optional()
+    private readonly googleAuthorization?: SocialGoogleAuthorizationService,
   ) {}
 
   async list(
@@ -130,7 +134,9 @@ export class SocialOrganicConnectionService {
     input: DisconnectSocialOrganicConnectionInput,
   ): Promise<SocialOrganicConnectionView> {
     const companyContextId = input.companyContextId ?? null;
-    return this.dataSource.transaction(async (manager) => {
+    let googleProduct: ReturnType<typeof googleProductForOrganicProvider> =
+      null;
+    const view = await this.dataSource.transaction(async (manager) => {
       const connections = manager.getRepository(SocialOrganicConnectionEntity);
       const assets = manager.getRepository(SocialOrganicAssetEntity);
       const connectionQuery = this.credentialResolver
@@ -252,8 +258,32 @@ export class SocialOrganicConnectionService {
       }
 
       connection.assets = boundAssets;
+      if (connection.authorizationMethod === 'google_oauth') {
+        googleProduct = googleProductForOrganicProvider(connection.provider);
+      }
       return toSocialOrganicConnectionView(connection);
     });
+
+    // D-I2: the Google side is released after the organic commit. A product
+    // already gone there is not an error; other Google products and identities
+    // are untouched, and the grant at Google is never revoked here.
+    if (googleProduct && this.googleAuthorization) {
+      try {
+        await this.googleAuthorization.disconnectProduct({
+          scope: {
+            tenantId: input.tenantId,
+            workspaceId: input.workspaceId,
+            agencyClientId: input.agencyClientId,
+            companyContextId,
+          },
+          userId: null,
+          product: googleProduct,
+        });
+      } catch (error) {
+        if (!(error instanceof NotFoundException)) throw error;
+      }
+    }
+    return view;
   }
 
   /**

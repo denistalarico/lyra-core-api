@@ -6,4 +6,5 @@ export * from './social-organic-health.scheduler';
 export * from './social-organic.controller';
 export * from './social-organic-oauth.provider';
 export * from './social-organic-oauth.service';
+export * from './social-organic-youtube.service';
 export * from './views/social-organic-connection.view';

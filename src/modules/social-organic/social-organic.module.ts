@@ -14,6 +14,7 @@ import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications';
 import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
+import { SocialOrganicYoutubeService } from './connections/social-organic-youtube.service';
 import { SocialGoogleModule } from '../social-google/social-google.module';
 import {
   MetaOrganicAnalyticsProvider,
@@ -214,6 +215,7 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     SocialOrganicOAuthProviderRegistry,
     SocialOrganicOAuthService,
     SocialOrganicConnectionService,
+    SocialOrganicYoutubeService,
     SocialPublicationRunService,
     SocialPublicationNotificationPublisher,
     SocialPublicationScheduler,
