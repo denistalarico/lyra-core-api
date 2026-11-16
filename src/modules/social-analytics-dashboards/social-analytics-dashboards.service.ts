@@ -56,6 +56,7 @@ export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
   { channel: 'meta_ads', name: 'Meta Ads' },
   { channel: 'google_ads', name: 'Google Ads' },
   { channel: 'linkedin_ads', name: 'LinkedIn Ads' },
+  { channel: 'tiktok_ads', name: 'TikTok Ads' },
   { channel: 'ga4', name: 'Google Analytics' },
   { channel: 'youtube', name: 'YouTube' },
 ];

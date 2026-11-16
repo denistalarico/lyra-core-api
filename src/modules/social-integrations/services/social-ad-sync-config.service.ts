@@ -18,6 +18,8 @@ export const SOCIAL_GOOGLE_ADS_SYNC_ENABLED_ENV =
   'SOCIAL_GOOGLE_ADS_SYNC_ENABLED';
 export const SOCIAL_LINKEDIN_ADS_SYNC_ENABLED_ENV =
   'SOCIAL_LINKEDIN_ADS_SYNC_ENABLED';
+export const SOCIAL_TIKTOK_ADS_SYNC_ENABLED_ENV =
+  'SOCIAL_TIKTOK_ADS_SYNC_ENABLED';
 export const SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET_ENV =
   'SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET';
 
@@ -39,6 +41,9 @@ export const GOOGLE_ADS_BACKFILL_CHUNK_DAYS = 30;
 /** LinkedIn: one wide `adAnalytics` call per level reads 30 days (D-I7). */
 export const LINKEDIN_ADS_BACKFILL_DAYS = 30;
 export const LINKEDIN_ADS_BACKFILL_CHUNK_DAYS = 30;
+/** TikTok: `stat_time_day` reports read at most 30 days per request. */
+export const TIKTOK_ADS_BACKFILL_DAYS = 30;
+export const TIKTOK_ADS_BACKFILL_CHUNK_DAYS = 30;
 
 /** How far back a daily run re-reads, when nothing says otherwise. */
 const DEFAULT_DAILY_LOOKBACK_DAYS = 7;
@@ -135,6 +140,14 @@ export class SocialAdSyncConfigService {
   get linkedInAdsEnabled(): boolean {
     const raw =
       process.env[SOCIAL_LINKEDIN_ADS_SYNC_ENABLED_ENV]?.trim().toLowerCase();
+
+    return raw !== undefined && ['true', '1', 'yes', 'on'].includes(raw);
+  }
+
+  /** Whether TikTok Ads accounts are scheduled at all. Off unless set. */
+  get tikTokAdsEnabled(): boolean {
+    const raw =
+      process.env[SOCIAL_TIKTOK_ADS_SYNC_ENABLED_ENV]?.trim().toLowerCase();
 
     return raw !== undefined && ['true', '1', 'yes', 'on'].includes(raw);
   }

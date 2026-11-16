@@ -53,6 +53,10 @@ import { LinkedInAdsApiClient } from './services/linkedin-ads-api.client';
 import { LinkedInAdsOAuthService } from './services/linkedin-ads-oauth.service';
 import { LinkedInAdsReaderService } from './services/linkedin-ads-reader.service';
 import { LinkedInAdsSyncService } from './services/linkedin-ads-sync.service';
+import { TikTokAdsApiClient } from './services/tiktok-ads-api.client';
+import { TikTokAdsOAuthService } from './services/tiktok-ads-oauth.service';
+import { TikTokAdsReaderService } from './services/tiktok-ads-reader.service';
+import { TikTokAdsSyncService } from './services/tiktok-ads-sync.service';
 import { SocialAdSyncConfigService } from './services/social-ad-sync-config.service';
 import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import { SocialAdSyncScheduler } from './services/social-ad-sync.scheduler';
@@ -146,6 +150,10 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     LinkedInAdsOAuthService,
     LinkedInAdsReaderService,
     LinkedInAdsSyncService,
+    TikTokAdsApiClient,
+    TikTokAdsOAuthService,
+    TikTokAdsReaderService,
+    TikTokAdsSyncService,
     SocialAdSyncWorker,
     SocialAdSyncScheduler,
     // Housekeeping over the run log, on its own switch and its own daily

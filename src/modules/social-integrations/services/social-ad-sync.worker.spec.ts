@@ -5,6 +5,7 @@ import type { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entit
 import { MetaGraphError } from './meta-graph-error';
 import type { GoogleAdsSyncService } from './google-ads-sync.service';
 import type { LinkedInAdsSyncService } from './linkedin-ads-sync.service';
+import type { TikTokAdsSyncService } from './tiktok-ads-sync.service';
 import type { SocialAdConnectionService } from './social-ad-connection.service';
 import type { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.service';
 import type { SocialAdInsightsSyncService } from './social-ad-insights-sync.service';
@@ -29,6 +30,12 @@ const GOOGLE_CREDENTIAL = {
   ...CREDENTIAL,
   provider: 'google_ads',
   externalAccountId: '1234567890',
+} as unknown as ResolvedAdCredential;
+
+const TIKTOK_CREDENTIAL = {
+  ...CREDENTIAL,
+  provider: 'tiktok_ads',
+  externalAccountId: '7012345678901234567',
 } as unknown as ResolvedAdCredential;
 
 const LINKEDIN_CREDENTIAL = {
@@ -87,6 +94,8 @@ type HarnessOptions = {
   google?: boolean;
   /** Resolve a LinkedIn Ads credential instead of the Meta one. */
   linkedin?: boolean;
+  /** Resolve a TikTok Ads credential instead of the Meta one. */
+  tiktok?: boolean;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -114,6 +123,7 @@ function createHarness(options: HarnessOptions = {}) {
       if (options.resolveError) throw options.resolveError;
 
       if (options.linkedin) return LINKEDIN_CREDENTIAL;
+      if (options.tiktok) return TIKTOK_CREDENTIAL;
 
       return options.google ? GOOGLE_CREDENTIAL : CREDENTIAL;
     }),
@@ -192,6 +202,19 @@ function createHarness(options: HarnessOptions = {}) {
     }),
   };
 
+  const tikTokAdsSync = {
+    syncHierarchyWith: jest.fn((credential: { provider: string }) => {
+      order.push(`${credential.provider}_hierarchy`);
+
+      return Promise.resolve({ entitiesWritten: 5, apiCalls: 4, levels: [] });
+    }),
+    ingestLevel: jest.fn((input: { level: string }) => {
+      order.push(`tiktok_${input.level}_insights`);
+
+      return Promise.resolve({ written: 3, skipped: 0, apiCalls: 1 });
+    }),
+  };
+
   const worker = new SocialAdSyncWorker(
     config,
     runService as unknown as SocialAdSyncRunService,
@@ -202,6 +225,7 @@ function createHarness(options: HarnessOptions = {}) {
     backfillPlanner as unknown as SocialAdBackfillPlannerService,
     googleAdsSync as unknown as GoogleAdsSyncService,
     linkedInAdsSync as unknown as LinkedInAdsSyncService,
+    tikTokAdsSync as unknown as TikTokAdsSyncService,
   );
 
   return {
@@ -214,6 +238,7 @@ function createHarness(options: HarnessOptions = {}) {
     backfillPlanner,
     googleAdsSync,
     linkedInAdsSync,
+    tikTokAdsSync,
     levels,
     order,
   };
@@ -285,6 +310,24 @@ describe('SocialAdSyncWorker — LinkedIn Ads dispatch (LI-ADS-BE)', () => {
     expect(harness.insightsSync.ingestLevel).not.toHaveBeenCalled();
     expect(harness.googleAdsSync.syncHierarchyWith).not.toHaveBeenCalled();
     expect(harness.googleAdsSync.ingestLevel).not.toHaveBeenCalled();
+  });
+});
+
+describe('SocialAdSyncWorker — TikTok Ads dispatch (TT-ADS-BE)', () => {
+  it('sends every segment of a tiktok_ads credential to the TikTok services', async () => {
+    const harness = createHarness({ tiktok: true });
+
+    await harness.worker.processDue();
+
+    expect(harness.order).toEqual([
+      'tiktok_ads_hierarchy',
+      'tiktok_account_insights',
+      'tiktok_campaign_insights',
+      'tiktok_adset_insights',
+    ]);
+    expect(harness.linkedInAdsSync.ingestLevel).not.toHaveBeenCalled();
+    expect(harness.googleAdsSync.ingestLevel).not.toHaveBeenCalled();
+    expect(harness.insightsSync.ingestLevel).not.toHaveBeenCalled();
   });
 });
 

@@ -38,6 +38,7 @@ export function deriveMetaCampaignAttentionReasons(input: {
   if (
     entity.provider !== 'google_ads' &&
     entity.provider !== 'linkedin_ads' &&
+    entity.provider !== 'tiktok_ads' &&
     entity.entityLevel === 'adset' &&
     (!entity.destinationType || entity.destinationType === 'unknown')
   ) {

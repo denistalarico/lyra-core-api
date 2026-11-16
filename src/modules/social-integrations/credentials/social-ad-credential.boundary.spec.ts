@@ -43,6 +43,8 @@ const CREDENTIAL_COLUMN_READERS = [
   // without decrypting it (the resolver is still the only decrypter).
   'modules/social-integrations/services/linkedin-ads-oauth.service.ts',
   'modules/social-integrations/services/meta-ads-oauth.service.ts',
+  // TT-ADS-BE: same carry-over as LinkedIn, without decrypting.
+  'modules/social-integrations/services/tiktok-ads-oauth.service.ts',
   'modules/social-integrations/credentials/social-ad-credential.resolver.ts',
 ];
 

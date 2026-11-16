@@ -27,6 +27,8 @@ import { SyncInsightsDto } from './dto/sync-insights.dto';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
 import { LinkedInAdsOAuthService } from './services/linkedin-ads-oauth.service';
 import { SelectLinkedInAdsAccountDto } from './dto/select-linkedin-ads-account.dto';
+import { TikTokAdsOAuthService } from './services/tiktok-ads-oauth.service';
+import { SelectTikTokAdsAccountDto } from './dto/select-tiktok-ads-account.dto';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
@@ -55,6 +57,7 @@ export class SocialIntegrationsController {
     private readonly connectionService: SocialAdConnectionService,
     private readonly systemUserService: MetaAdsSystemUserService,
     private readonly linkedInAdsOAuthService: LinkedInAdsOAuthService,
+    private readonly tikTokAdsOAuthService: TikTokAdsOAuthService,
     private readonly hierarchySyncService: SocialAdHierarchySyncService,
     private readonly insightsSyncService: SocialAdInsightsSyncService,
     private readonly breakdownSyncService: SocialAdBreakdownSyncService,
@@ -167,6 +170,60 @@ export class SocialIntegrationsController {
     const scope = this.requireScope(ctx);
 
     return this.linkedInAdsOAuthService.select({
+      ...scope,
+      userId: ctx.userId ?? null,
+      connectionId: dto.connectionId,
+      externalAccountId: dto.externalAccountId,
+    });
+  }
+
+  /** TikTok Ads (D-I7): advertiser authorization, then the selection of one. */
+  @Post('tiktok-ads/connect')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  connectTikTokAds(@RequestContextData() ctx: RequestContext) {
+    const scope = this.requireScope(ctx);
+
+    return this.tikTokAdsOAuthService.start({
+      ...scope,
+      userId: ctx.userId ?? null,
+    });
+  }
+
+  /**
+   * Public by necessity (TikTok redirects the browser); the state is the proof.
+   * Registered in the TikTok portal with a trailing slash (U2): Express routing
+   * is not strict, so `.../callback/` and `.../callback` both land here.
+   */
+  @Get('tiktok-ads/callback')
+  async tikTokAdsCallback(
+    @Query('auth_code') authCode: string | undefined,
+    @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Query('error') error: string | undefined,
+    @Res() response: Response,
+  ) {
+    const redirectUrl = await this.tikTokAdsOAuthService.handleCallback({
+      authCode: authCode ?? code,
+      state,
+      error,
+    });
+
+    return response.redirect(302, redirectUrl);
+  }
+
+  @Post('tiktok-ads/select')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  selectTikTokAdsAccount(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SelectTikTokAdsAccountDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.tikTokAdsOAuthService.select({
       ...scope,
       userId: ctx.userId ?? null,
       connectionId: dto.connectionId,

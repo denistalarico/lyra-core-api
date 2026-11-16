@@ -326,6 +326,7 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "social-campaigns/social-campaigns.controller.ts:preflightSchedule",
        "social-campaigns/social-campaigns.controller.ts:preflightStatus",
        "social-campaigns/social-campaigns.controller.ts:recommendationAvailability",
+       "social-campaigns/social-campaigns.controller.ts:tiktokHierarchy",
        "social-creative-studio/creative-image-generation.controller.ts:generateImages",
        "social-creative-studio/creative-image-generation.controller.ts:getGeneration",
        "social-creative-studio/creative-image-generation.controller.ts:outputContent",

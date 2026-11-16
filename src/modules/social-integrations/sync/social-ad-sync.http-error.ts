@@ -4,6 +4,7 @@ import type { SocialAdCredentialErrorCode } from '../credentials/social-ad-crede
 import { MetaGraphError } from '../services/meta-graph-error';
 import { GoogleAdsError, type GoogleAdsErrorKind } from './google-ads-error';
 import { LinkedInAdsError } from './linkedin-ads-error';
+import { TikTokAdsError } from './tiktok-ads-error';
 import {
   SocialAdBreakdownDisabledError,
   SocialAdBreakdownTruncatedError,
@@ -276,6 +277,15 @@ export function describeSocialAdSyncFailure(
     };
   }
 
+  if (error instanceof TikTokAdsError) {
+    return {
+      status: GOOGLE_ADS_STATUS[error.kind],
+      code: error.code,
+      message: 'TikTok Ads could not complete the request.',
+      ...(error.retryAfterMs ? { retryAfterMs: error.retryAfterMs } : {}),
+    };
+  }
+
   if (error instanceof LinkedInAdsError) {
     return {
       status: GOOGLE_ADS_STATUS[error.kind],
@@ -308,7 +318,8 @@ export function mapSocialAdSyncError(error: unknown): unknown {
     error instanceof SocialAdBackfillResumeError ||
     error instanceof MetaGraphError ||
     error instanceof GoogleAdsError ||
-    error instanceof LinkedInAdsError
+    error instanceof LinkedInAdsError ||
+    error instanceof TikTokAdsError
   ) {
     const { status, ...body } = describeSocialAdSyncFailure(error);
 

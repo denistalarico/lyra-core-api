@@ -125,6 +125,7 @@ export class SocialAdSyncScheduler {
       'meta_ads',
       ...(this.config.googleAdsEnabled ? (['google_ads'] as const) : []),
       ...(this.config.linkedInAdsEnabled ? (['linkedin_ads'] as const) : []),
+      ...(this.config.tikTokAdsEnabled ? (['tiktok_ads'] as const) : []),
     ]);
 
     let enqueued = 0;
@@ -263,6 +264,7 @@ export class SocialAdSyncScheduler {
     if (connection.provider === 'google_ads') return false;
     // Same for LinkedIn: the daily run is the only read.
     if (connection.provider === 'linkedin_ads') return false;
+    if (connection.provider === 'tiktok_ads') return false;
 
     const intervalHours = this.config.intradayIntervalHours;
 

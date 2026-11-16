@@ -550,7 +550,7 @@ export type SocialAdAnalyticsFreshness = {
  */
 export type SocialAdAnalyticsConnection = {
   id: string;
-  provider: "meta_ads" | "google_ads" | "linkedin_ads";
+  provider: "meta_ads" | "google_ads" | "linkedin_ads" | "tiktok_ads";
   connectionStatus: string;
   accountName: string | null;
   maskedAccountId: string | null;

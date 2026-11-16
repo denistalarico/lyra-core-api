@@ -21,7 +21,11 @@ import {
  * extracting a generic credential store would be abstraction ahead of
  * evidence. The second provider is the moment to revisit it.
  */
-export type SocialAdProvider = 'meta_ads' | 'google_ads' | 'linkedin_ads';
+export type SocialAdProvider =
+  | 'meta_ads'
+  | 'google_ads'
+  | 'linkedin_ads'
+  | 'tiktok_ads';
 
 /**
  * Lifecycle of one connection attempt, from the OAuth redirect to a live
@@ -63,7 +67,10 @@ export type SocialAdAuthorizationMethod =
   | 'google_oauth'
   // LinkedIn Ads: 3-legged OAuth; the token is in the row, encrypted, like
   // `business_login`. It lives 60 days and has no programmatic refresh here.
-  | 'linkedin_oauth';
+  | 'linkedin_oauth'
+  // TikTok Ads: TikTok API for Business advertiser authorization; the token is
+  // in the row, encrypted.
+  | 'tiktok_business';
 
 @Entity('social_ad_account_connections')
 // NULL external_account_id is distinct in Postgres, so in-flight rows never

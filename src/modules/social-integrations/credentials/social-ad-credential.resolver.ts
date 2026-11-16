@@ -3,7 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { GoogleAdsCredentialResolver } from '../../social-google/google-ads-credential.resolver';
 import { SettingsCryptoService } from '../../../common/crypto/settings-crypto.service';
-import { SocialAdAccountConnectionEntity } from '../entities/social-ad-account-connection.entity';
+import {
+  SocialAdAccountConnectionEntity,
+  type SocialAdAuthorizationMethod,
+  type SocialAdProvider,
+} from '../entities/social-ad-account-connection.entity';
 import { SocialInternalAccessService } from '../internal/social-internal-access.service';
 import { isSameAdAccountId, normalizeAdAccountId } from '../meta-ad-account-id';
 import {
@@ -21,6 +25,17 @@ import { SocialAdCredentialError } from './social-ad-credential.error';
  * into one clear "reconnect" instead of a half-written run.
  */
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
+
+/**
+ * Providers with their own OAuth whose token is stored in the row, and the one
+ * authorization method each may carry (D-I7).
+ */
+const ROW_TOKEN_OAUTH_METHOD: Partial<
+  Record<SocialAdProvider, SocialAdAuthorizationMethod>
+> = {
+  linkedin_ads: 'linkedin_oauth',
+  tiktok_ads: 'tiktok_business',
+};
 
 export type SocialAdCredentialScope = {
   tenantId: string;
@@ -95,7 +110,7 @@ export class SocialAdCredentialResolver {
 
     if (
       connection.provider !== 'meta_ads' &&
-      connection.provider !== 'linkedin_ads'
+      !(connection.provider in ROW_TOKEN_OAUTH_METHOD)
     ) {
       // Refusing by name beats resolving a Meta credential for a row that is
       // not Meta.
@@ -110,13 +125,14 @@ export class SocialAdCredentialResolver {
       throw new SocialAdCredentialError('connection_not_connected');
     }
 
-    // LinkedIn ad account ids are plain digits; Meta's are `act_<digits>`.
-    const externalAccountId =
-      connection.provider === 'linkedin_ads'
-        ? /^\d{1,20}$/.test(connection.externalAccountId ?? '')
-          ? connection.externalAccountId
-          : null
-        : normalizeAdAccountId(connection.externalAccountId);
+    // LinkedIn and TikTok ad account ids are plain digits; Meta's are
+    // `act_<digits>`.
+    const ownOAuthMethod = ROW_TOKEN_OAUTH_METHOD[connection.provider];
+    const externalAccountId = ownOAuthMethod
+      ? /^\d{1,20}$/.test(connection.externalAccountId ?? '')
+        ? connection.externalAccountId
+        : null
+      : normalizeAdAccountId(connection.externalAccountId);
 
     if (!externalAccountId) {
       throw new SocialAdCredentialError('account_not_bound');
@@ -137,8 +153,11 @@ export class SocialAdCredentialResolver {
 
     // A method that belongs to the other provider is as wrong as an unknown one.
     if (
-      (connection.provider === 'linkedin_ads') !==
-      (connection.authorizationMethod === 'linkedin_oauth')
+      ownOAuthMethod
+        ? connection.authorizationMethod !== ownOAuthMethod
+        : Object.values(ROW_TOKEN_OAUTH_METHOD).includes(
+            connection.authorizationMethod,
+          )
     ) {
       throw new SocialAdCredentialError('unsupported_authorization_method');
     }
@@ -155,11 +174,9 @@ export class SocialAdCredentialResolver {
         });
 
       case 'linkedin_oauth':
-        // LinkedIn (D-I7): the token is in the row, encrypted, like
-        // `business_login`; the provider check above keeps the two apart.
-        if (connection.provider !== 'linkedin_ads') {
-          throw new SocialAdCredentialError('unsupported_authorization_method');
-        }
+      case 'tiktok_business':
+        // LinkedIn and TikTok (D-I7): the token is in the row, encrypted, like
+        // `business_login`; the provider check above keeps each pair together.
         return createResolvedAdCredential({
           ...this.describe(connection, externalAccountId, timezone),
           tokenExpiresAt: connection.tokenExpiresAt,

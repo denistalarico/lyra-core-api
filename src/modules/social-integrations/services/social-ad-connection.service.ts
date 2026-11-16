@@ -141,9 +141,12 @@ export class SocialAdConnectionService {
    * history every single hour.
    */
   async listSchedulable(
-    providers: readonly ('meta_ads' | 'google_ads' | 'linkedin_ads')[] = [
-      'meta_ads',
-    ],
+    providers: readonly (
+      | 'meta_ads'
+      | 'google_ads'
+      | 'linkedin_ads'
+      | 'tiktok_ads'
+    )[] = ['meta_ads'],
   ): Promise<SocialAdSchedulableConnection[]> {
     const connections = await this.connectionsRepository.find({
       where: {

@@ -23,7 +23,8 @@ const META_PROVIDER = 'meta_ads';
 export type CampaignHierarchyProvider =
   | 'meta_ads'
   | 'google_ads'
-  | 'linkedin_ads';
+  | 'linkedin_ads'
+  | 'tiktok_ads';
 const PAID_SOURCE = 'paid';
 const ACCOUNT_DEFAULT_ATTRIBUTION = 'account_default';
 const EMPTY_METRICS: MetaCampaignNodeMetrics = {

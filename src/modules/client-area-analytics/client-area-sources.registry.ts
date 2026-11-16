@@ -14,6 +14,7 @@ export type AnalyticsReadQuery = {
     | 'summary'
     | 'google_ads'
     | 'linkedin_ads'
+    | 'tiktok_ads'
     | 'ga4'
     | 'youtube';
   from?: string;

@@ -17,6 +17,8 @@ import {
   GOOGLE_ADS_BACKFILL_DAYS,
   LINKEDIN_ADS_BACKFILL_CHUNK_DAYS,
   LINKEDIN_ADS_BACKFILL_DAYS,
+  TIKTOK_ADS_BACKFILL_CHUNK_DAYS,
+  TIKTOK_ADS_BACKFILL_DAYS,
   SocialAdSyncConfigService,
 } from './social-ad-sync-config.service';
 import {
@@ -316,6 +318,7 @@ export class SocialAdBackfillPlannerService {
 
     const google = connection.provider === 'google_ads';
     const linkedin = connection.provider === 'linkedin_ads';
+    const tiktok = connection.provider === 'tiktok_ads';
 
     // Google has its own switch (D-G8), default off.
     if (google && !this.config.googleAdsEnabled) {
@@ -327,13 +330,20 @@ export class SocialAdBackfillPlannerService {
       return { action: 'skipped', reason: 'sync_disabled' };
     }
 
+    // TikTok has its own switch (D-I7), default off.
+    if (tiktok && !this.config.tikTokAdsEnabled) {
+      return { action: 'skipped', reason: 'sync_disabled' };
+    }
+
     // Google reads a shorter history in one wide chunk (D-G11); the shared
     // knob can only lower it, never raise it.
     const totalDays = google
       ? Math.min(this.config.backfillDays, GOOGLE_ADS_BACKFILL_DAYS)
       : linkedin
         ? Math.min(this.config.backfillDays, LINKEDIN_ADS_BACKFILL_DAYS)
-        : this.config.backfillDays;
+        : tiktok
+          ? Math.min(this.config.backfillDays, TIKTOK_ADS_BACKFILL_DAYS)
+          : this.config.backfillDays;
 
     if (totalDays <= 0) {
       return { action: 'skipped', reason: 'backfill_disabled' };
@@ -393,7 +403,9 @@ export class SocialAdBackfillPlannerService {
         ? GOOGLE_ADS_BACKFILL_CHUNK_DAYS
         : linkedin
           ? LINKEDIN_ADS_BACKFILL_CHUNK_DAYS
-          : this.config.backfillChunkDays,
+          : tiktok
+            ? TIKTOK_ADS_BACKFILL_CHUNK_DAYS
+            : this.config.backfillChunkDays,
     });
 
     if (chunks.length === 0) {

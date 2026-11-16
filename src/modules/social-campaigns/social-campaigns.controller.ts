@@ -566,6 +566,29 @@ export class SocialCampaignsController {
     });
   }
 
+  /** TT-ADS-BE: same view over the local TikTok Ads mirror. Read-only (D-I7). */
+  @ClientAreaExposed('social_campaigns')
+  @Get('tiktok/hierarchy')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  tiktokHierarchy(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: MetaCampaignHierarchyQueryDto,
+  ) {
+    return this.hierarchy.read({
+      ...this.requireScope(ctx),
+      connectionId: query.connectionId,
+      since: query.since,
+      until: query.until,
+      status: query.status,
+      search: query.search,
+      page: query.page,
+      limit: query.limit,
+      provider: 'tiktok_ads',
+    });
+  }
+
   @ClientAreaExposed('social_campaigns')
   @Get('boost-templates')
   @UseGuards(JwtAuthGuard, PermissionsGuard)

@@ -1,6 +1,7 @@
 import { SocialAdCredentialError } from '../credentials/social-ad-credential.error';
 import { GoogleAdsError } from './google-ads-error';
 import { LinkedInAdsError } from './linkedin-ads-error';
+import { TikTokAdsError } from './tiktok-ads-error';
 import { MetaGraphError } from '../services/meta-graph-error';
 import {
   SocialAdInsightsWindowNotClosedError,
@@ -105,7 +106,11 @@ export function classifySocialAdSyncRetry(
 
   // Google Ads (G2): same four kinds, mapped to the same three actions. The
   // code is Google's own safe code, never a provider string.
-  if (error instanceof GoogleAdsError || error instanceof LinkedInAdsError) {
+  if (
+    error instanceof GoogleAdsError ||
+    error instanceof LinkedInAdsError ||
+    error instanceof TikTokAdsError
+  ) {
     switch (error.kind) {
       case 'transient':
         return { action: 'backoff', code, retryAfterMs: error.retryAfterMs };
