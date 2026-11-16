@@ -15,6 +15,7 @@ import {
 import { SocialAdReachMeasurementDisabledError } from './sync/social-ad-reach-period.error';
 import type { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
 import type { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
+import type { LinkedInAdsOAuthService } from './services/linkedin-ads-oauth.service';
 import type { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import type { SocialAdConnectionService } from './services/social-ad-connection.service';
 import type { SocialAdHierarchySyncService } from './services/social-ad-hierarchy-sync.service';
@@ -199,10 +200,17 @@ function createHarness(
     }),
   };
 
+  const linkedInOauth = {
+    start: jest.fn(),
+    handleCallback: jest.fn(),
+    select: jest.fn(),
+  };
+
   const controller = new SocialIntegrationsController(
     oauth as unknown as MetaAdsOAuthService,
     connections as unknown as SocialAdConnectionService,
     systemUser as unknown as MetaAdsSystemUserService,
+    linkedInOauth as unknown as LinkedInAdsOAuthService,
     hierarchySync as unknown as SocialAdHierarchySyncService,
     insightsSync as unknown as SocialAdInsightsSyncService,
     breakdownSync as unknown as SocialAdBreakdownSyncService,

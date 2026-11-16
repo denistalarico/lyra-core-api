@@ -20,7 +20,10 @@ import { deriveMetaCampaignAttentionReasons } from './meta-campaign-attention';
 
 const META_PROVIDER = 'meta_ads';
 /** G2: the mirror is shared; only the provider filter differs (D-G6). */
-export type CampaignHierarchyProvider = 'meta_ads' | 'google_ads';
+export type CampaignHierarchyProvider =
+  | 'meta_ads'
+  | 'google_ads'
+  | 'linkedin_ads';
 const PAID_SOURCE = 'paid';
 const ACCOUNT_DEFAULT_ATTRIBUTION = 'account_default';
 const EMPTY_METRICS: MetaCampaignNodeMetrics = {

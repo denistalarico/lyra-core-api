@@ -49,6 +49,10 @@ import { SocialAdRetentionService } from './services/social-ad-retention.service
 import { SocialAdRetentionScheduler } from './services/social-ad-retention.scheduler';
 import { GoogleAdsReaderService } from './services/google-ads-reader.service';
 import { GoogleAdsSyncService } from './services/google-ads-sync.service';
+import { LinkedInAdsApiClient } from './services/linkedin-ads-api.client';
+import { LinkedInAdsOAuthService } from './services/linkedin-ads-oauth.service';
+import { LinkedInAdsReaderService } from './services/linkedin-ads-reader.service';
+import { LinkedInAdsSyncService } from './services/linkedin-ads-sync.service';
 import { SocialAdSyncConfigService } from './services/social-ad-sync-config.service';
 import { SocialAdSyncRunService } from './services/social-ad-sync-run.service';
 import { SocialAdSyncScheduler } from './services/social-ad-sync.scheduler';
@@ -138,6 +142,10 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdBackfillResumeService,
     GoogleAdsReaderService,
     GoogleAdsSyncService,
+    LinkedInAdsApiClient,
+    LinkedInAdsOAuthService,
+    LinkedInAdsReaderService,
+    LinkedInAdsSyncService,
     SocialAdSyncWorker,
     SocialAdSyncScheduler,
     // Housekeeping over the run log, on its own switch and its own daily

@@ -477,6 +477,10 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
   ['GET /social/campaigns/google/hierarchy']: campaigns({
     query: connection,
   }),
+  // LI-ADS-BE — same read for a LinkedIn Ads connection.
+  ['GET /social/campaigns/linkedin/hierarchy']: campaigns({
+    query: connection,
+  }),
   ['GET /social/campaigns/boost-templates']: campaigns(),
   // Read-only analytics the Campaigns page needs (social-integrations,
   // decorator-only opt-in authorized by the user, 2026-10-19); CA-AN1 shares

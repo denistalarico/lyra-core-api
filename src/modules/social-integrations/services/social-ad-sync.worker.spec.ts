@@ -4,6 +4,7 @@ import type { SocialAdCredentialResolver } from '../credentials/social-ad-creden
 import type { SocialAdSyncRunEntity } from '../entities/social-ad-sync-run.entity';
 import { MetaGraphError } from './meta-graph-error';
 import type { GoogleAdsSyncService } from './google-ads-sync.service';
+import type { LinkedInAdsSyncService } from './linkedin-ads-sync.service';
 import type { SocialAdConnectionService } from './social-ad-connection.service';
 import type { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.service';
 import type { SocialAdInsightsSyncService } from './social-ad-insights-sync.service';
@@ -28,6 +29,13 @@ const GOOGLE_CREDENTIAL = {
   ...CREDENTIAL,
   provider: 'google_ads',
   externalAccountId: '1234567890',
+} as unknown as ResolvedAdCredential;
+
+const LINKEDIN_CREDENTIAL = {
+  ...CREDENTIAL,
+  provider: 'linkedin_ads',
+  externalAccountId: '508123456',
+  timezone: 'UTC',
 } as unknown as ResolvedAdCredential;
 
 function run(
@@ -77,6 +85,8 @@ type HarnessOptions = {
   insightsError?: Error;
   /** Resolve a Google Ads credential instead of the Meta one. */
   google?: boolean;
+  /** Resolve a LinkedIn Ads credential instead of the Meta one. */
+  linkedin?: boolean;
 };
 
 function createHarness(options: HarnessOptions = {}) {
@@ -102,6 +112,8 @@ function createHarness(options: HarnessOptions = {}) {
   const credentialResolver = {
     resolvePersisted: jest.fn(async () => {
       if (options.resolveError) throw options.resolveError;
+
+      if (options.linkedin) return LINKEDIN_CREDENTIAL;
 
       return options.google ? GOOGLE_CREDENTIAL : CREDENTIAL;
     }),
@@ -167,6 +179,19 @@ function createHarness(options: HarnessOptions = {}) {
     }),
   };
 
+  const linkedInAdsSync = {
+    syncHierarchyWith: jest.fn((credential: { provider: string }) => {
+      order.push(`${credential.provider}_hierarchy`);
+
+      return Promise.resolve({ entitiesWritten: 5, apiCalls: 4, levels: [] });
+    }),
+    ingestLevel: jest.fn((input: { level: string }) => {
+      order.push(`linkedin_${input.level}_insights`);
+
+      return Promise.resolve({ written: 3, skipped: 0, apiCalls: 1 });
+    }),
+  };
+
   const worker = new SocialAdSyncWorker(
     config,
     runService as unknown as SocialAdSyncRunService,
@@ -176,6 +201,7 @@ function createHarness(options: HarnessOptions = {}) {
     connectionService as unknown as SocialAdConnectionService,
     backfillPlanner as unknown as SocialAdBackfillPlannerService,
     googleAdsSync as unknown as GoogleAdsSyncService,
+    linkedInAdsSync as unknown as LinkedInAdsSyncService,
   );
 
   return {
@@ -187,6 +213,7 @@ function createHarness(options: HarnessOptions = {}) {
     connectionService,
     backfillPlanner,
     googleAdsSync,
+    linkedInAdsSync,
     levels,
     order,
   };
@@ -231,6 +258,32 @@ describe('SocialAdSyncWorker — Google Ads dispatch (G2)', () => {
 
     await harness.worker.processDue();
 
+    expect(harness.googleAdsSync.ingestLevel).not.toHaveBeenCalled();
+  });
+});
+
+describe('SocialAdSyncWorker — LinkedIn Ads dispatch (LI-ADS-BE)', () => {
+  it('sends every segment of a linkedin_ads credential to the LinkedIn services', async () => {
+    const harness = createHarness({ linkedin: true });
+
+    await harness.worker.processDue();
+
+    expect(harness.order).toEqual([
+      'linkedin_ads_hierarchy',
+      'linkedin_account_insights',
+      'linkedin_campaign_insights',
+      'linkedin_adset_insights',
+    ]);
+  });
+
+  it('never calls the Meta or Google services for a linkedin_ads credential', async () => {
+    const harness = createHarness({ linkedin: true });
+
+    await harness.worker.processDue();
+
+    expect(harness.hierarchySync.syncHierarchyWith).not.toHaveBeenCalled();
+    expect(harness.insightsSync.ingestLevel).not.toHaveBeenCalled();
+    expect(harness.googleAdsSync.syncHierarchyWith).not.toHaveBeenCalled();
     expect(harness.googleAdsSync.ingestLevel).not.toHaveBeenCalled();
   });
 });

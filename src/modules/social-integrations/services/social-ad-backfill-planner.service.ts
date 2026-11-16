@@ -15,6 +15,8 @@ import type { SocialAdSchedulableConnection } from './social-ad-connection.servi
 import {
   GOOGLE_ADS_BACKFILL_CHUNK_DAYS,
   GOOGLE_ADS_BACKFILL_DAYS,
+  LINKEDIN_ADS_BACKFILL_CHUNK_DAYS,
+  LINKEDIN_ADS_BACKFILL_DAYS,
   SocialAdSyncConfigService,
 } from './social-ad-sync-config.service';
 import {
@@ -313,9 +315,15 @@ export class SocialAdBackfillPlannerService {
     }
 
     const google = connection.provider === 'google_ads';
+    const linkedin = connection.provider === 'linkedin_ads';
 
     // Google has its own switch (D-G8), default off.
     if (google && !this.config.googleAdsEnabled) {
+      return { action: 'skipped', reason: 'sync_disabled' };
+    }
+
+    // LinkedIn has its own switch (D-I7), default off.
+    if (linkedin && !this.config.linkedInAdsEnabled) {
       return { action: 'skipped', reason: 'sync_disabled' };
     }
 
@@ -323,7 +331,9 @@ export class SocialAdBackfillPlannerService {
     // knob can only lower it, never raise it.
     const totalDays = google
       ? Math.min(this.config.backfillDays, GOOGLE_ADS_BACKFILL_DAYS)
-      : this.config.backfillDays;
+      : linkedin
+        ? Math.min(this.config.backfillDays, LINKEDIN_ADS_BACKFILL_DAYS)
+        : this.config.backfillDays;
 
     if (totalDays <= 0) {
       return { action: 'skipped', reason: 'backfill_disabled' };
@@ -381,7 +391,9 @@ export class SocialAdBackfillPlannerService {
       totalDays,
       chunkDays: google
         ? GOOGLE_ADS_BACKFILL_CHUNK_DAYS
-        : this.config.backfillChunkDays,
+        : linkedin
+          ? LINKEDIN_ADS_BACKFILL_CHUNK_DAYS
+          : this.config.backfillChunkDays,
     });
 
     if (chunks.length === 0) {

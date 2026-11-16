@@ -322,7 +322,7 @@ export function metricShape(metric: MetricDefinition): MetricShape {
   return metric.shape ?? "scalar";
 }
 
-const PAID_CHANNELS: ChannelId[] = ["meta_ads", "google_ads"];
+const PAID_CHANNELS: ChannelId[] = ["meta_ads", "google_ads", "linkedin_ads"];
 const META_ADS_ONLY: ChannelId[] = ["meta_ads"];
 const META_SURFACES: ChannelId[] = ["facebook", "instagram"];
 /**

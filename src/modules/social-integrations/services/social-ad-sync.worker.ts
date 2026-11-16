@@ -30,6 +30,8 @@ import {
 } from './social-ad-backfill-planner.service';
 import { GoogleAdsSyncService } from './google-ads-sync.service';
 import { GoogleAdsError } from '../sync/google-ads-error';
+import { LinkedInAdsError } from '../sync/linkedin-ads-error';
+import { LinkedInAdsSyncService } from './linkedin-ads-sync.service';
 import { SocialAdConnectionService } from './social-ad-connection.service';
 import { SocialAdHierarchySyncService } from './social-ad-hierarchy-sync.service';
 import { SocialAdInsightsSyncService } from './social-ad-insights-sync.service';
@@ -95,6 +97,7 @@ export class SocialAdSyncWorker {
     private readonly connectionService: SocialAdConnectionService,
     private readonly backfillPlanner: SocialAdBackfillPlannerService,
     private readonly googleAdsSync: GoogleAdsSyncService,
+    private readonly linkedInAdsSync: LinkedInAdsSyncService,
   ) {}
 
   @Interval(TICK_MS)
@@ -197,8 +200,12 @@ export class SocialAdSyncWorker {
         completed.push(segment);
       } catch (error) {
         // A failed Google request still spent quota (B3).
-        if (error instanceof GoogleAdsError)
+        if (
+          error instanceof GoogleAdsError ||
+          error instanceof LinkedInAdsError
+        ) {
           counters.apiCalls += error.apiCalls;
+        }
 
         /**
          * Stops at the first failure rather than trying the rest.
@@ -285,15 +292,19 @@ export class SocialAdSyncWorker {
     // services, which return the same summaries and write through the same
     // writers. Everything below this decision is provider-blind.
     const google = input.credential.provider === 'google_ads';
+    // LinkedIn Ads (D-I7) is the second branch of the same decision.
+    const linkedin = input.credential.provider === 'linkedin_ads';
 
     if (!isInsightsSegment(input.segment)) {
-      const summary = google
-        ? await this.googleAdsSync.syncHierarchyWith(input.credential)
-        : await this.hierarchySync.syncHierarchyWith(
-            input.credential,
-            // Provenance for the destination observations this sweep may append.
-            input.run.id,
-          );
+      const summary = linkedin
+        ? await this.linkedInAdsSync.syncHierarchyWith(input.credential)
+        : google
+          ? await this.googleAdsSync.syncHierarchyWith(input.credential)
+          : await this.hierarchySync.syncHierarchyWith(
+              input.credential,
+              // Provenance for the destination observations this sweep may append.
+              input.run.id,
+            );
 
       counters.entitiesWritten += summary.entitiesWritten;
       counters.apiCalls += summary.apiCalls;
@@ -343,7 +354,11 @@ export class SocialAdSyncWorker {
       assertClosedInsightsWindow(window, input.credential.timezone);
     }
 
-    const insights = google ? this.googleAdsSync : this.insightsSync;
+    const insights = linkedin
+      ? this.linkedInAdsSync
+      : google
+        ? this.googleAdsSync
+        : this.insightsSync;
     const summary = await insights.ingestLevel({
       credential: input.credential,
       // From the total map rather than a conditional: a segment that is not an

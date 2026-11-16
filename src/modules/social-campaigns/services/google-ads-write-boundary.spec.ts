@@ -29,4 +29,13 @@ describe('Google Ads write boundary (G2)', () => {
 
     expect(controller).not.toMatch(/@(Post|Patch|Put|Delete)\(\s*['"]google/);
   });
+
+  it('exposes no LinkedIn route that mutates (LI-ADS-BE)', () => {
+    const controller = readFileSync(
+      join(__dirname, '../social-campaigns.controller.ts'),
+      'utf8',
+    );
+
+    expect(controller).not.toMatch(/@(Post|Patch|Put|Delete)\(\s*['"]linkedin/);
+  });
 });

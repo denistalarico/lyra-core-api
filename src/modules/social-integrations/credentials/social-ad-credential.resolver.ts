@@ -93,7 +93,10 @@ export class SocialAdCredentialResolver {
       return this.googleAds.resolve(input);
     }
 
-    if (connection.provider !== 'meta_ads') {
+    if (
+      connection.provider !== 'meta_ads' &&
+      connection.provider !== 'linkedin_ads'
+    ) {
       // Refusing by name beats resolving a Meta credential for a row that is
       // not Meta.
       throw new SocialAdCredentialError('unsupported_provider');
@@ -107,9 +110,13 @@ export class SocialAdCredentialResolver {
       throw new SocialAdCredentialError('connection_not_connected');
     }
 
-    const externalAccountId = normalizeAdAccountId(
-      connection.externalAccountId,
-    );
+    // LinkedIn ad account ids are plain digits; Meta's are `act_<digits>`.
+    const externalAccountId =
+      connection.provider === 'linkedin_ads'
+        ? /^\d{1,20}$/.test(connection.externalAccountId ?? '')
+          ? connection.externalAccountId
+          : null
+        : normalizeAdAccountId(connection.externalAccountId);
 
     if (!externalAccountId) {
       throw new SocialAdCredentialError('account_not_bound');
@@ -128,11 +135,31 @@ export class SocialAdCredentialResolver {
       companyContextId: connection.companyContextId,
     };
 
+    // A method that belongs to the other provider is as wrong as an unknown one.
+    if (
+      (connection.provider === 'linkedin_ads') !==
+      (connection.authorizationMethod === 'linkedin_oauth')
+    ) {
+      throw new SocialAdCredentialError('unsupported_authorization_method');
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // The only runtime branch on `authorization_method` in the codebase.
     // ─────────────────────────────────────────────────────────────────────────
     switch (connection.authorizationMethod) {
       case 'business_login':
+        return createResolvedAdCredential({
+          ...this.describe(connection, externalAccountId, timezone),
+          tokenExpiresAt: connection.tokenExpiresAt,
+          accessToken: await this.resolveBusinessLoginToken(connection),
+        });
+
+      case 'linkedin_oauth':
+        // LinkedIn (D-I7): the token is in the row, encrypted, like
+        // `business_login`; the provider check above keeps the two apart.
+        if (connection.provider !== 'linkedin_ads') {
+          throw new SocialAdCredentialError('unsupported_authorization_method');
+        }
         return createResolvedAdCredential({
           ...this.describe(connection, externalAccountId, timezone),
           tokenExpiresAt: connection.tokenExpiresAt,

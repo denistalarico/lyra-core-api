@@ -16,6 +16,8 @@ export const SOCIAL_ADS_SYNC_INTRADAY_INTERVAL_HOURS_ENV =
  */
 export const SOCIAL_GOOGLE_ADS_SYNC_ENABLED_ENV =
   'SOCIAL_GOOGLE_ADS_SYNC_ENABLED';
+export const SOCIAL_LINKEDIN_ADS_SYNC_ENABLED_ENV =
+  'SOCIAL_LINKEDIN_ADS_SYNC_ENABLED';
 export const SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET_ENV =
   'SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET';
 
@@ -34,6 +36,9 @@ const DEFAULT_GOOGLE_ADS_DAILY_OPERATION_BUDGET = 2_000;
  */
 export const GOOGLE_ADS_BACKFILL_DAYS = 30;
 export const GOOGLE_ADS_BACKFILL_CHUNK_DAYS = 30;
+/** LinkedIn: one wide `adAnalytics` call per level reads 30 days (D-I7). */
+export const LINKEDIN_ADS_BACKFILL_DAYS = 30;
+export const LINKEDIN_ADS_BACKFILL_CHUNK_DAYS = 30;
 
 /** How far back a daily run re-reads, when nothing says otherwise. */
 const DEFAULT_DAILY_LOOKBACK_DAYS = 7;
@@ -122,6 +127,14 @@ export class SocialAdSyncConfigService {
   get googleAdsEnabled(): boolean {
     const raw =
       process.env[SOCIAL_GOOGLE_ADS_SYNC_ENABLED_ENV]?.trim().toLowerCase();
+
+    return raw !== undefined && ['true', '1', 'yes', 'on'].includes(raw);
+  }
+
+  /** Whether LinkedIn Ads accounts are scheduled at all. Off unless set. */
+  get linkedInAdsEnabled(): boolean {
+    const raw =
+      process.env[SOCIAL_LINKEDIN_ADS_SYNC_ENABLED_ENV]?.trim().toLowerCase();
 
     return raw !== undefined && ['true', '1', 'yes', 'on'].includes(raw);
   }

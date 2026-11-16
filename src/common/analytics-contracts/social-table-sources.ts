@@ -402,7 +402,7 @@ function facebookReelColumns(): TableColumnDefinition[] {
  * alike. A paid table reads the ad account; an Instagram table reads the IG
  * media edge; a Facebook table reads the Page.
  */
-const PAID_ONLY: ChannelId[] = ["meta_ads", "google_ads"];
+const PAID_ONLY: ChannelId[] = ["meta_ads", "google_ads", "linkedin_ads"];
 const INSTAGRAM_ONLY: ChannelId[] = ["instagram"];
 const FACEBOOK_ONLY: ChannelId[] = ["facebook"];
 const ORGANIC_NETWORKS: ChannelId[] = ["instagram", "facebook"];

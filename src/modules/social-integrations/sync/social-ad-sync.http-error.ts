@@ -3,6 +3,7 @@ import { SocialAdCredentialError } from '../credentials/social-ad-credential.err
 import type { SocialAdCredentialErrorCode } from '../credentials/social-ad-credential.error';
 import { MetaGraphError } from '../services/meta-graph-error';
 import { GoogleAdsError, type GoogleAdsErrorKind } from './google-ads-error';
+import { LinkedInAdsError } from './linkedin-ads-error';
 import {
   SocialAdBreakdownDisabledError,
   SocialAdBreakdownTruncatedError,
@@ -275,6 +276,15 @@ export function describeSocialAdSyncFailure(
     };
   }
 
+  if (error instanceof LinkedInAdsError) {
+    return {
+      status: GOOGLE_ADS_STATUS[error.kind],
+      code: error.code,
+      message: 'LinkedIn Ads could not complete the request.',
+      ...(error.retryAfterMs ? { retryAfterMs: error.retryAfterMs } : {}),
+    };
+  }
+
   // An unclassified error is a bug. It gets a code that says so rather than a
   // reassuring one, and the message stays generic because its own text has been
   // through no sanitizer.
@@ -297,7 +307,8 @@ export function mapSocialAdSyncError(error: unknown): unknown {
     error instanceof SocialAdSyncDisabledError ||
     error instanceof SocialAdBackfillResumeError ||
     error instanceof MetaGraphError ||
-    error instanceof GoogleAdsError
+    error instanceof GoogleAdsError ||
+    error instanceof LinkedInAdsError
   ) {
     const { status, ...body } = describeSocialAdSyncFailure(error);
 

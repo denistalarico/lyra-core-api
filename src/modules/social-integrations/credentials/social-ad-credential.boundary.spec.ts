@@ -39,6 +39,9 @@ const CONNECTION_TOKEN_DECRYPTERS = [
 
 /** Files allowed to load the encrypted column past the entity's `select: false`. */
 const CREDENTIAL_COLUMN_READERS = [
+  // LI-ADS-BE: carries the pending LinkedIn token into the connected row
+  // without decrypting it (the resolver is still the only decrypter).
+  'modules/social-integrations/services/linkedin-ads-oauth.service.ts',
   'modules/social-integrations/services/meta-ads-oauth.service.ts',
   'modules/social-integrations/credentials/social-ad-credential.resolver.ts',
 ];

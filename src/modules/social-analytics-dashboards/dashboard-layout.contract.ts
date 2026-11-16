@@ -25,6 +25,7 @@ export const DASHBOARD_CHANNEL_IDS = [
   'instagram',
   'meta_ads',
   'google_ads',
+  'linkedin_ads',
   'ga4',
   'youtube',
 ] as const;
@@ -135,6 +136,7 @@ const DEFAULT_SECTION_TITLES: Record<DashboardChannelId, string> = {
   instagram: 'Instagram',
   meta_ads: 'Meta Ads',
   google_ads: 'Google Ads',
+  linkedin_ads: 'LinkedIn Ads',
   ga4: 'Google Analytics',
   youtube: 'YouTube',
 };

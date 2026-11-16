@@ -25,6 +25,8 @@ import { SelectInternalAdAccountDto } from './dto/select-internal-ad-account.dto
 import { SelectMetaAdsAccountDto } from './dto/select-meta-ads-account.dto';
 import { SyncInsightsDto } from './dto/sync-insights.dto';
 import { MetaAdsOAuthService } from './services/meta-ads-oauth.service';
+import { LinkedInAdsOAuthService } from './services/linkedin-ads-oauth.service';
+import { SelectLinkedInAdsAccountDto } from './dto/select-linkedin-ads-account.dto';
 import { MetaAdsSystemUserService } from './services/meta-ads-system-user.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialAdBackfillResumeService } from './services/social-ad-backfill-resume.service';
@@ -52,6 +54,7 @@ export class SocialIntegrationsController {
     private readonly metaAdsOAuthService: MetaAdsOAuthService,
     private readonly connectionService: SocialAdConnectionService,
     private readonly systemUserService: MetaAdsSystemUserService,
+    private readonly linkedInAdsOAuthService: LinkedInAdsOAuthService,
     private readonly hierarchySyncService: SocialAdHierarchySyncService,
     private readonly insightsSyncService: SocialAdInsightsSyncService,
     private readonly breakdownSyncService: SocialAdBreakdownSyncService,
@@ -113,6 +116,57 @@ export class SocialIntegrationsController {
     const scope = this.requireScope(ctx);
 
     return this.metaAdsOAuthService.select({
+      ...scope,
+      userId: ctx.userId ?? null,
+      connectionId: dto.connectionId,
+      externalAccountId: dto.externalAccountId,
+    });
+  }
+
+  /** LinkedIn Ads (D-I7): read-only OAuth, then the selection of one account. */
+  @Post('linkedin-ads/connect')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  connectLinkedInAds(@RequestContextData() ctx: RequestContext) {
+    const scope = this.requireScope(ctx);
+
+    return this.linkedInAdsOAuthService.start({
+      ...scope,
+      userId: ctx.userId ?? null,
+    });
+  }
+
+  /** Public by necessity (LinkedIn redirects the browser); the state is the proof. */
+  @Get('linkedin-ads/callback')
+  async linkedInAdsCallback(
+    @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Query('error') error: string | undefined,
+    @Query('error_description') errorDescription: string | undefined,
+    @Res() response: Response,
+  ) {
+    const redirectUrl = await this.linkedInAdsOAuthService.handleCallback({
+      code,
+      state,
+      error,
+      errorDescription,
+    });
+
+    return response.redirect(302, redirectUrl);
+  }
+
+  @Post('linkedin-ads/select')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  selectLinkedInAdsAccount(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SelectLinkedInAdsAccountDto,
+  ) {
+    const scope = this.requireScope(ctx);
+
+    return this.linkedInAdsOAuthService.select({
       ...scope,
       userId: ctx.userId ?? null,
       connectionId: dto.connectionId,
