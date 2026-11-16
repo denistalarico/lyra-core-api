@@ -2,10 +2,33 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
+  IsIn,
+  ValidateNested,
   IsISO8601,
   IsOptional,
   IsUUID,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class TiktokPublicationOptionsDto {
+  @IsIn([
+    'PUBLIC_TO_EVERYONE',
+    'MUTUAL_FOLLOW_FRIENDS',
+    'FOLLOWER_OF_CREATOR',
+    'SELF_ONLY',
+  ])
+  privacyLevel!: string;
+
+  @IsBoolean()
+  disableComment!: boolean;
+
+  @IsBoolean()
+  disableDuet!: boolean;
+
+  @IsBoolean()
+  disableStitch!: boolean;
+}
 
 /**
  * Schedules a publication for a Planner destination.
@@ -22,6 +45,11 @@ import {
  * type) directly.
  */
 export class CreateSocialPublicationDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TiktokPublicationOptionsDto)
+  providerOptions?: TiktokPublicationOptionsDto;
+
   @IsUUID()
   contentItemId!: string;
 

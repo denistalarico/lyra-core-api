@@ -23,6 +23,7 @@ import type { CreateSocialPublicationDto } from './dto/create-social-publication
 import type { ListSocialPublicationsQueryDto } from './dto/list-social-publications.query.dto';
 import { SocialPublicationEntity } from './entities/social-publication.entity';
 import { SocialPublicationMediaEntity } from './entities/social-publication-media.entity';
+import { readTiktokOptions } from '../providers/tiktok/tiktok-publisher.adapter';
 import { canTransition } from './social-publication.state';
 
 export interface SocialPublicationScope {
@@ -93,6 +94,18 @@ export class SocialPublicationService {
       contentItem.id,
     );
     const asset = await this.requirePublishableAsset(scope, dto.assetId);
+    if (asset.provider === 'tiktok') {
+      if (
+        !dto.providerOptions ||
+        readTiktokOptions({ ...dto.providerOptions }).issues.length
+      ) {
+        throw new BadRequestException(
+          'tiktok_provider_options_required_or_invalid',
+        );
+      }
+    } else if (dto.providerOptions !== undefined) {
+      throw new BadRequestException('provider_options_not_supported');
+    }
     if (dto.mediaAssetId && dto.mediaAssetIds?.length) {
       throw new BadRequestException(
         'Choose mediaAssetId or mediaAssetIds, not both.',
@@ -162,6 +175,7 @@ export class SocialPublicationService {
       contentItem,
       destination,
       mediaAssetIds,
+      dto.providerOptions,
     );
     const payloadHash = this.hashPayload(payloadSnapshot);
     const idempotencyKey = randomUUID();
@@ -546,8 +560,19 @@ export class SocialPublicationService {
     contentItem: SocialContentItemEntity,
     destination: SocialContentDestinationEntity,
     mediaAssetIds: string[],
+    providerOptions?: CreateSocialPublicationDto['providerOptions'],
   ): Record<string, unknown> {
     return {
+      ...(providerOptions
+        ? {
+            providerOptions: {
+              privacyLevel: providerOptions.privacyLevel,
+              disableComment: providerOptions.disableComment,
+              disableDuet: providerOptions.disableDuet,
+              disableStitch: providerOptions.disableStitch,
+            },
+          }
+        : {}),
       placement: destination.placement,
       caption: contentItem.caption,
       copy: contentItem.copy,

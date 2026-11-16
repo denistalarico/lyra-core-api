@@ -202,6 +202,75 @@ describe('SocialPublicationService', () => {
   });
 
   describe('create', () => {
+    const tiktokOptions = {
+      privacyLevel: 'SELF_ONLY',
+      disableComment: true,
+      disableDuet: false,
+      disableStitch: true,
+    };
+    it('requires explicit creator choices for TikTok before creating a row', async () => {
+      assetsRepository.findOne.mockResolvedValue({
+        ...asset,
+        provider: 'tiktok',
+        assetType: 'tiktok_account',
+      });
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(publicationsRepository.save).not.toHaveBeenCalled();
+    });
+    it('snapshots TikTok choices while keeping editorial content server-owned', async () => {
+      assetsRepository.findOne.mockResolvedValue({
+        ...asset,
+        provider: 'tiktok',
+        assetType: 'tiktok_account',
+      });
+      const result = await service.create(agencyScope, actorUserId, {
+        contentItemId,
+        destinationId,
+        assetId,
+        providerOptions: tiktokOptions,
+      });
+      expect(result.payloadSnapshot).toEqual(
+        expect.objectContaining({
+          providerOptions: tiktokOptions,
+          caption: contentItem.caption,
+        }),
+      );
+    });
+    it('rejects public TikTok choices before the client audit', async () => {
+      assetsRepository.findOne.mockResolvedValue({
+        ...asset,
+        provider: 'tiktok',
+        assetType: 'tiktok_account',
+      });
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          providerOptions: {
+            ...tiktokOptions,
+            privacyLevel: 'PUBLIC_TO_EVERYONE',
+          },
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+    it('refuses TikTok choices on another provider', async () => {
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+          providerOptions: tiktokOptions,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
     it('rejects a destination that already published without creating another queue row', async () => {
       publicationsRepository.find.mockResolvedValue([
         { status: 'published', mediaAssetId },
