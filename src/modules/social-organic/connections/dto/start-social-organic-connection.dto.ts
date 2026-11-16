@@ -4,6 +4,7 @@ export const SOCIAL_ORGANIC_CONNECTION_MODES = [
   'facebook',
   'instagram_facebook',
   'instagram_direct',
+  'tiktok',
 ] as const;
 
 export type SocialOrganicConnectionMode =

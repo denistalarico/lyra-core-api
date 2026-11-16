@@ -1,5 +1,6 @@
 import { SocialOrganicCredentialError } from '../credentials/social-organic-credential.error';
 import { YoutubeApiError } from '../providers/youtube/youtube-api.client';
+import { TiktokApiError } from '../providers/tiktok/tiktok-api.client';
 import { MetaOrganicGraphError } from '../providers/meta/meta-organic-graph.error';
 import { MetaOrganicInsightsNormalizationError } from './meta/meta-organic-insights.normalizer';
 import { SocialOrganicSyncError } from './social-organic-sync.error';
@@ -29,6 +30,17 @@ export function classifyOrganicSyncFailure(
       retry: rateLimited || error.status >= 500,
       rateLimited,
       code: `youtube_${error.reason ?? error.status}`,
+    };
+  }
+  if (error instanceof TiktokApiError) {
+    const rateLimited =
+      error.status === 429 ||
+      error.code === 'rate_limit_exceeded' ||
+      error.code === 'spam_risk_too_many_posts';
+    return {
+      retry: rateLimited || error.status >= 500,
+      rateLimited,
+      code: `tiktok_${error.code ?? error.status}`,
     };
   }
   if (error instanceof SocialOrganicCredentialError) {

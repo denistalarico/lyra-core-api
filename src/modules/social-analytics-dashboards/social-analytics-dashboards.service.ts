@@ -59,6 +59,7 @@ export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
   { channel: 'tiktok_ads', name: 'TikTok Ads' },
   { channel: 'ga4', name: 'Google Analytics' },
   { channel: 'youtube', name: 'YouTube' },
+  { channel: 'tiktok', name: 'TikTok' },
 ];
 
 export type SocialAnalyticsDashboardView = {

@@ -11,6 +11,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyProductsModule } from '../../common/company-products/company-products.module';
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesModule } from '../../common/files/files.module';
+import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
 import {
@@ -108,6 +109,11 @@ import {
   MetaOrganicHealthService,
   MetaOrganicOAuthProvider,
   MetaPublisherRegistration,
+  TiktokApiClient,
+  TiktokCreatorInfoService,
+  TiktokOrganicOAuthProvider,
+  TiktokPublisherAdapter,
+  TiktokPublisherRegistration,
   YoutubeApiClient,
   YoutubePublisherAdapter,
   YoutubePublisherRegistration,
@@ -209,7 +215,11 @@ describe('SocialOrganicModule', () => {
       {
         provide: SOCIAL_ORGANIC_OAUTH_PROVIDERS,
         useFactory: createMetaOrganicOAuthProviders,
-        inject: [MetaOrganicOAuthProvider, MetaInstagramOAuthProvider],
+        inject: [
+          MetaOrganicOAuthProvider,
+          MetaInstagramOAuthProvider,
+          TiktokOrganicOAuthProvider,
+        ],
       },
       SocialOrganicCredentialResolver,
       SocialOrganicOAuthProviderRegistry,
@@ -233,6 +243,11 @@ describe('SocialOrganicModule', () => {
       YoutubeUploadQuota,
       YoutubePublisherAdapter,
       YoutubePublisherRegistration,
+      TiktokApiClient,
+      TiktokOrganicOAuthProvider,
+      TiktokPublisherAdapter,
+      TiktokPublisherRegistration,
+      TiktokCreatorInfoService,
       MetaOrganicHealthService,
       {
         provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,
@@ -245,10 +260,15 @@ describe('SocialOrganicModule', () => {
       {
         provide: SOCIAL_ORGANIC_ANALYTICS_PROVIDERS,
         useFactory: createOrganicAnalyticsProviders,
-        inject: [MetaOrganicAnalyticsProvider, YoutubeOrganicAnalyticsProvider],
+        inject: [
+          MetaOrganicAnalyticsProvider,
+          YoutubeOrganicAnalyticsProvider,
+          TiktokOrganicAnalyticsProvider,
+        ],
       },
       YoutubeAnalyticsClient,
       YoutubeOrganicAnalyticsProvider,
+      TiktokOrganicAnalyticsProvider,
       SocialOrganicAnalyticsProviderRegistry,
       SocialOrganicMetricsWriterService,
       SocialOrganicAudienceConfigService,

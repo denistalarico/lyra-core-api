@@ -207,7 +207,7 @@ describe('parseDashboardLayout', () => {
     expect(() =>
       parseDashboardLayout(
         layout({
-          sections: [{ id: 's', channel: 'tiktok', title: 'T', cards: [] }],
+          sections: [{ id: 's', channel: 'twitter', title: 'T', cards: [] }],
         }),
       ),
     ).toThrow(DashboardLayoutError);

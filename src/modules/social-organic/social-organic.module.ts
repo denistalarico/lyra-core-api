@@ -14,6 +14,7 @@ import { PermissionsModule } from '../permissions';
 import { NotificationsModule } from '../notifications';
 import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
+import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
 import { SocialOrganicYoutubeService } from './connections/social-organic-youtube.service';
@@ -102,6 +103,11 @@ import {
   MetaOrganicOAuthProvider,
   MetaPublisherRegistration,
   SocialPublisherRegistry,
+  TiktokApiClient,
+  TiktokCreatorInfoService,
+  TiktokOrganicOAuthProvider,
+  TiktokPublisherAdapter,
+  TiktokPublisherRegistration,
   YoutubeApiClient,
   YoutubePublisherAdapter,
   YoutubePublisherRegistration,
@@ -120,16 +126,18 @@ import {
 export function createMetaOrganicOAuthProviders(
   meta: MetaOrganicOAuthProvider,
   instagram: MetaInstagramOAuthProvider,
+  tiktok: TiktokOrganicOAuthProvider,
 ) {
-  return [meta, instagram];
+  return [meta, instagram, tiktok];
 }
 
 /** D-I4 (b): one analytics implementation per provider; YT/TT/LI plug here. */
 export function createOrganicAnalyticsProviders(
   meta: MetaOrganicAnalyticsProvider,
   youtube: YoutubeOrganicAnalyticsProvider,
+  tiktok: TiktokOrganicAnalyticsProvider,
 ) {
-  return [meta, youtube];
+  return [meta, youtube, tiktok];
 }
 
 /** D-I4 (c): one health implementation per provider; YT/TT/LI plug here. */
@@ -216,7 +224,11 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     {
       provide: SOCIAL_ORGANIC_OAUTH_PROVIDERS,
       useFactory: createMetaOrganicOAuthProviders,
-      inject: [MetaOrganicOAuthProvider, MetaInstagramOAuthProvider],
+      inject: [
+        MetaOrganicOAuthProvider,
+        MetaInstagramOAuthProvider,
+        TiktokOrganicOAuthProvider,
+      ],
     },
     SocialOrganicCredentialResolver,
     SocialOrganicOAuthProviderRegistry,
@@ -244,6 +256,14 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     YoutubeUploadQuota,
     YoutubePublisherAdapter,
     YoutubePublisherRegistration,
+    // D-I9/D-I10: TikTok OAuth (`oauth_user` + refresh), Direct Post adapter and
+    // the live `creator_info` read. Publishing stays behind
+    // `SOCIAL_PUBLICATION_TIKTOK_ENABLED`.
+    TiktokApiClient,
+    TiktokOrganicOAuthProvider,
+    TiktokPublisherAdapter,
+    TiktokPublisherRegistration,
+    TiktokCreatorInfoService,
     MetaOrganicHealthService,
     {
       provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,
@@ -256,10 +276,15 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     {
       provide: SOCIAL_ORGANIC_ANALYTICS_PROVIDERS,
       useFactory: createOrganicAnalyticsProviders,
-      inject: [MetaOrganicAnalyticsProvider, YoutubeOrganicAnalyticsProvider],
+      inject: [
+        MetaOrganicAnalyticsProvider,
+        YoutubeOrganicAnalyticsProvider,
+        TiktokOrganicAnalyticsProvider,
+      ],
     },
     YoutubeAnalyticsClient,
     YoutubeOrganicAnalyticsProvider,
+    TiktokOrganicAnalyticsProvider,
     SocialOrganicAnalyticsProviderRegistry,
     SocialOrganicMetricsWriterService,
     // Audience snapshots: a gate that is off by default, a reader that measures

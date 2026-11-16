@@ -299,6 +299,7 @@ describe('SocialAnalyticsDashboardsService', () => {
         'tiktok_ads',
         'ga4',
         'youtube',
+        'tiktok',
       ]);
     });
 

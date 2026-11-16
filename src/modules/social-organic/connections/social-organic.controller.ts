@@ -35,6 +35,7 @@ import { SocialOrganicOAuthService } from './social-organic-oauth.service';
 import { MetaOrganicHealthService } from '../providers/meta/meta-organic-health.service';
 import { RequestSocialOrganicSyncDto } from '../analytics/dto/request-social-organic-sync.dto';
 import { SocialOrganicSyncRunService } from '../analytics/social-organic-sync-run.service';
+import { TiktokCreatorInfoService } from '../providers/tiktok/tiktok-creator-info.service';
 
 const SOCIAL_INTEGRATIONS_PERMISSION =
   'social.settings.integrations.manage.admin';
@@ -54,6 +55,8 @@ export const CONNECTION_MODES: Record<
     provider: 'instagram',
     allowedAssetTypes: ['instagram_professional'],
   },
+  // D-I9: the generic `oauth/:provider/*` routes carry TikTok as well.
+  tiktok: { provider: 'tiktok', allowedAssetTypes: ['tiktok_account'] },
 };
 
 @Controller('social/organic')
@@ -64,6 +67,7 @@ export class SocialOrganicController {
     private readonly health: MetaOrganicHealthService,
     private readonly analyticsRuns: SocialOrganicSyncRunService,
     private readonly youtube: SocialOrganicYoutubeService,
+    private readonly tiktokCreator: TiktokCreatorInfoService,
   ) {}
 
   @Get('connections')
@@ -161,6 +165,22 @@ export class SocialOrganicController {
       userId: ctx.userId ?? null,
       channelId: dto.channelId,
     });
+  }
+
+  /**
+   * TikTok requires `creator_info/query` before every post and that the user
+   * sees these options (D-I10). Live, no cache, agency-only (not exposed to
+   * the Client Area).
+   */
+  @Get('assets/:assetId/tiktok/creator-info')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_INTEGRATIONS_PERMISSION)
+  tiktokCreatorInfo(
+    @RequestContextData() ctx: RequestContext,
+    @Param('assetId', ParseUUIDPipe) assetId: string,
+  ) {
+    return this.tiktokCreator.read({ ...this.requireScope(ctx), assetId });
   }
 
   @Delete('connections/:connectionId')

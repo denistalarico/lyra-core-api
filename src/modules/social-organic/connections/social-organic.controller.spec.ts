@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/unbound-method -- controller doubles and metadata inspection intentionally reference methods directly. */
+import type { TiktokCreatorInfoService } from '../providers/tiktok/tiktok-creator-info.service';
 import 'reflect-metadata';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PATH_METADATA } from '@nestjs/common/constants';
@@ -67,6 +68,7 @@ function harness() {
       health as unknown as MetaOrganicHealthService,
       analyticsRuns as unknown as SocialOrganicSyncRunService,
       {} as unknown as SocialOrganicYoutubeService,
+      {} as unknown as TiktokCreatorInfoService,
     ),
   };
 }

@@ -12,7 +12,8 @@ export type SocialChannelDefaultId =
   | 'ga4'
   | 'instagram'
   | 'facebook'
-  | 'youtube';
+  | 'youtube'
+  | 'tiktok';
 
 /**
  * SO-DEF1: the layout each Social channel screen (Meta Ads, Instagram,
@@ -2757,6 +2758,43 @@ export const SOCIAL_CHANNEL_DEFAULT_SECTIONS: Record<
     ],
     title: 'YouTube',
     channel: 'youtube',
+  },
+  // TikTok only answers "now" (D-I3): one follower stock and its history.
+  tiktok: {
+    id: 'section-tiktok',
+    cards: [
+      {
+        id: 'kpi-tiktok-1',
+        kind: 'kpi',
+        size: { h: 1, w: 3 },
+        title: 'Seguidores',
+        metric: 'followers_count',
+        display: 'absolute',
+        gridRow: 0,
+        decimals: 0,
+        gridColumn: 0,
+        description: null,
+        highlighted: true,
+        compactHeight: true,
+      },
+      {
+        id: 'chart-tiktok-1',
+        kind: 'chart',
+        size: { h: 6, w: 12 },
+        title: 'Seguidores por dia',
+        metricIds: ['followers_count'],
+        chartType: 'line',
+        decimals: 0,
+        display: 'absolute',
+        stacked: false,
+        grouped: false,
+        gridRow: 1,
+        gridColumn: 0,
+        description: null,
+      },
+    ],
+    title: 'TikTok',
+    channel: 'tiktok',
   },
 };
 

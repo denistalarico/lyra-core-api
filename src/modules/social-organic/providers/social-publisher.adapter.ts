@@ -12,6 +12,8 @@ export type PublicationPayload = {
   readonly cta: string | null;
   readonly mediaAssetId: string | null;
   readonly mediaAssetIds: readonly string[];
+  /** Provider-specific creator choices (e.g. TikTok privacy); validated by the adapter. */
+  readonly providerOptions?: Readonly<Record<string, unknown>>;
   /** Lyra-owned desired publish time; never a provider-side schedule (ADR-015). */
   readonly scheduledAt: Date;
 };

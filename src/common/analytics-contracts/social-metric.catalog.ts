@@ -1216,7 +1216,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "followers_count",
     label: "Seguidores",
     description: "Total de seguidores no fim do período.",
-    channels: ORGANIC_FOLLOWER_CHANNELS,
+    channels: [...ORGANIC_FOLLOWER_CHANNELS, "tiktok"],
     format: "integer",
     polarity: "higher_is_better",
     additive: false,

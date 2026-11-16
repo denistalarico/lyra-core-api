@@ -31,6 +31,7 @@ type PayloadSnapshotShape = {
   readonly hashtags?: unknown;
   readonly firstComment?: unknown;
   readonly mediaAssetIds?: unknown;
+  readonly providerOptions?: unknown;
 };
 
 /**
@@ -322,6 +323,16 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       cta: null,
       mediaAssetId: publication.mediaAssetId,
       mediaAssetIds,
+      ...(snapshot.providerOptions &&
+      typeof snapshot.providerOptions === 'object' &&
+      !Array.isArray(snapshot.providerOptions)
+        ? {
+            providerOptions: snapshot.providerOptions as Record<
+              string,
+              unknown
+            >,
+          }
+        : {}),
       scheduledAt: publication.scheduledAt,
     };
   }
