@@ -106,6 +106,10 @@ import {
   MetaOrganicHealthService,
   MetaOrganicOAuthProvider,
   MetaPublisherRegistration,
+  YoutubeApiClient,
+  YoutubePublisherAdapter,
+  YoutubePublisherRegistration,
+  YoutubeUploadQuota,
   SocialPublisherRegistry,
 } from './providers';
 import {
@@ -223,6 +227,10 @@ describe('SocialOrganicModule', () => {
       InstagramPublisherAdapter,
       DirectInstagramPublisherAdapter,
       MetaPublisherRegistration,
+      YoutubeApiClient,
+      YoutubeUploadQuota,
+      YoutubePublisherAdapter,
+      YoutubePublisherRegistration,
       MetaOrganicHealthService,
       {
         provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,

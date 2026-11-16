@@ -22,14 +22,15 @@ import {
   SocialOrganicAssetEntity,
   SocialOrganicConnectionEntity,
 } from '../entities';
+import {
+  YOUTUBE_CHANNEL_ASSET_TYPE,
+  YOUTUBE_PROVIDER,
+} from '../providers/youtube/youtube-capabilities';
 import type { SocialOrganicConnectionScope } from './social-organic-connection.service';
 import {
   toSocialOrganicConnectionView,
   type SocialOrganicConnectionView,
 } from './views/social-organic-connection.view';
-
-export const YOUTUBE_PROVIDER = 'youtube';
-export const YOUTUBE_CHANNEL_ASSET_TYPE = 'youtube_channel';
 
 export type YoutubeChannelCandidateView = {
   channelId: string;
@@ -180,10 +181,10 @@ export class SocialOrganicYoutubeService {
       asset.assetTokenEncrypted = null;
       asset.assetTokenExpiresAt = null;
       // A channel has no timezone: left NULL (analytics fail closed) until the
-      // user sets one through PATCH assets/:id/timezone. Publishing stays off
-      // until the YT2 adapter exists.
+      // user sets one through PATCH assets/:id/timezone. Publishing is gated by
+      // SOCIAL_PUBLICATION_YOUTUBE_ENABLED, not by this flag.
       asset.assetTimezone = existingAsset?.assetTimezone ?? null;
-      asset.isPublishEnabled = false;
+      asset.isPublishEnabled = true;
       asset.capabilitiesSnapshot = {};
       asset.status = 'active';
       asset.lastHealthCheckAt = null;

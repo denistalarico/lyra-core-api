@@ -100,6 +100,10 @@ import {
   MetaOrganicOAuthProvider,
   MetaPublisherRegistration,
   SocialPublisherRegistry,
+  YoutubeApiClient,
+  YoutubePublisherAdapter,
+  YoutubePublisherRegistration,
+  YoutubeUploadQuota,
 } from './providers';
 import {
   MetaOrganicWebhookController,
@@ -233,6 +237,10 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     InstagramPublisherAdapter,
     DirectInstagramPublisherAdapter,
     MetaPublisherRegistration,
+    YoutubeApiClient,
+    YoutubeUploadQuota,
+    YoutubePublisherAdapter,
+    YoutubePublisherRegistration,
     MetaOrganicHealthService,
     {
       provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,
