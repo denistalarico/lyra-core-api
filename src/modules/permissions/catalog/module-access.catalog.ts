@@ -33,6 +33,7 @@ export const AGENCY_ACCESS_MODULES = [
   'contracts',
   'finance',
   'team',
+  'forms',
 ] as const;
 export type AgencyAccessModule = (typeof AGENCY_ACCESS_MODULES)[number];
 
@@ -69,6 +70,7 @@ const AGENCY_MODULE_BY_CATALOG_MODULE: Record<string, AgencyAccessModule> = {
   contracts: 'contracts',
   finance: 'finance',
   team: 'team',
+  forms: 'forms',
 };
 
 /**

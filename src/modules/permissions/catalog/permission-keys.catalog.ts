@@ -221,6 +221,13 @@ const RAW_PERMISSIONS: RawPermission[] = [
   ['agency.sales.products.manage.admin', ADMIN_UP],
   ['agency.sales.plans.manage.admin', ADMIN_UP],
 
+  // Forms addon (2026-11-17): building/publishing is Admin+; Managers of the
+  // module follow submissions and reprocess failures.
+  ['agency.forms.forms.view', MANAGER_UP],
+  ['agency.forms.forms.manage.admin', ADMIN_UP],
+  ['agency.forms.submissions.view', MANAGER_UP],
+  ['agency.forms.submissions.reprocess', MANAGER_UP],
+
   // 9.8 Finance
   ['agency.finance.summary.view.finance_or_owner', ALL_ROLES],
   ['agency.finance.transactions.view.finance_or_owner', ALL_ROLES],

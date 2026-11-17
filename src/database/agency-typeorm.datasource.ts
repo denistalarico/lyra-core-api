@@ -303,6 +303,7 @@ import { SocialGoogleIdentityPerAuthorization1804000000000 } from './migrations/
 import { SocialGoogleYoutubeProduct1804200000000 } from './migrations/1804200000000-social-google-youtube-product';
 import { SocialOrganicAccountWatchTime1804300000000 } from './migrations/1804300000000-social-organic-account-watch-time';
 import { SocialContentDestinationOptions1804400000000 } from './migrations/1804400000000-social-content-destination-options';
+import { CreateForms1804500000000 } from './migrations/1804500000000-create-forms';
 import { CreateSocialTrendSnapshots1803600000000 } from './migrations/1803600000000-create-social-trend-snapshots';
 import { AddSocialApprovalCardCustomization1803300000000 } from './migrations/1803300000000-add-social-approval-card-customization';
 import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
@@ -636,5 +637,6 @@ export const AgencyDataSource = new DataSource({
     SocialGoogleYoutubeProduct1804200000000,
     SocialOrganicAccountWatchTime1804300000000,
     SocialContentDestinationOptions1804400000000,
+    CreateForms1804500000000,
   ],
 });

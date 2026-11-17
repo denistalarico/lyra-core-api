@@ -20,6 +20,7 @@ import { WebchatModule } from './modules/webchat/webchat.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { InboxModule } from './modules/inbox/inbox.module';
 import { CrmModule } from './modules/crm/crm.module';
+import { FormsModule } from './modules/forms/forms.module';
 import { AgencyAuthModule } from './modules/agency/agency-auth.module';
 import { AgencySettingsModule } from './modules/agency/agency-settings.module';
 import { AgencySalesModule } from './modules/agency/agency-sales.module';
@@ -109,6 +110,7 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     AppointmentsModule,
     InboxModule,
     CrmModule,
+    FormsModule,
     AgencyAuthModule,
     AgencySettingsModule,
     AgencySalesModule,

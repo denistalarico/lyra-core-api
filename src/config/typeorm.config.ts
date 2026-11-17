@@ -67,6 +67,8 @@ import { PasswordResetEntity } from '../modules/auth/entities/password-reset.ent
 import { EmailTwoFactorCodeEntity } from '../modules/auth/entities/email-2fa-code.entity';
 
 import { ContactEntity } from '../modules/contacts/entities/contact.entity';
+import { FormEntity } from '../modules/forms/entities/form.entity';
+import { FormSubmissionEntity } from '../modules/forms/entities/form-submission.entity';
 import { LeadFlowContactCompanyEntity } from '../modules/contacts/entities/leadflow-contact-company.entity';
 import { ContactMethodEntity } from '../modules/contacts/entities/contact-method.entity';
 import { ContactAddressEntity } from '../modules/contacts/entities/contact-address.entity';
@@ -814,6 +816,8 @@ export const agencyEntities = [
   SocialEditorialPillarEntity,
   SocialContentIdeaEntity,
   SocialTrendSnapshotEntity,
+  FormEntity,
+  FormSubmissionEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {
