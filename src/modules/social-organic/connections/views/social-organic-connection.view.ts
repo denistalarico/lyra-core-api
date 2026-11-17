@@ -5,7 +5,10 @@ import type {
   SocialOrganicConnectionStatus,
 } from '../../entities';
 import type { SocialOrganicDiscoveredAsset } from '../social-organic-oauth.provider';
-import type { SocialOrganicConnectionMode } from '../dto/start-social-organic-connection.dto';
+import {
+  SOCIAL_ORGANIC_CONNECTION_MODES,
+  type SocialOrganicConnectionMode,
+} from '../dto/start-social-organic-connection.dto';
 
 export type SocialOrganicConnectionState =
   | 'connecting'
@@ -103,10 +106,11 @@ function readConnectionMode(
   metadata: Record<string, unknown> | null | undefined,
 ): SocialOrganicConnectionMode | null {
   const value = metadata?.connectionMode;
-  return value === 'facebook' ||
-    value === 'instagram_facebook' ||
-    value === 'instagram_direct'
-    ? value
+  // Every connector the start route accepts: the panel places a connection
+  // (and its asset selection) on the channel by this mode.
+  return typeof value === 'string' &&
+    (SOCIAL_ORGANIC_CONNECTION_MODES as readonly string[]).includes(value)
+    ? (value as SocialOrganicConnectionMode)
     : null;
 }
 

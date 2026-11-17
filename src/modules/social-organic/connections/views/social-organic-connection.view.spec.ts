@@ -52,6 +52,47 @@ describe('social organic connection view', () => {
     expect(serialized).toContain('external-asset');
   });
 
+  it.each(['tiktok_business', 'tiktok', 'linkedin', 'instagram_direct'])(
+    'keeps the %s connector mode so the panel can place the selection',
+    (mode) => {
+      const view = toSocialOrganicConnectionView({
+        id: 'c',
+        provider: mode,
+        connectionStatus: 'awaiting_selection',
+        authorizationMethod: 'oauth_user',
+        agencyClientId: null,
+        scopes: [],
+        tokenExpiresAt: null,
+        lastError: null,
+        credentialRemovedAt: null,
+        metadata: { connectionMode: mode, selectableAssets: [] },
+        assets: [],
+        createdAt: new Date('2026-11-17T00:00:00.000Z'),
+        updatedAt: new Date('2026-11-17T00:00:00.000Z'),
+      } as unknown as SocialOrganicConnectionEntity);
+      expect(view.connectionMode).toBe(mode);
+    },
+  );
+
+  it('drops an unknown connector mode', () => {
+    const view = toSocialOrganicConnectionView({
+      id: 'c',
+      provider: 'x',
+      connectionStatus: 'connected',
+      authorizationMethod: 'oauth_user',
+      agencyClientId: null,
+      scopes: [],
+      tokenExpiresAt: null,
+      lastError: null,
+      credentialRemovedAt: null,
+      metadata: { connectionMode: 'made_up' },
+      assets: [],
+      createdAt: new Date('2026-11-17T00:00:00.000Z'),
+      updatedAt: new Date('2026-11-17T00:00:00.000Z'),
+    } as unknown as SocialOrganicConnectionEntity);
+    expect(view.connectionMode).toBeNull();
+  });
+
   it('drops malformed selectable assets', () => {
     expect(
       readSelectableAssets({
