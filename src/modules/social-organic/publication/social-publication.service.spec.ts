@@ -242,6 +242,48 @@ describe('SocialPublicationService', () => {
         }),
       );
     });
+    it('snapshots the YouTube destination options and keeps the caption off a Short', async () => {
+      assetsRepository.findOne.mockResolvedValue({
+        ...asset,
+        provider: 'youtube',
+        assetType: 'youtube_channel',
+      });
+      destinationsRepository.findOne.mockResolvedValue({
+        ...destination,
+        channel: 'youtube',
+        placement: 'short',
+        options: { title: 'Título do Short', privacyStatus: 'unlisted' },
+      });
+      const result = await service.create(agencyScope, actorUserId, {
+        contentItemId,
+        destinationId,
+        assetId,
+      });
+      expect(result.payloadSnapshot).toEqual(
+        expect.objectContaining({
+          caption: null,
+          providerOptions: {
+            title: 'Título do Short',
+            privacyStatus: 'unlisted',
+            madeForKids: false,
+          },
+        }),
+      );
+    });
+    it('uses the caption override of the destination', async () => {
+      destinationsRepository.findOne.mockResolvedValue({
+        ...destination,
+        options: { caption: 'Legenda curta' },
+      });
+      const result = await service.create(agencyScope, actorUserId, {
+        contentItemId,
+        destinationId,
+        assetId,
+      });
+      expect(result.payloadSnapshot).toEqual(
+        expect.objectContaining({ caption: 'Legenda curta' }),
+      );
+    });
     it('rejects public TikTok choices before the client audit', async () => {
       assetsRepository.findOne.mockResolvedValue({
         ...asset,

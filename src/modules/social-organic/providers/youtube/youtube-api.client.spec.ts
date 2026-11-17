@@ -37,7 +37,10 @@ describe('YoutubeApiClient', () => {
       mimeType: 'video/mp4',
       metadata: {
         snippet: { title: 'a', description: '', tags: [], categoryId: '22' },
-        status: { privacyStatus: 'public' as const },
+        status: {
+          privacyStatus: 'public' as const,
+          selfDeclaredMadeForKids: false,
+        },
       },
     };
     await expect(client.startUpload(args)).resolves.toBe(SESSION);

@@ -35,7 +35,10 @@ export type YoutubeUploadMetadata = {
     tags: string[];
     categoryId: string;
   };
-  status: { privacyStatus: 'public' };
+  status: {
+    privacyStatus: 'public' | 'unlisted' | 'private';
+    selfDeclaredMadeForKids: boolean;
+  };
 };
 
 export type YoutubeVideoState = {

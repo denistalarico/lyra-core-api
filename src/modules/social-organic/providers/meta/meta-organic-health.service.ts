@@ -154,6 +154,7 @@ export class MetaOrganicHealthService implements SocialOrganicHealthProvider {
 
     const reachable = await this.probeReachable(credential.accessToken, asset);
     if (!reachable.ok) return reachable.result;
+    await this.refreshAvatar(credential.accessToken, asset);
 
     return expiryStatus === 'degraded'
       ? { status: 'degraded', reason: 'expires_soon' }
@@ -242,6 +243,28 @@ export class MetaOrganicHealthService implements SocialOrganicHealthProvider {
       return { ok: true };
     } catch (error) {
       return { ok: false, result: this.classifyGraphError(error) };
+    }
+  }
+
+  /**
+   * Best effort and never part of the health verdict: a failed read keeps the
+   * stored picture, and the UI falls back to the initial when it is expired.
+   */
+  private async refreshAvatar(
+    accessToken: string,
+    asset: SocialOrganicAssetEntity,
+  ): Promise<void> {
+    try {
+      const avatarUrl = await this.graph.getAvatarUrl({
+        objectId: asset.externalAssetId,
+        accessToken,
+        assetType: asset.assetType,
+      });
+      if (avatarUrl && avatarUrl !== asset.avatarUrl) {
+        await this.assetsRepository.update({ id: asset.id }, { avatarUrl });
+      }
+    } catch {
+      // Kept as is; see above.
     }
   }
 

@@ -23,6 +23,7 @@ import {
 } from '../dto';
 import {
   SocialContentDestinationEntity,
+  type SocialContentDestinationOptions,
   SocialContentItemEntity,
   SocialPlanEntity,
   SocialContentRevisionEntity,
@@ -460,15 +461,25 @@ export class SocialPlannerService {
         }
 
         const kept = existing.filter((entry) => requested.has(keyOf(entry)));
-        const rescheduled = kept.filter((entry) => {
+        const changed = kept.filter((entry) => {
           const input = requested.get(keyOf(entry))!;
-          if (input.plannedAt === undefined) return false;
+          let dirty = false;
+          if (input.options !== undefined) {
+            const options = normalizeDestinationOptions(input.options);
+            if (
+              JSON.stringify(options) !== JSON.stringify(entry.options ?? {})
+            ) {
+              entry.options = options;
+              dirty = true;
+            }
+          }
+          if (input.plannedAt === undefined) return dirty;
           const next = input.plannedAt ? new Date(input.plannedAt) : null;
-          if (next?.getTime() === entry.plannedAt?.getTime()) return false;
+          if (next?.getTime() === entry.plannedAt?.getTime()) return dirty;
           entry.plannedAt = next;
           return true;
         });
-        if (rescheduled.length > 0) await repository.save(rescheduled);
+        if (changed.length > 0) await repository.save(changed);
 
         const keptKeys = new Set(kept.map(keyOf));
         const added = dto.items.filter((input) => !keptKeys.has(keyOf(input)));
@@ -485,6 +496,7 @@ export class SocialPlannerService {
             channel: input.channel,
             placement: input.placement,
             plannedAt: input.plannedAt ? new Date(input.plannedAt) : null,
+            options: normalizeDestinationOptions(input.options),
           }),
         );
 
@@ -928,4 +940,25 @@ export class SocialPlannerService {
     const normalized = value.trim();
     return normalized.length > 0 ? normalized : null;
   }
+}
+
+/**
+ * Stored shape of a destination's options: trimmed, empty strings dropped and
+ * keys in a fixed order, so an unchanged form never rewrites the row.
+ */
+export function normalizeDestinationOptions(
+  input: SocialContentDestinationOptions | undefined,
+): SocialContentDestinationOptions {
+  const options: SocialContentDestinationOptions = {};
+  if (!input) return options;
+  const caption = input.caption?.trim();
+  if (caption) options.caption = caption;
+  const title = input.title?.trim();
+  if (title) options.title = title;
+  if (input.privacyStatus) options.privacyStatus = input.privacyStatus;
+  if (typeof input.madeForKids === 'boolean') {
+    options.madeForKids = input.madeForKids;
+  }
+  if (input.categoryId) options.categoryId = input.categoryId;
+  return options;
 }

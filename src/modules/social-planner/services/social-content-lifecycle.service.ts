@@ -329,6 +329,7 @@ export class SocialContentLifecycleService {
           channel: sourceDestination.channel,
           placement: sourceDestination.placement,
           plannedAt: sourceDestination.plannedAt,
+          options: sourceDestination.options ?? {},
         }),
       );
 

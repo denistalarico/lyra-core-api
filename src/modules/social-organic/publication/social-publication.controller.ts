@@ -11,6 +11,7 @@ import {
   Query,
   HttpCode,
   UseGuards,
+  Optional,
 } from '@nestjs/common';
 import { RequestContextData } from '../../../common/context/request-context.decorator';
 import type { RequestContext } from '../../../common/context/request-context.interface';
@@ -31,6 +32,7 @@ import {
   SocialPublicationService,
   type SocialPublicationScope,
 } from './social-publication.service';
+import { SocialPublicationConfigService } from './social-publication-config.service';
 import { toSocialPublicationView } from './views/social-publication.view';
 import { toSocialPublisherCapabilityView } from './views/social-publisher-capability.view';
 import { toSocialPublishTargetView } from './views/social-publish-target.view';
@@ -50,6 +52,8 @@ export class SocialPublicationController {
   constructor(
     private readonly publicationService: SocialPublicationService,
     private readonly publisherRegistry: SocialPublisherRegistry,
+    @Optional()
+    private readonly publicationConfig?: SocialPublicationConfigService,
   ) {}
 
   /**
@@ -75,12 +79,18 @@ export class SocialPublicationController {
   @RequirePermission(VIEW_PERMISSION)
   capabilities() {
     const items = this.publisherRegistry.registeredPairs.map(
-      ({ provider, assetType }) =>
-        toSocialPublisherCapabilityView(
+      ({ provider, assetType }) => ({
+        ...toSocialPublisherCapabilityView(
           this.publisherRegistry
             .resolve(provider, assetType)
             .capabilities(assetType),
         ),
+        // The adapter is registered, but execution also needs the
+        // provider's env switch; the composer says "not enabled yet"
+        // instead of letting the queue fail with provider_unavailable.
+        publishingEnabled:
+          this.publicationConfig?.isProviderEnabled(provider) ?? true,
+      }),
     );
 
     return { items, total: items.length };

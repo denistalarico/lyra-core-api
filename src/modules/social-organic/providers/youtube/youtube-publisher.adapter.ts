@@ -21,7 +21,7 @@ import {
 import {
   YOUTUBE_DESCRIPTION_MAX_BYTES,
   buildYoutubeMetadata,
-  youtubeTitle,
+  youtubeOptions,
 } from './youtube-metadata';
 import { YoutubeUploadQuota } from './youtube-upload-quota';
 
@@ -71,7 +71,7 @@ export class YoutubePublisherAdapter implements SocialPublisherAdapter {
     if (input.mediaAssetIds.length !== 1) {
       issues.push({ field: 'mediaAssetIds', reason: 'single_video_required' });
     }
-    if (!youtubeTitle(input.caption)) {
+    if (!youtubeOptions(input).title) {
       issues.push({ field: 'caption', reason: 'title_required' });
     }
     if (

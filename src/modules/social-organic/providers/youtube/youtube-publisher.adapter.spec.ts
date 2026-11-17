@@ -118,10 +118,47 @@ describe('YoutubePublisherAdapter', () => {
             description: payload.caption,
             tags: ['lyra', 'Social'],
           }),
-          status: { privacyStatus: 'public' },
+          status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
         },
       }),
     );
+  });
+
+  it('uses the Planner destination options: title, privacy, audience and category', async () => {
+    const { api, adapter } = build();
+    await adapter.prepareMedia({
+      ...media,
+      payload: {
+        ...payload,
+        providerOptions: {
+          title: 'Título <próprio>',
+          privacyStatus: 'unlisted',
+          madeForKids: true,
+          categoryId: '27',
+        },
+      },
+    });
+    const metadata = api.startUpload.mock.calls[0][0].metadata;
+    expect(metadata.snippet).toMatchObject({
+      title: 'Título próprio',
+      categoryId: '27',
+    });
+    expect(metadata.status).toEqual({
+      privacyStatus: 'unlisted',
+      selfDeclaredMadeForKids: true,
+    });
+  });
+
+  it('accepts a Short with a title and no caption', () => {
+    const { adapter } = build();
+    expect(
+      adapter.validate({
+        ...payload,
+        placement: 'short',
+        caption: null,
+        providerOptions: { title: 'Só o título' },
+      }),
+    ).toEqual({ valid: true });
   });
 
   it('truncates the title to 100 characters', async () => {

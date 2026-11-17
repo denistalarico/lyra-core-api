@@ -276,6 +276,33 @@ export class MetaOrganicGraphService {
     return id;
   }
 
+  /**
+   * The asset's current profile picture. Meta signs these URLs with an
+   * expiry, so the stored one is refreshed by the hourly health pass instead
+   * of only at connect time (an expired one renders as a broken image).
+   */
+  async getAvatarUrl(input: {
+    objectId: string;
+    accessToken: string;
+    assetType: string;
+  }): Promise<string | null> {
+    const url = this.graphUrl(encodeURIComponent(input.objectId));
+    const page = input.assetType === 'facebook_page';
+    url.searchParams.set(
+      'fields',
+      page ? 'picture{url}' : 'profile_picture_url',
+    );
+    const data = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+    if (!isRecord(data)) throw this.invalidResponse();
+    if (!page) return readOptionalString(data.profile_picture_url);
+    const picture = isRecord(data.picture) ? data.picture : null;
+    const pictureData = picture && isRecord(picture.data) ? picture.data : null;
+    return pictureData ? readOptionalString(pictureData.url) : null;
+  }
+
   /** Current follower stock. Historical values are never synthesized from it. */
   async getProfileFollowersCount(input: {
     objectId: string;

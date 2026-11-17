@@ -5,6 +5,7 @@ import {
   PRODUCT_ENTITLEMENT_METADATA,
 } from '../../permissions/decorators/permissions.decorators';
 import type { SocialPublisherRegistry } from '../providers';
+import { SocialPublicationConfigService } from './social-publication-config.service';
 import { SocialPublicationController } from './social-publication.controller';
 import type { SocialPublicationService } from './social-publication.service';
 
@@ -319,6 +320,24 @@ describe('SocialPublicationController', () => {
       expect(result.total).toBe(1);
       expect(result.items[0].provider).toBe('meta');
       expect(result.items[0].assetType).toBe('facebook_page');
+    });
+
+    it('flags a provider whose publishing switch is off', () => {
+      registry.registeredPairs = [
+        { provider: 'meta', assetType: 'facebook_page' },
+      ];
+      registry.resolve.mockReturnValue({
+        capabilities: () => facebookCapabilities,
+      });
+      const gated = new SocialPublicationController(
+        service as unknown as SocialPublicationService,
+        registry as unknown as SocialPublisherRegistry,
+        {
+          isProviderEnabled: () => false,
+        } as unknown as SocialPublicationConfigService,
+      );
+
+      expect(gated.capabilities().items[0].publishingEnabled).toBe(false);
     });
 
     it('drops a placement that has no declared media block', () => {

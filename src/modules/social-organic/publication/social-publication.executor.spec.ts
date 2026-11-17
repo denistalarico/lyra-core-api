@@ -268,7 +268,10 @@ describe('SocialPublicationExecutorService', () => {
       const adapter = buildAdapter();
       registry.resolve.mockReturnValue(adapter);
       mockResolvedMedia();
-      const asset = (await assetsRepository.findOne()) as Record<string, unknown>;
+      const asset = (await assetsRepository.findOne()) as Record<
+        string,
+        unknown
+      >;
       assetsRepository.findOne.mockResolvedValue({
         ...asset,
         agencyClientId: 'client-1',
@@ -413,6 +416,30 @@ describe('SocialPublicationExecutorService', () => {
             firstComment: null,
           }),
         }),
+      );
+    });
+
+    it('leaves out a first comment the network cannot post', async () => {
+      const adapter = buildAdapter({
+        capabilities: jest.fn(() => ({
+          ...IMAGE_CAPABILITIES,
+          supportsFirstComment: false,
+        })),
+      });
+      registry.resolve.mockReturnValue(adapter);
+
+      await executor.publish(
+        buildPublication({
+          payloadSnapshot: {
+            placement: 'feed',
+            caption: 'Legenda',
+            firstComment: 'Comentário para o Instagram',
+          },
+        }),
+      );
+
+      expect(adapter.validate).toHaveBeenCalledWith(
+        expect.objectContaining({ caption: 'Legenda', firstComment: null }),
       );
     });
 

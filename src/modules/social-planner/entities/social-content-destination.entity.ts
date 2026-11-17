@@ -8,6 +8,20 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+/** See `SocialContentDestinationEntity.options`. */
+export interface SocialContentDestinationOptions {
+  /** Caption for this network only (a shorter limit, e.g. X). */
+  caption?: string | null;
+  /** YouTube video/Short title (max 100). */
+  title?: string | null;
+  /** YouTube privacy. */
+  privacyStatus?: 'public' | 'unlisted' | 'private';
+  /** YouTube audience declaration (COPPA). */
+  madeForKids?: boolean;
+  /** YouTube category id. */
+  categoryId?: string;
+}
+
 @Entity('social_content_destinations')
 @Unique('UQ_social_content_destinations_channel_placement', [
   'contentItemId',
@@ -55,6 +69,14 @@ export class SocialContentDestinationEntity {
    */
   @Column({ name: 'planned_at', type: 'timestamptz', nullable: true })
   plannedAt!: Date | null;
+
+  /**
+   * Network-specific publishing options. An absent key inherits the item
+   * (e.g. no `caption` = the item's shared caption). Read by the publication
+   * snapshot, so what is scheduled is what the editor saved here.
+   */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  options!: SocialContentDestinationOptions;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

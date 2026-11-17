@@ -5,7 +5,7 @@ export const YOUTUBE_TITLE_MAX = 100;
 /** YouTube counts the description in bytes. */
 export const YOUTUBE_DESCRIPTION_MAX_BYTES = 5000;
 const YOUTUBE_TAGS_MAX_CHARS = 500;
-/** "People & Blogs": the neutral default; the Planner has no category field. */
+/** "People & Blogs": the neutral default when the destination sets no category. */
 const DEFAULT_CATEGORY_ID = '22';
 
 /** YouTube rejects `<` and `>` in titles and descriptions. */
@@ -42,16 +42,44 @@ export function youtubeTags(caption: string | null): string[] {
   return tags;
 }
 
+const PRIVACY = new Set(['public', 'unlisted', 'private']);
+
+/**
+ * The Planner destination options (title, privacy, audience, category), as the
+ * publication snapshot froze them. A publication scheduled before those
+ * options existed has none and keeps the caption-derived defaults.
+ */
+export function youtubeOptions(payload: PublicationPayload) {
+  const raw = payload.providerOptions ?? {};
+  const title = typeof raw.title === 'string' ? youtubeTitle(raw.title) : '';
+  return {
+    title: title || youtubeTitle(payload.caption),
+    privacyStatus: (typeof raw.privacyStatus === 'string' &&
+    PRIVACY.has(raw.privacyStatus)
+      ? raw.privacyStatus
+      : 'public') as YoutubeUploadMetadata['status']['privacyStatus'],
+    madeForKids: raw.madeForKids === true,
+    categoryId:
+      typeof raw.categoryId === 'string' && /^\d{1,3}$/.test(raw.categoryId)
+        ? raw.categoryId
+        : DEFAULT_CATEGORY_ID,
+  };
+}
+
 export function buildYoutubeMetadata(
   payload: PublicationPayload,
 ): YoutubeUploadMetadata {
+  const options = youtubeOptions(payload);
   return {
     snippet: {
-      title: youtubeTitle(payload.caption),
+      title: options.title,
       description: youtubeDescription(payload.caption),
       tags: youtubeTags(payload.caption),
-      categoryId: DEFAULT_CATEGORY_ID,
+      categoryId: options.categoryId,
     },
-    status: { privacyStatus: 'public' },
+    status: {
+      privacyStatus: options.privacyStatus,
+      selfDeclaredMadeForKids: options.madeForKids,
+    },
   };
 }

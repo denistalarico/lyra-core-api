@@ -94,6 +94,7 @@ function harness(
     listed?: SocialOrganicAssetEntity[];
     resolve?: () => Promise<unknown>;
     getObjectId?: () => Promise<string>;
+    getAvatarUrl?: () => Promise<string | null>;
   } = {},
 ) {
   const assetsRepository = {
@@ -129,6 +130,7 @@ function harness(
   };
   const graph = {
     getObjectId: input.getObjectId ?? jest.fn(async () => 'page-123'),
+    getAvatarUrl: input.getAvatarUrl ?? jest.fn(async () => null),
   };
 
   const service = new MetaOrganicHealthService(
@@ -149,6 +151,43 @@ describe('MetaOrganicHealthService', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it('refreshes an expired avatar URL after a reachable probe', async () => {
+    const { service, assetsRepository } = harness({
+      found: asset(),
+      getAvatarUrl: jest.fn(async () => 'https://cdn.example/new.jpg'),
+    });
+
+    await service.checkAsset({
+      tenantId: TENANT,
+      workspaceId: WORKSPACE,
+      agencyClientId: null,
+      assetId: 'asset-id',
+    });
+
+    expect(assetsRepository.update).toHaveBeenCalledWith(
+      { id: 'asset-id' },
+      { avatarUrl: 'https://cdn.example/new.jpg' },
+    );
+  });
+
+  it('keeps the verdict when the avatar read fails', async () => {
+    const { service } = harness({
+      found: asset(),
+      getAvatarUrl: jest.fn(async () => {
+        throw new Error('graph down');
+      }),
+    });
+
+    await expect(
+      service.checkAsset({
+        tenantId: TENANT,
+        workspaceId: WORKSPACE,
+        agencyClientId: null,
+        assetId: 'asset-id',
+      }),
+    ).resolves.toMatchObject({ status: 'healthy', reason: 'ok' });
   });
 
   it('1. reports healthy for a Facebook Page with valid scopes, no expiry issue and a reachable asset', async () => {

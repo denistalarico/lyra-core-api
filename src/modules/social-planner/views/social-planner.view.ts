@@ -30,6 +30,7 @@ export function toSocialDestinationView(
     channel: destination.channel,
     placement: destination.placement,
     plannedAt: destination.plannedAt,
+    options: destination.options ?? {},
     createdAt: destination.createdAt,
     updatedAt: destination.updatedAt,
   };

@@ -884,6 +884,7 @@ describe('CreativeImageGenerationService (CS3.2)', () => {
               channel: 'instagram',
               placement: 'feed',
               plannedAt: null,
+              options: {},
               createdAt: new Date(),
               updatedAt: new Date(),
             },

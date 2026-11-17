@@ -103,7 +103,11 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       );
     }
 
-    const payload = this.buildPayload(publication, asset.assetType);
+    const payload = this.buildPayload(
+      publication,
+      asset.assetType,
+      adapter.capabilities(asset.assetType).supportsFirstComment,
+    );
 
     const providerValidation = adapter.validate(payload);
     if (!providerValidation.valid) {
@@ -293,6 +297,7 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
   private buildPayload(
     publication: SocialPublicationEntity,
     assetType: string,
+    supportsFirstComment: boolean,
   ): PublicationPayload {
     const snapshot = publication.payloadSnapshot as PayloadSnapshotShape;
     const placement =
@@ -315,8 +320,12 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       assetType,
       placement,
       caption: mediaOnly ? null : this.captionWithHashtags(snapshot),
+      // One item feeds every network; a first comment the network cannot post
+      // is left out instead of failing the whole publication in `validate`.
       firstComment:
-        !mediaOnly && typeof snapshot.firstComment === 'string'
+        !mediaOnly &&
+        supportsFirstComment &&
+        typeof snapshot.firstComment === 'string'
           ? snapshot.firstComment
           : null,
       hashtags: [],

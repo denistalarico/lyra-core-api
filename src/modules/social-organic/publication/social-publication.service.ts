@@ -176,6 +176,7 @@ export class SocialPublicationService {
       destination,
       mediaAssetIds,
       dto.providerOptions,
+      asset.provider,
     );
     const payloadHash = this.hashPayload(payloadSnapshot);
     const idempotencyKey = randomUUID();
@@ -561,8 +562,27 @@ export class SocialPublicationService {
     destination: SocialContentDestinationEntity,
     mediaAssetIds: string[],
     providerOptions?: CreateSocialPublicationDto['providerOptions'],
+    provider?: string,
   ): Record<string, unknown> {
+    const options = destination.options ?? {};
+    const youtube = provider === 'youtube';
+    // A Short carries a title only: the item's caption was written for the
+    // other networks of the same item, never as a YouTube description.
+    const caption =
+      youtube && destination.placement === 'short'
+        ? null
+        : (options.caption ?? contentItem.caption);
     return {
+      ...(youtube
+        ? {
+            providerOptions: {
+              title: options.title ?? null,
+              privacyStatus: options.privacyStatus ?? 'public',
+              madeForKids: options.madeForKids ?? false,
+              ...(options.categoryId ? { categoryId: options.categoryId } : {}),
+            },
+          }
+        : {}),
       ...(providerOptions
         ? {
             providerOptions: {
@@ -574,7 +594,7 @@ export class SocialPublicationService {
           }
         : {}),
       placement: destination.placement,
-      caption: contentItem.caption,
+      caption,
       copy: contentItem.copy,
       cta: contentItem.cta,
       hashtags: contentItem.hashtags,
