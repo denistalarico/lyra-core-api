@@ -57,6 +57,11 @@ export const CONNECTION_MODES: Record<
   },
   // D-I9: the generic `oauth/:provider/*` routes carry TikTok as well.
   tiktok: { provider: 'tiktok', allowedAssetTypes: ['tiktok_account'] },
+  // Same TikTok channel, authorized through the TikTok for Business app.
+  tiktok_business: {
+    provider: 'tiktok_business',
+    allowedAssetTypes: ['tiktok_business_account'],
+  },
   linkedin: {
     provider: 'linkedin',
     allowedAssetTypes: ['linkedin_organization'],

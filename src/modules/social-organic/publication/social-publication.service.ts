@@ -24,6 +24,8 @@ import type { ListSocialPublicationsQueryDto } from './dto/list-social-publicati
 import { SocialPublicationEntity } from './entities/social-publication.entity';
 import { SocialPublicationMediaEntity } from './entities/social-publication-media.entity';
 import { readTiktokOptions } from '../providers/tiktok/tiktok-publisher.adapter';
+import { readTiktokBusinessOptions } from '../providers/tiktok-business/tiktok-business-publisher.adapter';
+import { TIKTOK_BUSINESS_PROVIDER } from '../providers/tiktok-business/tiktok-business-capabilities';
 import { canTransition } from './social-publication.state';
 
 export interface SocialPublicationScope {
@@ -96,8 +98,17 @@ export class SocialPublicationService {
     const asset = await this.requirePublishableAsset(scope, dto.assetId);
     if (asset.provider === 'tiktok') {
       if (
-        !dto.providerOptions ||
+        !dto.providerOptions?.privacyLevel ||
         readTiktokOptions({ ...dto.providerOptions }).issues.length
+      ) {
+        throw new BadRequestException(
+          'tiktok_provider_options_required_or_invalid',
+        );
+      }
+    } else if (asset.provider === TIKTOK_BUSINESS_PROVIDER) {
+      if (
+        !dto.providerOptions ||
+        readTiktokBusinessOptions({ ...dto.providerOptions }).issues.length
       ) {
         throw new BadRequestException(
           'tiktok_provider_options_required_or_invalid',
@@ -583,16 +594,27 @@ export class SocialPublicationService {
             },
           }
         : {}),
-      ...(providerOptions
+      ...(providerOptions && provider === TIKTOK_BUSINESS_PROVIDER
         ? {
             providerOptions: {
-              privacyLevel: providerOptions.privacyLevel,
               disableComment: providerOptions.disableComment,
               disableDuet: providerOptions.disableDuet,
               disableStitch: providerOptions.disableStitch,
+              isBrandOrganic: providerOptions.isBrandOrganic ?? false,
+              isBrandedContent: providerOptions.isBrandedContent ?? false,
+              isAiGenerated: providerOptions.isAiGenerated ?? false,
             },
           }
-        : {}),
+        : providerOptions
+          ? {
+              providerOptions: {
+                privacyLevel: providerOptions.privacyLevel,
+                disableComment: providerOptions.disableComment,
+                disableDuet: providerOptions.disableDuet,
+                disableStitch: providerOptions.disableStitch,
+              },
+            }
+          : {}),
       placement: destination.placement,
       caption,
       copy: contentItem.copy,

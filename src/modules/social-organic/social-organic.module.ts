@@ -114,6 +114,10 @@ import {
   TiktokOrganicOAuthProvider,
   TiktokPublisherAdapter,
   TiktokPublisherRegistration,
+  TiktokBusinessApiClient,
+  TiktokBusinessOAuthProvider,
+  TiktokBusinessPublisherAdapter,
+  TiktokBusinessPublisherRegistration,
   YoutubeApiClient,
   YoutubePublisherAdapter,
   YoutubePublisherRegistration,
@@ -134,8 +138,9 @@ export function createMetaOrganicOAuthProviders(
   instagram: MetaInstagramOAuthProvider,
   tiktok: TiktokOrganicOAuthProvider,
   linkedin: LinkedInOrganicOAuthProvider,
+  tiktokBusiness: TiktokBusinessOAuthProvider,
 ) {
-  return [meta, instagram, tiktok, linkedin];
+  return [meta, instagram, tiktok, linkedin, tiktokBusiness];
 }
 
 /** D-I4 (b): one analytics implementation per provider; YT/TT/LI plug here. */
@@ -237,6 +242,7 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
         MetaInstagramOAuthProvider,
         TiktokOrganicOAuthProvider,
         LinkedInOrganicOAuthProvider,
+        TiktokBusinessOAuthProvider,
       ],
     },
     SocialOrganicCredentialResolver,
@@ -273,6 +279,13 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     TiktokPublisherAdapter,
     TiktokPublisherRegistration,
     TiktokCreatorInfoService,
+    // TikTok accounts through the TikTok for Business app ("TikTok Accounts"):
+    // account holder OAuth and `/business/video/publish/`. Publishing stays
+    // behind `SOCIAL_PUBLICATION_TIKTOK_BUSINESS_ENABLED`.
+    TiktokBusinessApiClient,
+    TiktokBusinessOAuthProvider,
+    TiktokBusinessPublisherAdapter,
+    TiktokBusinessPublisherRegistration,
     // LI-ORG-BE: LinkedIn Pages (`oauth_user`, 500 calls/day while Development).
     LinkedInCallBudget,
     LinkedInOrganicApiClient,

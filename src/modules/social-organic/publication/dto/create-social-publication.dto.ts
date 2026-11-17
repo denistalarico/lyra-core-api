@@ -12,13 +12,15 @@ import {
 import { Type } from 'class-transformer';
 
 export class TiktokPublicationOptionsDto {
+  /** Login Kit accounts only; TikTok for Business posts are always public. */
+  @IsOptional()
   @IsIn([
     'PUBLIC_TO_EVERYONE',
     'MUTUAL_FOLLOW_FRIENDS',
     'FOLLOWER_OF_CREATOR',
     'SELF_ONLY',
   ])
-  privacyLevel!: string;
+  privacyLevel?: string;
 
   @IsBoolean()
   disableComment!: boolean;
@@ -28,6 +30,19 @@ export class TiktokPublicationOptionsDto {
 
   @IsBoolean()
   disableStitch!: boolean;
+
+  /** TikTok for Business disclosures ("Promotional content" / "Paid partnership"). */
+  @IsOptional()
+  @IsBoolean()
+  isBrandOrganic?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isBrandedContent?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isAiGenerated?: boolean;
 }
 
 /**

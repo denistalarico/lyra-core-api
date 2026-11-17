@@ -284,6 +284,50 @@ describe('SocialPublicationService', () => {
         expect.objectContaining({ caption: 'Legenda curta' }),
       );
     });
+    it('snapshots TikTok for Business choices with disclosures and no privacy level', async () => {
+      assetsRepository.findOne.mockResolvedValue({
+        ...asset,
+        provider: 'tiktok_business',
+        assetType: 'tiktok_business_account',
+      });
+      const result = await service.create(agencyScope, actorUserId, {
+        contentItemId,
+        destinationId,
+        assetId,
+        providerOptions: {
+          disableComment: false,
+          disableDuet: true,
+          disableStitch: true,
+          isBrandOrganic: true,
+        },
+      });
+      expect(result.payloadSnapshot).toEqual(
+        expect.objectContaining({
+          providerOptions: {
+            disableComment: false,
+            disableDuet: true,
+            disableStitch: true,
+            isBrandOrganic: true,
+            isBrandedContent: false,
+            isAiGenerated: false,
+          },
+        }),
+      );
+    });
+    it('requires the TikTok for Business choices', async () => {
+      assetsRepository.findOne.mockResolvedValue({
+        ...asset,
+        provider: 'tiktok_business',
+        assetType: 'tiktok_business_account',
+      });
+      await expect(
+        service.create(agencyScope, actorUserId, {
+          contentItemId,
+          destinationId,
+          assetId,
+        }),
+      ).rejects.toThrow('tiktok_provider_options_required_or_invalid');
+    });
     it('rejects public TikTok choices before the client audit', async () => {
       assetsRepository.findOne.mockResolvedValue({
         ...asset,

@@ -14,12 +14,20 @@ import type { SocialOrganicConnectionScope } from '../../connections/social-orga
 import { TiktokApiClient, TiktokApiError } from './tiktok-api.client';
 import { TIKTOK_PROVIDER } from './tiktok-capabilities';
 import {
+  TiktokBusinessApiClient,
+  TiktokBusinessApiError,
+  tiktokBusinessFailure,
+} from '../tiktok-business/tiktok-business-api.client';
+import { TIKTOK_BUSINESS_PROVIDER } from '../tiktok-business/tiktok-business-capabilities';
+import {
   TIKTOK_CLIENT_AUDITED,
   TIKTOK_UNAUDITED_PRIVACY_LEVEL,
 } from './tiktok-publisher.adapter';
 
 export type TiktokCreatorInfoView = {
   assetId: string;
+  /** `business`: TikTok for Business account (public posts, disclosures). */
+  accountKind: 'personal' | 'business';
   creator: {
     username: string | null;
     nickname: string | null;
@@ -45,6 +53,7 @@ export class TiktokCreatorInfoService {
   constructor(
     private readonly credentials: SocialOrganicCredentialResolver,
     private readonly api: TiktokApiClient,
+    private readonly businessApi: TiktokBusinessApiClient,
   ) {}
 
   async read(
@@ -58,12 +67,42 @@ export class TiktokCreatorInfoService {
         companyContextId: input.companyContextId ?? null,
         assetId: input.assetId,
       });
+      if (credential.provider === TIKTOK_BUSINESS_PROVIDER) {
+        const [settings, profile] = await Promise.all([
+          this.businessApi.videoSettings({
+            accessToken: credential.accessToken,
+            businessId: credential.externalAssetId,
+          }),
+          this.businessApi.profile({
+            accessToken: credential.accessToken,
+            businessId: credential.externalAssetId,
+          }),
+        ]);
+        return {
+          assetId: input.assetId,
+          accountKind: 'business',
+          creator: {
+            username: profile.username,
+            nickname: profile.displayName,
+            avatarUrl: profile.profileImage,
+          },
+          privacyLevelOptions: settings.privacyLevelOptions,
+          // The Accounts API publishes public posts only.
+          allowedPrivacyLevels: ['PUBLIC_TO_EVERYONE'],
+          clientAudited: true,
+          commentDisabled: settings.commentDisabled,
+          duetDisabled: settings.duetDisabled,
+          stitchDisabled: settings.stitchDisabled,
+          maxVideoPostDurationSec: settings.maxVideoPostDurationSec,
+        };
+      }
       if (credential.provider !== TIKTOK_PROVIDER) {
         throw new NotFoundException('asset_not_found');
       }
       const info = await this.api.creatorInfo(credential.accessToken);
       return {
         assetId: input.assetId,
+        accountKind: 'personal',
         creator: {
           username: info.username,
           nickname: info.nickname,
@@ -94,6 +133,20 @@ export class TiktokCreatorInfoService {
           default:
             throw new ConflictException(error.code);
         }
+      }
+      if (error instanceof TiktokBusinessApiError) {
+        const failure = tiktokBusinessFailure(error);
+        if (failure.reason === 'credential_expired')
+          throw new ConflictException('reauth_required');
+        if (failure.reason === 'permission_lost')
+          throw new ForbiddenException('permission_denied');
+        if (
+          failure.reason === 'rate_limited' ||
+          failure.reason === 'provider_unavailable'
+        ) {
+          throw new ServiceUnavailableException('tiktok_unavailable');
+        }
+        throw new BadGatewayException('tiktok_invalid_response');
       }
       if (error instanceof TiktokApiError) {
         if (error.status === 401)

@@ -111,6 +111,12 @@ export interface SocialPublisherAdapter {
     | 'provider_idempotency_key'
     | 'pre_retry_existence_check'
     | 'non_retryable_after_send';
+  /**
+   * How long the presigned source URL must stay valid, for providers that
+   * pull the file themselves after the call (TikTok for Business). Absent =
+   * the media store default.
+   */
+  readonly sourceUrlTtlSeconds?: number;
 
   capabilities(assetType: string): PublisherCapabilities;
 

@@ -276,6 +276,9 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       },
       provider: publication.provider,
       placement: payload.placement,
+      ...(adapter.sourceUrlTtlSeconds
+        ? { ttlSeconds: adapter.sourceUrlTtlSeconds }
+        : {}),
     });
 
     try {
