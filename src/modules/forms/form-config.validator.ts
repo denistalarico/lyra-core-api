@@ -2,15 +2,25 @@ import { BadRequestException } from '@nestjs/common';
 import {
   DEFAULT_FORM_AFTER_SUBMIT,
   DEFAULT_FORM_DESTINATION,
+  DEFAULT_FORM_PRESENTATION,
   DEFAULT_FORM_SECURITY,
+  DEFAULT_FORM_TRACKING,
+  FORM_BACKGROUNDS,
+  FORM_CONTAINERS,
   FORM_DESTINATION_TARGETS,
   FORM_FIELD_TARGETS,
   FORM_FIELD_TYPES,
+  FORM_FLOWS,
+  FORM_FONTS,
+  FORM_TRIGGER_FREQUENCIES,
+  FORM_TRIGGERS,
   type FormAfterSubmit,
   type FormDestination,
   type FormField,
   type FormFieldsConfig,
+  type FormPresentation,
   type FormSecurity,
+  type FormTracking,
 } from './forms.types';
 
 /**
@@ -261,7 +271,7 @@ export function validateAfterSubmit(input: unknown): FormAfterSubmit {
   };
 }
 
-/** presentation/tracking: free-form until F2 types them; only shape and size are enforced. */
+/** Only shape and size are enforced (kept for future free-form parts). */
 export function validateLooseObject(
   input: unknown,
   label: string,
@@ -271,6 +281,189 @@ export function validateLooseObject(
   if (Buffer.byteLength(JSON.stringify(input), 'utf8') > MAX_JSON_BYTES)
     fail(`${label} is too large.`);
   return input;
+}
+
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T,
+  label: string,
+): T {
+  if (value === undefined || value === null) return fallback;
+  if (!allowed.includes(value as T)) fail(`${label} is invalid.`);
+  return value as T;
+}
+
+function intIn(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+  label: string,
+): number {
+  if (value === undefined || value === null) return fallback;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max)
+    fail(`${label} must be between ${min} and ${max}.`);
+  return number;
+}
+
+function color(value: unknown, fallback: string, label: string): string {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== 'string' || !HEX_COLOR.test(value))
+    fail(`${label} must be a #RRGGBB color.`);
+  return value.toUpperCase();
+}
+
+function httpsUrl(value: unknown, label: string): string | null {
+  const raw = text(value, 1000, label);
+  if (!raw) return null;
+  // Uploaded assets are served by the API under /api/assets/…
+  if (raw.startsWith('/api/assets/')) return raw;
+  try {
+    if (new URL(raw).protocol === 'https:') return raw;
+  } catch {
+    // falls through
+  }
+  return fail(`${label} must be an https URL.`);
+}
+
+export function validatePresentation(input: unknown): FormPresentation {
+  const base = DEFAULT_FORM_PRESENTATION;
+  if (input === undefined || input === null) return structuredClone(base);
+  if (!isRecord(input)) fail('presentation must be an object.');
+  const theme = isRecord(input.theme) ? input.theme : {};
+  const trigger = isRecord(input.trigger) ? input.trigger : {};
+  return {
+    container: oneOf(
+      input.container,
+      FORM_CONTAINERS,
+      base.container,
+      'presentation.container',
+    ),
+    flow: oneOf(input.flow, FORM_FLOWS, base.flow, 'presentation.flow'),
+    background: oneOf(
+      input.background,
+      FORM_BACKGROUNDS,
+      base.background,
+      'presentation.background',
+    ),
+    theme: {
+      primaryColor: color(
+        theme.primaryColor,
+        base.theme.primaryColor,
+        'theme.primaryColor',
+      ),
+      backgroundColor: color(
+        theme.backgroundColor,
+        base.theme.backgroundColor,
+        'theme.backgroundColor',
+      ),
+      textColor: color(
+        theme.textColor,
+        base.theme.textColor,
+        'theme.textColor',
+      ),
+      radius: intIn(theme.radius, 0, 24, base.theme.radius, 'theme.radius'),
+      fontFamily: oneOf(
+        theme.fontFamily,
+        FORM_FONTS,
+        base.theme.fontFamily,
+        'theme.fontFamily',
+      ),
+    },
+    logoUrl: httpsUrl(input.logoUrl, 'presentation.logoUrl'),
+    title: text(input.title, 200, 'presentation.title'),
+    subtitle: text(input.subtitle, 500, 'presentation.subtitle'),
+    submitLabel:
+      text(input.submitLabel, 60, 'presentation.submitLabel') ??
+      base.submitLabel,
+    maxWidth: intIn(
+      input.maxWidth,
+      320,
+      1200,
+      base.maxWidth,
+      'presentation.maxWidth',
+    ),
+    trigger: {
+      type: oneOf(
+        trigger.type,
+        FORM_TRIGGERS,
+        base.trigger.type,
+        'trigger.type',
+      ),
+      buttonLabel:
+        text(trigger.buttonLabel, 60, 'trigger.buttonLabel') ??
+        base.trigger.buttonLabel,
+      selector: text(trigger.selector, 200, 'trigger.selector'),
+      delaySeconds: intIn(
+        trigger.delaySeconds,
+        0,
+        600,
+        base.trigger.delaySeconds,
+        'trigger.delaySeconds',
+      ),
+      scrollPercent: intIn(
+        trigger.scrollPercent,
+        1,
+        100,
+        base.trigger.scrollPercent,
+        'trigger.scrollPercent',
+      ),
+      frequency: oneOf(
+        trigger.frequency,
+        FORM_TRIGGER_FREQUENCIES,
+        base.trigger.frequency,
+        'trigger.frequency',
+      ),
+    },
+  };
+}
+
+const TRACKING_IDS = {
+  gtmId: /^GTM-[A-Z0-9]{4,12}$/,
+  metaPixelId: /^\d{8,20}$/,
+  ga4Id: /^G-[A-Z0-9]{4,16}$/,
+  googleAdsConversionId: /^AW-\d{6,15}$/,
+  googleAdsConversionLabel: /^[A-Za-z0-9_-]{4,64}$/,
+} as const;
+
+export function validateTracking(input: unknown): FormTracking {
+  if (input === undefined || input === null)
+    return { ...DEFAULT_FORM_TRACKING };
+  if (!isRecord(input)) fail('tracking must be an object.');
+  const id = (key: keyof typeof TRACKING_IDS, label: string) => {
+    const raw = text(input[key], 64, label);
+    if (!raw) return null;
+    const value = key === 'googleAdsConversionLabel' ? raw : raw.toUpperCase();
+    if (!TRACKING_IDS[key].test(value)) fail(`${label} has an invalid format.`);
+    return value;
+  };
+  const tracking: FormTracking = {
+    gtmId: id('gtmId', 'GTM'),
+    metaPixelId: id('metaPixelId', 'Meta Pixel'),
+    ga4Id: id('ga4Id', 'GA4'),
+    googleAdsConversionId: id(
+      'googleAdsConversionId',
+      'Google Ads conversion ID',
+    ),
+    googleAdsConversionLabel: id(
+      'googleAdsConversionLabel',
+      'Google Ads conversion label',
+    ),
+    fireParentEvents:
+      input.fireParentEvents === undefined
+        ? true
+        : input.fireParentEvents === true,
+  };
+  if (
+    Boolean(tracking.googleAdsConversionId) !==
+    Boolean(tracking.googleAdsConversionLabel)
+  )
+    fail('Google Ads needs both the conversion ID and the label.');
+  return tracking;
 }
 
 export function assertPublishable(fields: FormFieldsConfig) {

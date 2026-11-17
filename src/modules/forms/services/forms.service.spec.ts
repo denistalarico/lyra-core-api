@@ -56,8 +56,9 @@ function activeForm(overrides: Partial<FormEntity> = {}): FormEntity {
         },
       ],
     },
-    presentation: {},
-    tracking: { gtmId: 'GTM-1' },
+    // Simulates a row saved before F2 typed these columns.
+    presentation: {} as FormEntity['presentation'],
+    tracking: { gtmId: 'GTM-ABC123' } as FormEntity['tracking'],
     destination: { ...DEFAULT_FORM_DESTINATION },
     security: { ...DEFAULT_FORM_SECURITY, minFillSeconds: 2 },
     afterSubmit: { ...DEFAULT_FORM_AFTER_SUBMIT },
@@ -211,8 +212,12 @@ describe('FormsService public submit', () => {
     expect(config).not.toHaveProperty('tenantId');
     expect(config).toMatchObject({
       publicKey: KEY,
-      tracking: { gtmId: 'GTM-1' },
+      tracking: { gtmId: 'GTM-ABC123', fireParentEvents: true },
+      // rows saved before F2 get the defaults
+      presentation: { container: 'inline', submitLabel: 'Enviar' },
       consentText: null,
+      allowedOrigins: [],
+      minFillSeconds: 2,
     });
   });
 });

@@ -30,7 +30,8 @@ import {
   validateAfterSubmit,
   validateDestination,
   validateFieldsConfig,
-  validateLooseObject,
+  validatePresentation,
+  validateTracking,
   validateSecurity,
 } from '../form-config.validator';
 import {
@@ -177,8 +178,8 @@ export class FormsService {
       publicKey: generatePublicKey(),
       schemaVersion: 1,
       fields: validateFieldsConfig(dto.fields),
-      presentation: validateLooseObject(dto.presentation, 'presentation'),
-      tracking: validateLooseObject(dto.tracking, 'tracking'),
+      presentation: validatePresentation(dto.presentation),
+      tracking: validateTracking(dto.tracking),
       destination,
       security: validateSecurity(dto.security),
       afterSubmit: validateAfterSubmit(dto.afterSubmit),
@@ -202,9 +203,9 @@ export class FormsService {
       if (form.publishedAt) form.schemaVersion += 1;
     }
     if (dto.presentation !== undefined)
-      form.presentation = validateLooseObject(dto.presentation, 'presentation');
+      form.presentation = validatePresentation(dto.presentation);
     if (dto.tracking !== undefined)
-      form.tracking = validateLooseObject(dto.tracking, 'tracking');
+      form.tracking = validateTracking(dto.tracking);
     if (dto.security !== undefined)
       form.security = validateSecurity(dto.security);
     if (dto.afterSubmit !== undefined)
@@ -337,10 +338,14 @@ export class FormsService {
       description: form.description,
       schemaVersion: form.schemaVersion,
       fields: form.fields,
-      presentation: form.presentation,
-      tracking: form.tracking,
+      // Rows saved before F2 typed these get the defaults filled in.
+      presentation: validatePresentation(form.presentation),
+      tracking: validateTracking(form.tracking),
       afterSubmit: form.afterSubmit,
       consentText: form.security.consentText ?? null,
+      // The embedded page refuses to render on hosts outside this list (§5.6).
+      allowedOrigins: form.security.allowedOrigins ?? [],
+      minFillSeconds: form.security.minFillSeconds ?? 0,
     };
   }
 

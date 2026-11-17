@@ -95,6 +95,98 @@ export type FormAfterSubmit = {
   redirectUrl: string | null;
 };
 
+/** F2 (§5.3): container × flow × background, plus a basic theme. */
+export const FORM_CONTAINERS = [
+  'inline',
+  'fullscreen',
+  'modal',
+  'slide_in',
+] as const;
+export const FORM_FLOWS = ['single', 'wizard'] as const;
+export const FORM_BACKGROUNDS = ['solid', 'transparent'] as const;
+export const FORM_FONTS = ['system', 'geist', 'sora', 'serif'] as const;
+export const FORM_TRIGGERS = [
+  'button',
+  'selector',
+  'delay',
+  'scroll',
+  'exit_intent',
+] as const;
+export const FORM_TRIGGER_FREQUENCIES = ['always', 'session', 'day'] as const;
+
+export type FormPresentation = {
+  container: (typeof FORM_CONTAINERS)[number];
+  flow: (typeof FORM_FLOWS)[number];
+  background: (typeof FORM_BACKGROUNDS)[number];
+  theme: {
+    primaryColor: string;
+    backgroundColor: string;
+    textColor: string;
+    radius: number;
+    fontFamily: (typeof FORM_FONTS)[number];
+  };
+  logoUrl: string | null;
+  title: string | null;
+  subtitle: string | null;
+  submitLabel: string;
+  maxWidth: number;
+  /** modal / slide_in / fullscreen only. */
+  trigger: {
+    type: (typeof FORM_TRIGGERS)[number];
+    buttonLabel: string;
+    selector: string | null;
+    delaySeconds: number;
+    scrollPercent: number;
+    frequency: (typeof FORM_TRIGGER_FREQUENCIES)[number];
+  };
+};
+
+/** IDs are injected into script URLs on the public page: formats are strict. */
+export type FormTracking = {
+  gtmId: string | null;
+  metaPixelId: string | null;
+  ga4Id: string | null;
+  googleAdsConversionId: string | null;
+  googleAdsConversionLabel: string | null;
+  /** Embed: push lyra_form_* into the host page dataLayer and fire its fbq/gtag. */
+  fireParentEvents: boolean;
+};
+
+export const DEFAULT_FORM_PRESENTATION: FormPresentation = {
+  container: 'inline',
+  flow: 'single',
+  background: 'solid',
+  theme: {
+    primaryColor: '#2563EB',
+    backgroundColor: '#FFFFFF',
+    textColor: '#111827',
+    radius: 10,
+    fontFamily: 'system',
+  },
+  logoUrl: null,
+  title: null,
+  subtitle: null,
+  submitLabel: 'Enviar',
+  maxWidth: 560,
+  trigger: {
+    type: 'button',
+    buttonLabel: 'Fale conosco',
+    selector: null,
+    delaySeconds: 10,
+    scrollPercent: 50,
+    frequency: 'session',
+  },
+};
+
+export const DEFAULT_FORM_TRACKING: FormTracking = {
+  gtmId: null,
+  metaPixelId: null,
+  ga4Id: null,
+  googleAdsConversionId: null,
+  googleAdsConversionLabel: null,
+  fireParentEvents: true,
+};
+
 export const FORM_SUBMISSION_SOURCES = [
   'page',
   'embed',

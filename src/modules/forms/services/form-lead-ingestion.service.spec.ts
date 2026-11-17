@@ -3,6 +3,8 @@ import type { FormEntity } from '../entities/form.entity';
 import type { FormSubmissionEntity } from '../entities/form-submission.entity';
 import {
   DEFAULT_FORM_AFTER_SUBMIT,
+  DEFAULT_FORM_PRESENTATION,
+  DEFAULT_FORM_TRACKING,
   DEFAULT_FORM_DESTINATION,
   DEFAULT_FORM_SECURITY,
 } from '../forms.types';
@@ -31,8 +33,8 @@ function makeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     publicKey: 'f_aaaaaaaaaaaaaaaaaaaaaaaa',
     schemaVersion: 1,
     fields: { fields: [] },
-    presentation: {},
-    tracking: {},
+    presentation: structuredClone(DEFAULT_FORM_PRESENTATION),
+    tracking: { ...DEFAULT_FORM_TRACKING },
     destination: { ...DEFAULT_FORM_DESTINATION },
     security: { ...DEFAULT_FORM_SECURITY },
     afterSubmit: { ...DEFAULT_FORM_AFTER_SUBMIT },

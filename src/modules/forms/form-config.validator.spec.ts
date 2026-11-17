@@ -5,8 +5,78 @@ import {
   validateDestination,
   validateFieldsConfig,
   validateLooseObject,
+  validatePresentation,
   validateSecurity,
+  validateTracking,
 } from './form-config.validator';
+
+describe('presentation and tracking (F2)', () => {
+  it('fills defaults and normalizes colors', () => {
+    const result = validatePresentation({
+      container: 'modal',
+      theme: { primaryColor: '#ff0066' },
+      trigger: { type: 'exit_intent' },
+    });
+    expect(result).toMatchObject({
+      container: 'modal',
+      flow: 'single',
+      background: 'solid',
+      theme: { primaryColor: '#FF0066', radius: 10, fontFamily: 'system' },
+      trigger: { type: 'exit_intent', frequency: 'session' },
+      submitLabel: 'Enviar',
+    });
+  });
+
+  it.each([
+    [{ container: 'popup' }, /container/],
+    [{ theme: { primaryColor: 'red; background:url(x)' } }, /#RRGGBB/],
+    [{ logoUrl: 'javascript:alert(1)' }, /https URL/],
+    [{ logoUrl: 'http://site.com/logo.png' }, /https URL/],
+    [{ maxWidth: 5000 }, /between 320 and 1200/],
+  ])('rejects presentation %j', (input, message) => {
+    expect(() => validatePresentation(input)).toThrow(message);
+  });
+
+  it('accepts https and API asset logos', () => {
+    expect(
+      validatePresentation({ logoUrl: 'https://cdn.site.com/l.png' }).logoUrl,
+    ).toBe('https://cdn.site.com/l.png');
+    expect(validatePresentation({ logoUrl: '/api/assets/abc' }).logoUrl).toBe(
+      '/api/assets/abc',
+    );
+  });
+
+  it('validates tracking ids strictly (they end up in script URLs)', () => {
+    expect(
+      validateTracking({
+        gtmId: 'gtm-abc123',
+        metaPixelId: '1234567890',
+        ga4Id: 'g-ABCD1234',
+        googleAdsConversionId: 'AW-123456789',
+        googleAdsConversionLabel: 'AbC_d-1',
+      }),
+    ).toEqual({
+      gtmId: 'GTM-ABC123',
+      metaPixelId: '1234567890',
+      ga4Id: 'G-ABCD1234',
+      googleAdsConversionId: 'AW-123456789',
+      googleAdsConversionLabel: 'AbC_d-1',
+      fireParentEvents: true,
+    });
+    expect(() => validateTracking({ gtmId: "GTM-1');alert(1)//" })).toThrow(
+      /invalid format/,
+    );
+    expect(() => validateTracking({ metaPixelId: '12ab' })).toThrow(
+      /invalid format/,
+    );
+    expect(() =>
+      validateTracking({ googleAdsConversionId: 'AW-123456789' }),
+    ).toThrow(/both/);
+    expect(validateTracking({ fireParentEvents: false }).fireParentEvents).toBe(
+      false,
+    );
+  });
+});
 
 describe('form-config.validator', () => {
   describe('validateFieldsConfig', () => {

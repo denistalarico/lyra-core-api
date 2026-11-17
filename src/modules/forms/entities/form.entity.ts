@@ -10,8 +10,10 @@ import type {
   FormAfterSubmit,
   FormDestination,
   FormFieldsConfig,
+  FormPresentation,
   FormSecurity,
   FormStatus,
+  FormTracking,
   FormType,
 } from '../forms.types';
 
@@ -58,10 +60,10 @@ export class FormEntity {
   fields!: FormFieldsConfig;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
-  presentation!: Record<string, unknown>;
+  presentation!: FormPresentation;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
-  tracking!: Record<string, unknown>;
+  tracking!: FormTracking;
 
   @Column({ type: 'jsonb' })
   destination!: FormDestination;
