@@ -473,6 +473,159 @@ describe('FinanceProfitabilityService — direct profitability', () => {
     expect(overview.summary.revenue).toBe(4897);
   });
 
+  it.each([
+    {
+      link: 'source',
+      billed: 4897,
+      extra: 0,
+      status: 'issued',
+      expected: 4897,
+    },
+    {
+      link: 'metadata',
+      billed: 4897,
+      extra: 750,
+      status: 'issued',
+      expected: 5647,
+    },
+    {
+      link: 'template',
+      billed: 4897,
+      extra: 0,
+      status: 'issued',
+      expected: 4897,
+    },
+    {
+      link: 'source',
+      billed: 2000,
+      extra: 0,
+      status: 'issued',
+      expected: 4897,
+    },
+    {
+      link: 'source',
+      billed: 5500,
+      extra: 0,
+      status: 'issued',
+      expected: 5500,
+    },
+    { link: 'source', billed: 4897, extra: 0, status: 'draft', expected: 4897 },
+    {
+      link: 'source',
+      billed: 4897,
+      extra: 0,
+      status: 'cancelled',
+      expected: 4897,
+    },
+    {
+      link: 'unrelated',
+      billed: 750,
+      extra: 0,
+      status: 'issued',
+      expected: 5647,
+    },
+  ])(
+    'counts invoiced recurrence only once: $link/$status/$billed/$extra',
+    async ({ link, billed, extra, status, expected }) => {
+      const service = makeService(
+        baseData({
+          clients: [{ id: CLIENT, contactId: 'contact-client-1' }],
+          recurringProfiles: [
+            {
+              id: 'monthly-fee',
+              customerId: 'contact-client-1',
+              status: FinanceRecurringProfileStatus.Active,
+              interval: FinanceRecurringInterval.Monthly,
+              amount: '4897',
+              sourceModule: link === 'template' ? 'finance_invoice' : null,
+              sourceId: link === 'template' ? 'inv-1' : null,
+            },
+          ],
+          invoices: [
+            {
+              id: 'inv-1',
+              customerId: 'contact-client-1',
+              status: status as FinanceInvoice['status'],
+              totalAmount: String(billed),
+              issueDate: inPeriodDate(),
+              createdAt: new Date(),
+              sourceModule:
+                link === 'source' ? 'finance_recurring_profile' : null,
+              sourceId: link === 'source' ? 'monthly-fee' : null,
+              metadata:
+                link === 'metadata'
+                  ? { recurringProfileId: 'monthly-fee' }
+                  : {},
+            },
+            ...(extra
+              ? [
+                  {
+                    id: 'extra',
+                    customerId: 'contact-client-1',
+                    status: 'issued' as FinanceInvoice['status'],
+                    totalAmount: String(extra),
+                    issueDate: inPeriodDate(),
+                    createdAt: new Date(),
+                  },
+                ]
+              : []),
+          ],
+        }),
+      );
+      const overview = await service.getOverview(ctx());
+      const detail = await service.getClientDetail(ctx(), CLIENT);
+      expect(
+        overview.clients.find((client) => client.id === CLIENT),
+      ).toMatchObject({
+        revenue: expected,
+        recurringRevenue: 4897,
+        grossProfit: expected - 400,
+      });
+      expect(overview.summary.revenue).toBe(expected);
+      expect(detail).toMatchObject({ client: { revenue: expected } });
+    },
+  );
+
+  it.each([
+    { agency: true, secondFee: '4897', billed: '4897', expected: 4897 },
+    { agency: false, secondFee: '1000', billed: '5500', expected: 6500 },
+  ])(
+    'reconciles duplicate Agency profiles while preserving independent profiles: $agency',
+    async ({ agency, secondFee, billed, expected }) => {
+      const overview = await makeService(
+        baseData({
+          clients: agency
+            ? [{ id: CLIENT, contactId: 'contact-client-1' }]
+            : [],
+          recurringProfiles: ['older', 'newer'].map((id, index) => ({
+            id,
+            customerId: CLIENT,
+            status: FinanceRecurringProfileStatus.Active,
+            interval: FinanceRecurringInterval.Monthly,
+            amount: index === 0 ? '4897' : secondFee,
+            updatedAt: new Date(`2026-11-0${index + 1}T12:00:00Z`),
+          })),
+          invoices: [
+            {
+              id: 'inv-1',
+              customerId: CLIENT,
+              status: 'issued' as FinanceInvoice['status'],
+              totalAmount: billed,
+              issueDate: inPeriodDate(),
+              createdAt: new Date(),
+              sourceModule: 'finance_recurring_profile',
+              sourceId: 'older',
+            },
+          ],
+        }),
+      ).getOverview(ctx());
+      expect(
+        overview.clients.find((client) => client.id === CLIENT)?.revenue,
+      ).toBe(expected);
+      expect(overview.summary.revenue).toBe(expected);
+    },
+  );
+
   it('falls back to monthlyCost / contracted hours when no hourly cost is set', async () => {
     const data = baseData();
     data.members = [

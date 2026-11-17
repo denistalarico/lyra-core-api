@@ -441,10 +441,11 @@ export class FinanceProfitabilityService {
     const activeRecurringProfiles = clientRecurringProfiles.filter(
       (profile) => String(profile.status) === 'active',
     );
+    const agencyClientIds = new Set(customerClientIds.values());
     const clientRevenueRecurringProfiles =
       this.deduplicateAgencyClientRecurringProfiles(
         activeRecurringProfiles,
-        new Set(customerClientIds.values()),
+        agencyClientIds,
       );
 
     const projectsProfitability = projects.map((project) => {
@@ -523,6 +524,39 @@ export class FinanceProfitabilityService {
         clientId,
         clientRevenueRecurringProfiles,
       );
+      // A recurrence is a forecast, not a second revenue when its invoice
+      // already recognizes the same service. Keep unrelated invoices additive.
+      const uninvoicedRecurringRevenue = clientRevenueRecurringProfiles
+        .filter((profile) => profile.customerId === clientId)
+        .reduce((sum, profile) => {
+          const relatedProfiles = agencyClientIds.has(clientId)
+            ? activeRecurringProfiles.filter(
+                (item) => item.customerId === clientId,
+              )
+            : [profile];
+          const invoiced = periodInvoices
+            .filter(
+              (invoice) =>
+                invoice.customerId === clientId &&
+                relatedProfiles.some(
+                  (item) =>
+                    (invoice.sourceModule === 'finance_recurring_profile' &&
+                      invoice.sourceId === item.id) ||
+                    invoice.metadata?.recurringProfileId === item.id ||
+                    invoice.metadata?.generatedFromRecurringProfileId ===
+                      item.id ||
+                    (item.sourceModule === 'finance_invoice' &&
+                      item.sourceId === invoice.id),
+                ),
+            )
+            .reduce(
+              (total, invoice) => total + toNumber(invoice.totalAmount),
+              0,
+            );
+          return (
+            sum + Math.max(0, this.normalizeRecurringAmount(profile) - invoiced)
+          );
+        }, 0);
 
       const directCosts = directCostByClientId.get(clientId) ?? 0;
 
@@ -530,7 +564,7 @@ export class FinanceProfitabilityService {
         id: clientId,
         name: `Cliente ${clientId.slice(0, 8)}`,
         clientId,
-        revenue: invoicedRevenue + recurringRevenue,
+        revenue: invoicedRevenue + uninvoicedRecurringRevenue,
         invoicedRevenue,
         recurringRevenue,
         directCosts,
@@ -599,7 +633,7 @@ export class FinanceProfitabilityService {
       projects: projectsProfitability,
       clients: clientsProfitability,
       notes: [
-        'Revenue source: confirmed/issued invoices (draft and cancelled excluded) linked by customerId, plus active recurring profiles.',
+        'Revenue source: confirmed/issued invoices (draft and cancelled excluded) linked by customerId, plus the uninvoiced portion of active recurring profiles. Recurring revenue is the full monthly forecast, not an additional issued revenue.',
         'Direct cost source: confirmed payable (bill) lines whose effective cost center is the client cost center (draft/cancelled bills excluded). Falls back to bill/line metadata clientId when no cost center matches.',
         'Labor cost: subtask time entries × subtask responsible hourly cost (falling back to task responsible). Task trackedMinutes is used only when a task has no subtask time; missing responsible/cost is reported in membersMissingCost/hoursWithoutCost.',
         'This is a DIRECT margin: shared/overhead costs (tools, infrastructure, internal cost centers) are NOT allocated to clients in this view.',
