@@ -801,6 +801,7 @@ export class SocialContentLifecycleService {
         ...this.contentScopeWhere(scope),
         deletedAt: IsNull(),
         planId: plan.id,
+        calendarOnly: false,
         ...(archived === 'exclude' ? { archivedAt: IsNull() } : {}),
         ...(archived === 'only' ? { archivedAt: Not(IsNull()) } : {}),
       },

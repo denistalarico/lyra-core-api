@@ -868,6 +868,7 @@ describe('SocialContentLifecycleService', () => {
 
       expect(where.deletedAt).toEqual(IsNull());
       expect(where.archivedAt).toEqual(IsNull());
+      expect(where.calendarOnly).toBe(false);
     });
 
     it('reads only archived rows when asked for the archive view', async () => {
