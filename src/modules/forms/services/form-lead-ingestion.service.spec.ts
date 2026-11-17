@@ -6,6 +6,7 @@ import {
   DEFAULT_FORM_PRESENTATION,
   DEFAULT_FORM_TRACKING,
   DEFAULT_FORM_DESTINATION,
+  DEFAULT_FORM_INBOUND_EMAIL,
   DEFAULT_FORM_SECURITY,
 } from '../forms.types';
 import {
@@ -39,6 +40,8 @@ function makeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     security: { ...DEFAULT_FORM_SECURITY },
     afterSubmit: { ...DEFAULT_FORM_AFTER_SUBMIT },
     capture: { formSelector: null, fieldMap: {} },
+    inboundEmailAddress: null,
+    inboundEmail: { ...DEFAULT_FORM_INBOUND_EMAIL },
     createdByUserId: null,
     publishedAt: new Date(),
     archivedAt: null,
@@ -75,6 +78,7 @@ function makeSubmission(
     },
     attribution: { utm_source: 'meta', gclid: 'g1' },
     clientNonce: null,
+    emailMessageId: null,
     ipHash: null,
     userAgent: null,
     status: 'received',

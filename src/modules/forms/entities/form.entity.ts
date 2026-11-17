@@ -11,6 +11,7 @@ import type {
   FormCapture,
   FormDestination,
   FormFieldsConfig,
+  FormInboundEmail,
   FormPresentation,
   FormSecurity,
   FormStatus,
@@ -74,6 +75,22 @@ export class FormEntity {
 
   @Column({ name: 'after_submit', type: 'jsonb', default: () => "'{}'::jsonb" })
   afterSubmit!: FormAfterSubmit;
+
+  /** F4: address that reaches the agency's IMAP box; unique per workspace, lower case. */
+  @Column({
+    name: 'inbound_email_address',
+    type: 'varchar',
+    length: 254,
+    nullable: true,
+  })
+  inboundEmailAddress!: string | null;
+
+  @Column({
+    name: 'inbound_email',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  inboundEmail!: FormInboundEmail;
 
   /** F3: capture script settings (selector + field mapping). */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })

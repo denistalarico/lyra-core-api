@@ -14,6 +14,7 @@ import type { FormSubmissionEntity } from '../entities/form-submission.entity';
 import {
   DEFAULT_FORM_AFTER_SUBMIT,
   DEFAULT_FORM_DESTINATION,
+  DEFAULT_FORM_INBOUND_EMAIL,
   DEFAULT_FORM_SECURITY,
 } from '../forms.types';
 import { FormsAddonService } from './forms-addon.service';
@@ -63,6 +64,8 @@ function activeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     security: { ...DEFAULT_FORM_SECURITY, minFillSeconds: 2 },
     afterSubmit: { ...DEFAULT_FORM_AFTER_SUBMIT },
     capture: { formSelector: null, fieldMap: {} },
+    inboundEmailAddress: null,
+    inboundEmail: { ...DEFAULT_FORM_INBOUND_EMAIL },
     createdByUserId: null,
     publishedAt: new Date(),
     archivedAt: null,
@@ -409,5 +412,55 @@ describe('FormsService capture script (F3)', () => {
     await expect(
       service.capturePublic(KEY, { payload: '{nope' }, CAPTURE_META),
     ).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('FormsService reprocess e-mail lead (F4)', () => {
+  it('re-maps stored pairs with the current mapping and keeps AI-found contact data', async () => {
+    const form = activeForm({
+      capture: { formSelector: null, fieldMap: { 'Campo 1': 'contact.name' } },
+    });
+    const { service, submissions, ingestion } = setup(form);
+    submissions.findOne.mockResolvedValue({
+      id: 'sub-9',
+      formId: 'form-1',
+      source: 'email',
+      status: 'needs_review',
+      opportunityId: null,
+      payload: {
+        subject: 'Contato',
+        text: 'Campo 1: Rita',
+        fields: [
+          {
+            key: 'Campo 1',
+            label: 'Campo 1',
+            type: 'text',
+            autocomplete: null,
+            hint: null,
+            value: 'Rita',
+          },
+        ],
+      },
+      normalized: {
+        values: {},
+        lead: {
+          name: null,
+          email: null,
+          phone: '+5511999990000',
+          company: null,
+          position: null,
+        },
+        opportunity: { title: null, valueAmount: null, notes: null },
+        summaryLines: [],
+        extractedBy: 'ai',
+      },
+    });
+    await service.reprocessSubmission(CTX as never, 'sub-9');
+    const row = ingestion.process.mock.calls[0][1];
+    expect(row.normalized?.lead).toMatchObject({
+      name: 'Rita',
+      phone: '+5511999990000',
+    });
+    expect(row.normalized?.extractedBy).toBe('ai');
   });
 });

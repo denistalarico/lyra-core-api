@@ -58,6 +58,15 @@ export class FormSubmissionEntity {
   @Column({ name: 'client_nonce', type: 'varchar', length: 64, nullable: true })
   clientNonce!: string | null;
 
+  /** F4: Message-ID of the e-mail lead (dedup per form). */
+  @Column({
+    name: 'email_message_id',
+    type: 'varchar',
+    length: 998,
+    nullable: true,
+  })
+  emailMessageId!: string | null;
+
   @Column({ name: 'ip_hash', type: 'varchar', length: 64, nullable: true })
   ipHash!: string | null;
 

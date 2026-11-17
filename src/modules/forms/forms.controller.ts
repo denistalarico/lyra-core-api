@@ -22,7 +22,9 @@ import {
   ListFormsQueryDto,
   PatchFormDto,
   SetFormsAddonDto,
+  UpdateFormInboundEmailDto,
 } from './dto/forms.dto';
+import { FormInboundEmailService } from './services/form-inbound-email.service';
 import { FormsAddonService } from './services/forms-addon.service';
 import { FormsService } from './services/forms.service';
 
@@ -39,6 +41,7 @@ export class FormsController {
   constructor(
     private readonly forms: FormsService,
     private readonly addon: FormsAddonService,
+    private readonly inboundEmail: FormInboundEmailService,
   ) {}
 
   @Get('addon')
@@ -79,6 +82,20 @@ export class FormsController {
     @Body() dto: CreateFormDto,
   ) {
     return this.forms.create(ctx, dto);
+  }
+
+  /** F4: is the agency IMAP box set up, and how is the reader doing (§6.3). */
+  @Get('inbound-email/status')
+  @RequirePermission('agency.forms.forms.view')
+  inboundEmailStatus(@RequestContextData() ctx: RequestContext) {
+    return this.inboundEmail.status(ctx);
+  }
+
+  /** /settings/email helper: login + read-only INBOX open, nothing is read. */
+  @Post('inbound-email/test-connection')
+  @RequirePermission('agency.settings.email.manage.admin')
+  testImapConnection(@RequestContextData() ctx: RequestContext) {
+    return this.inboundEmail.testConnection(ctx);
   }
 
   @Get('submissions/:submissionId')
@@ -170,6 +187,25 @@ export class FormsController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.forms.rotateKey(ctx, id);
+  }
+
+  @Put(':id/inbound-email')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async updateInboundEmail(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateFormInboundEmailDto,
+  ) {
+    return this.inboundEmail.configure(ctx, await this.forms.get(ctx, id), dto);
+  }
+
+  @Post(':id/inbound-email/test')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async testInboundEmail(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.inboundEmail.sendTest(await this.forms.get(ctx, id));
   }
 
   /** Learning mode for the capture script: fields seen in recent captures. */

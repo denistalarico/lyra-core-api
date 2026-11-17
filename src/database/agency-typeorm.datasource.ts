@@ -306,6 +306,7 @@ import { SocialOrganicAccountWatchTime1804300000000 } from './migrations/1804300
 import { SocialContentDestinationOptions1804400000000 } from './migrations/1804400000000-social-content-destination-options';
 import { CreateForms1804500000000 } from './migrations/1804500000000-create-forms';
 import { AddFormsCapture1804600000000 } from './migrations/1804600000000-add-forms-capture';
+import { AddFormsInboundEmail1804700000000 } from './migrations/1804700000000-add-forms-inbound-email';
 import { CreateSocialTrendSnapshots1803600000000 } from './migrations/1803600000000-create-social-trend-snapshots';
 import { AddSocialApprovalCardCustomization1803300000000 } from './migrations/1803300000000-add-social-approval-card-customization';
 import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
@@ -642,5 +643,6 @@ export const AgencyDataSource = new DataSource({
     SocialContentDestinationOptions1804400000000,
     CreateForms1804500000000,
     AddFormsCapture1804600000000,
+    AddFormsInboundEmail1804700000000,
   ],
 });

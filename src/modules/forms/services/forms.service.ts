@@ -42,6 +42,7 @@ import {
   normalizeSubmission,
   sanitizeAttribution,
 } from '../form-submission.normalizer';
+import { extractEmailLead, trimStoredText } from '../form-email.extractor';
 import {
   CaptureFormatError,
   isCaptureOriginAllowed,
@@ -49,10 +50,11 @@ import {
   parseCapturePayload,
   summarizeCapturedFields,
 } from '../form-capture.mapper';
-import type {
-  CapturedField,
-  FormDestination,
-  NormalizedSubmission,
+import {
+  DEFAULT_FORM_INBOUND_EMAIL,
+  type CapturedField,
+  type FormDestination,
+  type NormalizedSubmission,
 } from '../forms.types';
 import {
   FormLeadIngestionService,
@@ -176,8 +178,12 @@ export class FormsService {
     await this.addon.assertEnabled(scope.tenantId, scope.workspaceId);
     const form = await this.forms.findOne({ where: { ...scope, id } });
     if (!form) throw new NotFoundException('Form not found.');
-    // Rows created before F3 have `{}`.
+    // Rows created before F3/F4 have `{}`.
     form.capture = validateCapture(form.capture);
+    form.inboundEmail = {
+      ...DEFAULT_FORM_INBOUND_EMAIL,
+      ...(form.inboundEmail ?? {}),
+    };
     return form;
   }
 
@@ -339,6 +345,8 @@ export class FormsService {
         capturedFieldsOf(submission.payload),
         form.capture.fieldMap,
       );
+    if (submission.source === 'email')
+      submission.normalized = this.reextractEmail(form, submission);
     return this.ingestion.process(form, submission);
   }
 
@@ -351,7 +359,7 @@ export class FormsService {
         tenantId: form.tenantId,
         workspaceId: form.workspaceId,
         formId: form.id,
-        source: 'script',
+        source: In(['script', 'email']),
       },
       order: { createdAt: 'DESC' },
       take: 50,
@@ -578,6 +586,43 @@ export class FormsService {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  /**
+   * E-mail lead re-mapped with the current field mapping. Contact data found
+   * by the AI at arrival is kept when the rules still cannot find it.
+   */
+  private reextractEmail(
+    form: FormEntity,
+    submission: FormSubmissionEntity,
+  ): NormalizedSubmission {
+    const payload = submission.payload;
+    const str = (key: string) =>
+      typeof payload[key] === 'string' ? payload[key] : null;
+    const { normalized } = extractEmailLead(
+      {
+        messageId: str('messageId'),
+        subject: str('subject'),
+        from: str('from'),
+        replyTo: str('replyTo'),
+        date: str('date'),
+        text: trimStoredText(str('text') ?? ''),
+        html: null,
+      },
+      {
+        ownAddresses: [form.inboundEmailAddress ?? ''].filter(Boolean),
+        fieldMap: form.capture.fieldMap,
+        fields: capturedFieldsOf(submission.payload),
+      },
+    );
+    const previous = submission.normalized;
+    if (previous?.extractedBy === 'ai') {
+      const lead = normalized.lead;
+      for (const key of Object.keys(lead) as Array<keyof typeof lead>)
+        lead[key] ??= previous.lead[key];
+      normalized.extractedBy = 'ai';
+    }
+    return normalized;
+  }
 
   /** Per form + visitor cap; returns the visitor hash stored on the row. */
   private async assertRateLimit(formId: string, ip: string | null) {

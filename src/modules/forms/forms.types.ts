@@ -219,6 +219,37 @@ export type CapturedField = {
   value: string;
 };
 
+/**
+ * F4 (§6): leads by e-mail. The address reaches the agency's IMAP box
+ * (`/settings/email`) as a sub-address (`box+slug@`) or a hPanel alias.
+ */
+export type FormInboundEmail = {
+  kind: 'plus' | 'alias';
+  verifiedAt: string | null;
+  /** Empty = any sender. Exact address or `@domain`. */
+  allowedSenders: string[];
+  /** D-F12: on by default. */
+  aiExtraction: boolean;
+  /** "Testar endereço": token in the subject of the e-mail we send. */
+  pendingTest: { token: string; sentAt: string } | null;
+  /** Gmail/Outlook forwarding confirmation caught by the reader (§6.5.2). */
+  forwardingConfirmation: {
+    url: string | null;
+    from: string | null;
+    subject: string | null;
+    receivedAt: string;
+  } | null;
+};
+
+export const DEFAULT_FORM_INBOUND_EMAIL: FormInboundEmail = {
+  kind: 'plus',
+  verifiedAt: null,
+  allowedSenders: [],
+  aiExtraction: true,
+  pendingTest: null,
+  forwardingConfirmation: null,
+};
+
 export const FORM_SUBMISSION_SOURCES = [
   'page',
   'embed',
@@ -257,6 +288,8 @@ export type NormalizedSubmission = {
   opportunity: NormalizedOpportunity;
   /** "Label: value" lines in field order, for the opportunity description. */
   summaryLines: string[];
+  /** E-mail leads: who found the contact data (§6.5.4). */
+  extractedBy?: 'rules' | 'ai';
 };
 
 export type FormSubmissionOutcome = {

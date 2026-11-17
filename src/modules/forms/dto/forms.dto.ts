@@ -1,5 +1,8 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
+  IsEmail,
   IsIn,
   IsInt,
   IsNumberString,
@@ -188,4 +191,31 @@ export class CapturePublicFormDto {
   @IsString()
   @MaxLength(32_000)
   payload!: string;
+}
+
+/** F4: address of the form in the agency's IMAP box (§6.2). */
+export class UpdateFormInboundEmailDto {
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsOptional()
+  @IsIn(['plus', 'alias'])
+  kind?: 'plus' | 'alias';
+
+  /** Alias created in hPanel (kind = alias). */
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(254)
+  address?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(254, { each: true })
+  allowedSenders?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  aiExtraction?: boolean;
 }
