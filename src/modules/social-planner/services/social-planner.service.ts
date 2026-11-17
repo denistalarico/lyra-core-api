@@ -76,7 +76,7 @@ export class SocialPlannerService {
 
   async listPlans(scope: SocialPlannerScope) {
     const plans = await this.plansRepository.find({
-      where: this.planScopeWhere(scope),
+      where: { ...this.planScopeWhere(scope), calendarContainer: false },
       order: {
         periodStart: 'DESC',
         createdAt: 'DESC',
@@ -87,6 +87,25 @@ export class SocialPlannerService {
       items: plans.map(toSocialPlanView),
       total: plans.length,
     };
+  }
+
+  async listCalendarContent(scope: SocialPlannerScope) {
+    const plans = await this.plansRepository.find({ where: { ...this.planScopeWhere(scope), calendarContainer: true } });
+    const responses = await Promise.all(plans.map((plan) => this.listContent(scope, plan.id)));
+    const items = responses.flatMap((response) => response.items);
+    return { items, total: items.length };
+  }
+
+  async createCalendarContent(scope: SocialPlannerScope, actorUserId: string | null, dto: CreateSocialContentItemDto) {
+    let plan = await this.plansRepository.findOne({ where: { ...this.planScopeWhere(scope), calendarContainer: true } });
+    if (!plan) {
+      plan = await this.plansRepository.save(this.plansRepository.create({
+        tenantId: scope.tenantId, workspaceId: scope.workspaceId, agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId, title: 'Publicações avulsas', calendarContainer: true,
+        periodStart: '2000-01-01', periodEnd: '9999-12-31', status: 'draft', createdById: actorUserId, updatedById: actorUserId,
+      }));
+    }
+    return this.createContent(scope, plan.id, actorUserId, { ...dto, calendarOnly: true });
   }
 
   async createPlan(

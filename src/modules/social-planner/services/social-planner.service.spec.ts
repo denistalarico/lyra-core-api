@@ -968,3 +968,18 @@ describe('SocialPlannerService', () => {
     });
   });
 });
+
+describe('standalone calendar scope', () => {
+  it('creates a calendar-only item under a container resolved in the server company scope', async () => {
+    const scope = { tenantId: 'tenant', workspaceId: 'workspace', agencyClientId: 'client', companyContextId: 'company' };
+    const plans = createRepositoryMock<SocialPlanEntity>();
+    plans.findOne.mockResolvedValue(null);
+    plans.save.mockImplementation(async (value) => ({ ...value, id: 'container' }));
+    const service = new SocialPlannerService(plans as unknown as Repository<SocialPlanEntity>, createRepositoryMock() as unknown as Repository<SocialContentItemEntity>, createRepositoryMock() as unknown as Repository<SocialContentDestinationEntity>, createRepositoryMock() as unknown as Repository<SocialContentRevisionEntity>, { assertOptionalLinks: jest.fn() } as unknown as SocialCampaignService);
+    const create = jest.spyOn(service, 'createContent').mockResolvedValue({ id: 'post' } as never);
+    await service.createCalendarContent(scope, 'actor', { title: 'Story', calendarOnly: false } as CreateSocialContentItemDto);
+    expect(plans.findOne).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ ...scope, calendarContainer: true }) }));
+    expect(plans.save).toHaveBeenCalledWith(expect.objectContaining({ ...scope, calendarContainer: true }));
+    expect(create).toHaveBeenCalledWith(scope, 'container', 'actor', expect.objectContaining({ calendarOnly: true }));
+  });
+});

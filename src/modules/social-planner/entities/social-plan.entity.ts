@@ -60,6 +60,9 @@ export class SocialPlanEntity {
   @Column({ name: 'company_context_id', type: 'uuid', nullable: true })
   companyContextId!: string | null;
 
+  @Column({ name: 'calendar_container', type: 'boolean', default: false })
+  calendarContainer!: boolean;
+
   @Column({ type: 'varchar', length: 240 })
   title!: string;
 

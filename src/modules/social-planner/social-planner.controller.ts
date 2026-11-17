@@ -202,6 +202,20 @@ export class SocialPlannerController {
   }
 
   @ClientAreaExposed('social_planner')
+  @Get('calendar/content')
+  @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
+  listCalendarContent(@RequestContextData() ctx: RequestContext) {
+    return this.socialPlannerService.listCalendarContent(this.requireScope(ctx));
+  }
+
+  @ClientAreaExposed('social_planner')
+  @Post('calendar/content')
+  @RequirePermission(SOCIAL_PLANNER_CREATE_PERMISSION)
+  createCalendarContent(@RequestContextData() ctx: RequestContext, @Body() dto: CreateSocialContentItemDto) {
+    return this.socialPlannerService.createCalendarContent(this.requireScope(ctx), ctx.userId ?? null, dto);
+  }
+
+  @ClientAreaExposed('social_planner')
   @Get('plans/:planId/content')
   @RequirePermission(SOCIAL_PLANNER_VIEW_PERMISSION)
   listContent(

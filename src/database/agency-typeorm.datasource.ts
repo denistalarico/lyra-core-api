@@ -1,3 +1,4 @@
+import { AddSocialCalendarContainers1802500000000 } from './migrations/1802500000000-add-social-calendar-containers';
 import { CreateInboxFollowupTemplates1800300000000 } from './migrations/1800300000000-create-inbox-followup-templates';
 import { CreateInboxComments1800400000000 } from './migrations/1800400000000-create-inbox-comments';
 import { AddInboxSmsChannelNumberIndex1800500000000 } from './migrations/1800500000000-add-inbox-sms-channel-number-index';
@@ -329,6 +330,7 @@ export const AgencyDataSource = new DataSource({
   logging: false,
   entities: agencyEntities,
   migrations: [
+    AddSocialCalendarContainers1802500000000,
     CreateMeetingAiProcessing1798900000000,
     CreateInboxCore1760000020000,
     CreateInboxSettings1760000021000,

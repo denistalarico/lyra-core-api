@@ -148,6 +148,8 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
     subject: { ref: 'brandKitAsset', param: 'assetId' },
   }),
   // ------------------------------------------------------------- Planner
+  [`GET ${P}/calendar/content`]: planner(),
+  [`POST ${P}/calendar/content`]: planner({ body: contentRefs }),
   [`GET ${P}/plans`]: planner(),
   [`POST ${P}/plans`]: planner({ manager: true }),
   [`GET ${P}/plans/:planId`]: planner({ subject: plan }),
