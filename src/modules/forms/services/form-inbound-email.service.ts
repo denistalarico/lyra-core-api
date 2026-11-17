@@ -115,7 +115,7 @@ export class FormInboundEmailService {
       await session.close();
       return { ok: true, error: null, mailbox: credentials.user };
     } catch (error) {
-      return { ok: false, error: imapErrorMessage(error) };
+      return { ok: false, error: imapErrorMessage(error, credentials.host) };
     }
   }
 
@@ -343,7 +343,7 @@ export class FormInboundEmailService {
       // Progress up to the last handled message is kept; the rest retries next minute.
       if (session) state.uidValidity ??= session.uidValidity;
       state.lastUid = cursor;
-      state.lastError = imapErrorMessage(error);
+      state.lastError = imapErrorMessage(error, credentials.host);
       this.logger.warn(
         `Forms e-mail reader ${workspaceId}: ${state.lastError}`,
       );
@@ -526,15 +526,21 @@ function validateSenders(input: string[]): string[] {
 }
 
 /** IMAP errors carry server text; keep it short and without credentials. */
-export function imapErrorMessage(error: unknown): string {
+export function imapErrorMessage(error: unknown, host = ''): string {
   const err = error as {
     authenticationFailed?: boolean;
     code?: string;
     message?: string;
     responseText?: string;
   };
-  if (err?.authenticationFailed)
+  if (err?.authenticationFailed) {
+    // Provider-specific causes the agency can act on (§6.4).
+    if (/office365|outlook\.com|hotmail|live\.com/i.test(host))
+      return 'O Microsoft 365/Outlook só aceita IMAP com login OAuth, e o leitor usa usuário e senha. Encaminhe os e-mails para uma caixa de outro provedor e configure essa caixa.';
+    if (/gmail\.com|googlemail/i.test(host))
+      return 'O Google recusou a senha. Use uma senha de app (exige verificação em 2 etapas) e confira se o IMAP está ativado no Gmail.';
     return 'Usuário ou senha IMAP recusados pelo servidor.';
+  }
   if (err?.code === 'ENOTFOUND') return 'Servidor IMAP não encontrado.';
   if (err?.code === 'ECONNREFUSED' || err?.code === 'ETIMEDOUT')
     return 'Não foi possível conectar ao servidor IMAP (porta/SSL).';

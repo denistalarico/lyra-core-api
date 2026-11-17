@@ -15,7 +15,10 @@ import {
   DEFAULT_FORM_TRACKING,
 } from '../forms.types';
 import type { ImapHeaderRow } from './form-email-imap.gateway';
-import { FormInboundEmailService } from './form-inbound-email.service';
+import {
+  FormInboundEmailService,
+  imapErrorMessage,
+} from './form-inbound-email.service';
 
 const ADDRESS = 'leads+lp-ab12@agencia.com.br';
 
@@ -485,5 +488,16 @@ describe('FormInboundEmailService configure', () => {
     >;
     expect(sent.to).toBe(ADDRESS);
     expect(sent.subject).toContain(`[${token}]`);
+  });
+});
+
+describe('imapErrorMessage', () => {
+  it('explains provider-specific login failures', () => {
+    const auth = Object.assign(new Error('x'), { authenticationFailed: true });
+    expect(imapErrorMessage(auth, 'outlook.office365.com')).toContain('OAuth');
+    expect(imapErrorMessage(auth, 'imap.gmail.com')).toContain('senha de app');
+    expect(imapErrorMessage(auth, 'imap.hostinger.com')).toBe(
+      'Usuário ou senha IMAP recusados pelo servidor.',
+    );
   });
 });

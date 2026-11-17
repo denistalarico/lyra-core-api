@@ -350,7 +350,8 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
       : fill(route.path);
 
   it('checks company, live session and Viewer mutation level on every Social opt-in', async () => {
-    expect(exposed).toHaveLength(128);
+    // +2 (2026-11-17): calendar/content list + create (view.client / create.manager, like plans/:id/content).
+    expect(exposed).toHaveLength(130);
     levels('viewer');
     for (const route of exposed) {
       const at = `${route.verb} ${route.path}`;
