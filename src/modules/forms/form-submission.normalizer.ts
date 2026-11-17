@@ -98,7 +98,7 @@ function asText(raw: unknown): string | null {
   return null;
 }
 
-function parseAmount(value: string): number | null {
+export function parseAmount(value: string): number | null {
   // "1.234,56" (BR) or "1234.56"
   const cleaned = value.replace(/[^\d,.-]/g, '');
   const normalized = cleaned.includes(',')

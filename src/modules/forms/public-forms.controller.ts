@@ -10,7 +10,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { SubmitPublicFormDto } from './dto/forms.dto';
+import { CapturePublicFormDto, SubmitPublicFormDto } from './dto/forms.dto';
 import { FormsService } from './services/forms.service';
 
 /**
@@ -40,6 +40,28 @@ export class PublicFormsController {
     return this.forms.submitPublic(publicKey, dto, {
       ip: req.ip ?? null,
       userAgent: userAgent ?? null,
+    });
+  }
+
+  /**
+   * capture.js (F3) via sendBeacon: urlencoded `payload`, no preflight and no
+   * CORS headers needed (the script never reads the answer).
+   */
+  @Post(':publicKey/captures')
+  @HttpCode(204)
+  async capture(
+    @Param('publicKey') publicKey: string,
+    @Body() dto: CapturePublicFormDto,
+    @Req() req: Request,
+    @Headers('user-agent') userAgent?: string,
+    @Headers('origin') origin?: string,
+    @Headers('referer') referer?: string,
+  ): Promise<void> {
+    await this.forms.capturePublic(publicKey, dto, {
+      ip: req.ip ?? null,
+      userAgent: userAgent ?? null,
+      origin: origin ?? null,
+      referer: referer ?? null,
     });
   }
 }

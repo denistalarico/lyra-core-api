@@ -187,6 +187,38 @@ export const DEFAULT_FORM_TRACKING: FormTracking = {
   fireParentEvents: true,
 };
 
+/**
+ * F3 (§5.6): capture script on a form the site already has. Fields are keyed
+ * by the site's own `name`/`id`; `fieldMap` overrides the automatic guess.
+ */
+export type FormCaptureTarget = FormFieldTarget | 'ignore';
+export const FORM_CAPTURE_TARGETS: readonly FormCaptureTarget[] = [
+  ...FORM_FIELD_TARGETS,
+  'ignore',
+];
+
+export type FormCapture = {
+  /** CSS selector of the site's form; null = automatic (forms with e-mail/phone). */
+  formSelector: string | null;
+  fieldMap: Record<string, FormCaptureTarget>;
+};
+
+export const DEFAULT_FORM_CAPTURE: FormCapture = {
+  formSelector: null,
+  fieldMap: {},
+};
+
+/** One input read by capture.js (sensitive inputs never leave the page). */
+export type CapturedField = {
+  key: string;
+  label: string | null;
+  type: string;
+  autocomplete: string | null;
+  /** `data-lyra-field` on the site's input. */
+  hint: string | null;
+  value: string;
+};
+
 export const FORM_SUBMISSION_SOURCES = [
   'page',
   'embed',

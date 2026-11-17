@@ -62,6 +62,7 @@ function activeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     destination: { ...DEFAULT_FORM_DESTINATION },
     security: { ...DEFAULT_FORM_SECURITY, minFillSeconds: 2 },
     afterSubmit: { ...DEFAULT_FORM_AFTER_SUBMIT },
+    capture: { formSelector: null, fieldMap: {} },
     createdByUserId: null,
     publishedAt: new Date(),
     archivedAt: null,
@@ -321,5 +322,92 @@ describe('FormsAddonService', () => {
         .mockResolvedValue({ apps: [{ appKey: 'dashboard', enabled: true }] }),
     } as never);
     expect(await addon.isEnabled('t', 'w')).toBe(false);
+  });
+});
+
+describe('FormsService capture script (F3)', () => {
+  const CAPTURE_META = {
+    ...META,
+    origin: 'https://lp.cliente.com.br',
+    referer: null,
+  };
+  const payload = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      fields: [
+        { key: 'your-name', type: 'text', value: 'Ana Souza' },
+        { key: 'your-email', type: 'email', value: 'ANA@x.com' },
+        { key: 'senha', type: 'password', value: 'secret' },
+      ],
+      nonce: 'cap_abcdefgh12',
+      attribution: { utm_source: 'meta' },
+      elapsedMs: 8000,
+      ...extra,
+    });
+
+  it('stores the site fields as a script submission and runs ingestion', async () => {
+    const { service, submissions, ingestion } = setup();
+    await service.capturePublic(KEY, { payload: payload() }, CAPTURE_META);
+    const stored = submissions.save.mock.calls[0][0];
+    expect(stored).toMatchObject({
+      source: 'script',
+      status: 'received',
+      clientNonce: 'cap_abcdefgh12',
+      attribution: { utm_source: 'meta' },
+    });
+    expect(JSON.stringify(stored.payload)).not.toContain('secret');
+    expect(stored.normalized?.lead).toMatchObject({
+      name: 'Ana Souza',
+      email: 'ana@x.com',
+    });
+    expect(ingestion.process).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses sites outside allowedOrigins and accepts subdomains of *.domain', async () => {
+    const form = activeForm({
+      security: {
+        ...DEFAULT_FORM_SECURITY,
+        allowedOrigins: ['*.cliente.com.br'],
+      },
+    });
+    const ok = setup(form);
+    await ok.service.capturePublic(KEY, { payload: payload() }, CAPTURE_META);
+    expect(ok.submissions.save).toHaveBeenCalledTimes(1);
+
+    const blocked = setup(form);
+    await expect(
+      blocked.service.capturePublic(
+        KEY,
+        { payload: payload() },
+        { ...CAPTURE_META, origin: 'https://evil.example' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(blocked.submissions.save).not.toHaveBeenCalled();
+  });
+
+  it('a repeated nonce is ignored; too fast after page load is spam', async () => {
+    const replay = setup();
+    replay.submissions.findOne.mockResolvedValue({ id: 'sub-first' });
+    await replay.service.capturePublic(
+      KEY,
+      { payload: payload() },
+      CAPTURE_META,
+    );
+    expect(replay.submissions.save).not.toHaveBeenCalled();
+
+    const fast = setup();
+    await fast.service.capturePublic(
+      KEY,
+      { payload: payload({ elapsedMs: 200 }) },
+      CAPTURE_META,
+    );
+    expect(fast.submissions.save.mock.calls[0][0].status).toBe('spam');
+    expect(fast.ingestion.process).not.toHaveBeenCalled();
+  });
+
+  it('rejects a payload that is not JSON', async () => {
+    const { service } = setup();
+    await expect(
+      service.capturePublic(KEY, { payload: '{nope' }, CAPTURE_META),
+    ).rejects.toMatchObject({ status: 400 });
   });
 });

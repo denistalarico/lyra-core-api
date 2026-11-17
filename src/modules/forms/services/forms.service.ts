@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   HttpStatus,
   Injectable,
@@ -17,6 +18,7 @@ import {
 } from '../../agency/entities/agency-sales.entities';
 import { CrmService } from '../../crm/crm.service';
 import type {
+  CapturePublicFormDto,
   CreateFormDto,
   ListFormSubmissionsQueryDto,
   ListFormsQueryDto,
@@ -28,6 +30,7 @@ import { FormSubmissionEntity } from '../entities/form-submission.entity';
 import {
   assertPublishable,
   validateAfterSubmit,
+  validateCapture,
   validateDestination,
   validateFieldsConfig,
   validatePresentation,
@@ -39,7 +42,18 @@ import {
   normalizeSubmission,
   sanitizeAttribution,
 } from '../form-submission.normalizer';
-import type { FormDestination, NormalizedSubmission } from '../forms.types';
+import {
+  CaptureFormatError,
+  isCaptureOriginAllowed,
+  normalizeCapture,
+  parseCapturePayload,
+  summarizeCapturedFields,
+} from '../form-capture.mapper';
+import type {
+  CapturedField,
+  FormDestination,
+  NormalizedSubmission,
+} from '../forms.types';
 import {
   FormLeadIngestionService,
   formRequestContext,
@@ -51,6 +65,10 @@ const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW_MS = 10 * 60_000;
 
 export type PublicSubmitMeta = { ip: string | null; userAgent: string | null };
+export type PublicCaptureMeta = PublicSubmitMeta & {
+  origin: string | null;
+  referer: string | null;
+};
 
 export function generatePublicKey(): string {
   return `f_${randomBytes(12).toString('hex')}`;
@@ -62,6 +80,12 @@ export function hashVisitorIp(
 ): string | null {
   if (!ip) return null;
   return createHash('sha256').update(`${formId}:${ip}`).digest('hex');
+}
+
+function capturedFieldsOf(payload: Record<string, unknown>): CapturedField[] {
+  return Array.isArray(payload?.fields)
+    ? (payload.fields as CapturedField[])
+    : [];
 }
 
 function requireScope(ctx: RequestContext) {
@@ -152,6 +176,8 @@ export class FormsService {
     await this.addon.assertEnabled(scope.tenantId, scope.workspaceId);
     const form = await this.forms.findOne({ where: { ...scope, id } });
     if (!form) throw new NotFoundException('Form not found.');
+    // Rows created before F3 have `{}`.
+    form.capture = validateCapture(form.capture);
     return form;
   }
 
@@ -210,6 +236,7 @@ export class FormsService {
       form.security = validateSecurity(dto.security);
     if (dto.afterSubmit !== undefined)
       form.afterSubmit = validateAfterSubmit(dto.afterSubmit);
+    if (dto.capture !== undefined) form.capture = validateCapture(dto.capture);
     if (dto.destination !== undefined) {
       const destination = validateDestination(dto.destination);
       this.assertDestinationMatchesScope(destination, form.agencyClientId);
@@ -306,7 +333,36 @@ export class FormsService {
       throw new ConflictException('Submission already has an opportunity.');
     const form = await this.get(ctx, submission.formId);
     if (submission.status === 'spam') submission.status = 'received';
+    // Captured site forms are re-mapped with the current field mapping (learning mode).
+    if (submission.source === 'script')
+      submission.normalized = normalizeCapture(
+        capturedFieldsOf(submission.payload),
+        form.capture.fieldMap,
+      );
     return this.ingestion.process(form, submission);
+  }
+
+  /** Fields seen in the latest captures and where each one goes (§5.6 learning mode). */
+  async listCaptureFields(ctx: RequestContext, formId: string) {
+    const form = await this.get(ctx, formId);
+    const recent = await this.submissions.find({
+      select: { id: true, payload: true },
+      where: {
+        tenantId: form.tenantId,
+        workspaceId: form.workspaceId,
+        formId: form.id,
+        source: 'script',
+      },
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+    return {
+      captures: recent.length,
+      fields: summarizeCapturedFields(
+        recent.map((row) => row.payload),
+        form.capture.fieldMap,
+      ),
+    };
   }
 
   async markSpam(ctx: RequestContext, submissionId: string) {
@@ -357,23 +413,7 @@ export class FormsService {
     const form = await this.findPublicForm(publicKey);
     const response = { ok: true as const, afterSubmit: form.afterSubmit };
 
-    const ipHash = hashVisitorIp(form.id, meta.ip);
-    if (ipHash) {
-      const recent = await this.submissions.count({
-        where: {
-          formId: form.id,
-          ipHash,
-          createdAt: MoreThanOrEqual(
-            new Date(Date.now() - RATE_LIMIT_WINDOW_MS),
-          ),
-        },
-      });
-      if (recent >= RATE_LIMIT_MAX)
-        throw new HttpException(
-          'Too many submissions. Try again later.',
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-    }
+    const ipHash = await this.assertRateLimit(form.id, meta.ip);
 
     if (dto.nonce) {
       const replay = await this.submissions.findOne({
@@ -453,7 +493,110 @@ export class FormsService {
     return { ...response, submissionId: submission.id };
   }
 
+  /**
+   * capture.js (F3): a copy of what the site's own form sent. The site keeps
+   * its own flow (PHP etc.); this never answers with anything the script uses.
+   */
+  async capturePublic(
+    publicKey: string,
+    dto: CapturePublicFormDto,
+    meta: PublicCaptureMeta,
+  ): Promise<void> {
+    const form = await this.findPublicForm(publicKey);
+    // Other sites cannot feed leads in through a copied snippet (§5.6).
+    if (
+      !isCaptureOriginAllowed(
+        meta.origin,
+        meta.referer,
+        form.security.allowedOrigins ?? [],
+      )
+    )
+      throw new ForbiddenException('Origin not allowed for this form.');
+
+    let parsed: ReturnType<typeof parseCapturePayload>;
+    try {
+      parsed = parseCapturePayload(dto.payload);
+    } catch (error) {
+      if (error instanceof CaptureFormatError)
+        throw new BadRequestException(error.message);
+      throw error;
+    }
+    if (!parsed.fields.length) return;
+
+    const ipHash = await this.assertRateLimit(form.id, meta.ip);
+    if (parsed.nonce) {
+      const replay = await this.submissions.findOne({
+        where: { formId: form.id, clientNonce: parsed.nonce },
+      });
+      if (replay) return;
+    }
+
+    // Time since the page loaded: bots post within milliseconds.
+    const minFillMs = (form.security.minFillSeconds ?? 0) * 1000;
+    const isSpam =
+      minFillMs > 0 &&
+      parsed.elapsedMs !== null &&
+      parsed.elapsedMs < minFillMs;
+    const capture = validateCapture(form.capture);
+
+    let submission: FormSubmissionEntity;
+    try {
+      submission = await this.submissions.save(
+        this.submissions.create({
+          tenantId: form.tenantId,
+          workspaceId: form.workspaceId,
+          agencyClientId: form.agencyClientId,
+          companyContextId: form.companyContextId,
+          formId: form.id,
+          schemaVersion: form.schemaVersion,
+          source: 'script',
+          payload: { fields: parsed.fields },
+          normalized: normalizeCapture(parsed.fields, capture.fieldMap),
+          attribution: sanitizeAttribution(parsed.attribution),
+          clientNonce: parsed.nonce,
+          ipHash,
+          userAgent: meta.userAgent?.slice(0, 400) ?? null,
+          status: isSpam ? 'spam' : 'received',
+          error: null,
+          contactId: null,
+          opportunityId: null,
+          outcome: {},
+          processedAt: isSpam ? new Date() : null,
+        }),
+      );
+    } catch (error) {
+      // Same nonce raced (submit + click fallback): the first row wins.
+      if (
+        parsed.nonce &&
+        error instanceof QueryFailedError &&
+        (error.driverError as { code?: string }).code === '23505'
+      )
+        return;
+      throw error;
+    }
+    if (!isSpam) await this.ingestion.process(form, submission);
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  /** Per form + visitor cap; returns the visitor hash stored on the row. */
+  private async assertRateLimit(formId: string, ip: string | null) {
+    const ipHash = hashVisitorIp(formId, ip);
+    if (!ipHash) return null;
+    const recent = await this.submissions.count({
+      where: {
+        formId,
+        ipHash,
+        createdAt: MoreThanOrEqual(new Date(Date.now() - RATE_LIMIT_WINDOW_MS)),
+      },
+    });
+    if (recent >= RATE_LIMIT_MAX)
+      throw new HttpException(
+        'Too many submissions. Try again later.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    return ipHash;
+  }
 
   private validateClientScope(
     dto: Pick<CreateFormDto, 'agencyClientId' | 'companyContextId'>,

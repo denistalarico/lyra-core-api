@@ -172,6 +172,16 @@ export class FormsController {
     return this.forms.rotateKey(ctx, id);
   }
 
+  /** Learning mode for the capture script: fields seen in recent captures. */
+  @Get(':id/capture-fields')
+  @RequirePermission('agency.forms.submissions.view')
+  listCaptureFields(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.forms.listCaptureFields(ctx, id);
+  }
+
   @Get(':id/submissions')
   @RequirePermission('agency.forms.submissions.view')
   listSubmissions(

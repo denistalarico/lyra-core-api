@@ -38,6 +38,7 @@ function makeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     destination: { ...DEFAULT_FORM_DESTINATION },
     security: { ...DEFAULT_FORM_SECURITY },
     afterSubmit: { ...DEFAULT_FORM_AFTER_SUBMIT },
+    capture: { formSelector: null, fieldMap: {} },
     createdByUserId: null,
     publishedAt: new Date(),
     archivedAt: null,
@@ -255,6 +256,32 @@ describe('FormLeadIngestionService', () => {
       contactId: null,
       outcome: { contactAction: 'skipped' },
     });
+  });
+
+  it('a captured site form without name/e-mail/phone waits for mapping (no blank deal)', async () => {
+    const { service, contacts, sales } = setup();
+    const result = await service.process(
+      makeForm(),
+      makeSubmission({
+        source: 'script',
+        normalized: {
+          values: { input_1: 'x' },
+          lead: {
+            name: null,
+            email: null,
+            phone: null,
+            company: null,
+            position: null,
+          },
+          opportunity: { title: null, valueAmount: null, notes: null },
+          summaryLines: ['input_1: x'],
+        },
+      }),
+    );
+    expect(result.status).toBe('needs_review');
+    expect(result.error).toContain('Mapeie');
+    expect(contacts.findExisting).not.toHaveBeenCalled();
+    expect(sales.createQuickOpportunity).not.toHaveBeenCalled();
   });
 
   it('keeps the submission as failed (reprocessable) when the CRM throws', async () => {

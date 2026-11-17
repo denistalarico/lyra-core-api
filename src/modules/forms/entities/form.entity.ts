@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import type {
   FormAfterSubmit,
+  FormCapture,
   FormDestination,
   FormFieldsConfig,
   FormPresentation,
@@ -73,6 +74,10 @@ export class FormEntity {
 
   @Column({ name: 'after_submit', type: 'jsonb', default: () => "'{}'::jsonb" })
   afterSubmit!: FormAfterSubmit;
+
+  /** F3: capture script settings (selector + field mapping). */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  capture!: FormCapture;
 
   @Column({ name: 'created_by_user_id', type: 'uuid', nullable: true })
   createdByUserId!: string | null;

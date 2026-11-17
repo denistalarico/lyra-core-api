@@ -9,6 +9,7 @@ import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity'
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
 import { FormEntity } from '../entities/form.entity';
 import { FormSubmissionEntity } from '../entities/form-submission.entity';
+import { hasLeadIdentity } from '../form-capture.mapper';
 import type {
   FormSubmissionOutcome,
   NormalizedSubmission,
@@ -103,6 +104,14 @@ export class FormLeadIngestionService {
         submission,
         'needs_review',
         'Submission has no normalized data.',
+      );
+    // A captured site form with no recognizable contact field (newsletter,
+    // search, unmapped names) waits for the mapping instead of opening a blank deal.
+    if (submission.source === 'script' && !hasLeadIdentity(normalized))
+      return this.finish(
+        submission,
+        'needs_review',
+        'Nenhum campo de nome, e-mail ou telefone reconhecido. Mapeie os campos na aba Publicação e reprocesse.',
       );
 
     try {

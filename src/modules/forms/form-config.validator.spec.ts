@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import {
   assertPublishable,
   validateAfterSubmit,
+  validateCapture,
   validateDestination,
   validateFieldsConfig,
   validateLooseObject,
@@ -214,5 +215,28 @@ describe('form-config.validator', () => {
       validateLooseObject({ big: 'x'.repeat(40_000) }, 'tracking'),
     ).toThrow(/too large/);
     expect(() => validateLooseObject([], 'tracking')).toThrow(/object/);
+  });
+});
+
+describe('validateCapture', () => {
+  it('defaults, accepts mapping and rejects bad targets/selectors', () => {
+    expect(validateCapture(undefined)).toEqual({
+      formSelector: null,
+      fieldMap: {},
+    });
+    expect(validateCapture({})).toEqual({ formSelector: null, fieldMap: {} });
+    expect(
+      validateCapture({
+        formSelector: ' #contato form ',
+        fieldMap: { 'your-name': 'contact.name', x: 'ignore' },
+      }),
+    ).toEqual({
+      formSelector: '#contato form',
+      fieldMap: { 'your-name': 'contact.name', x: 'ignore' },
+    });
+    expect(() =>
+      validateCapture({ fieldMap: { a: 'contact.password' } }),
+    ).toThrow();
+    expect(() => validateCapture({ formSelector: '<script>' })).toThrow();
   });
 });

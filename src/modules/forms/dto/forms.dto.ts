@@ -108,6 +108,11 @@ export class PatchFormDto {
   @IsOptional()
   @IsObject()
   afterSubmit?: Record<string, unknown>;
+
+  /** F3: capture script selector + field mapping. */
+  @IsOptional()
+  @IsObject()
+  capture?: Record<string, unknown>;
 }
 
 export class ListFormsQueryDto {
@@ -172,4 +177,15 @@ export class SubmitPublicFormDto {
   @IsOptional()
   @IsIn(['page', 'embed'])
   source?: 'page' | 'embed';
+}
+
+/**
+ * capture.js posts `payload=<json>` as urlencoded (sendBeacon): a CORS-safelisted
+ * type, so any site can send it without a preflight. The JSON is parsed and
+ * validated in `form-capture.mapper.ts`.
+ */
+export class CapturePublicFormDto {
+  @IsString()
+  @MaxLength(32_000)
+  payload!: string;
 }

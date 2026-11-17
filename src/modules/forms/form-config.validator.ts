@@ -1,11 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   DEFAULT_FORM_AFTER_SUBMIT,
+  DEFAULT_FORM_CAPTURE,
   DEFAULT_FORM_DESTINATION,
   DEFAULT_FORM_PRESENTATION,
   DEFAULT_FORM_SECURITY,
   DEFAULT_FORM_TRACKING,
   FORM_BACKGROUNDS,
+  FORM_CAPTURE_TARGETS,
   FORM_CONTAINERS,
   FORM_DESTINATION_TARGETS,
   FORM_FIELD_TARGETS,
@@ -15,6 +17,8 @@ import {
   FORM_TRIGGER_FREQUENCIES,
   FORM_TRIGGERS,
   type FormAfterSubmit,
+  type FormCapture,
+  type FormCaptureTarget,
   type FormDestination,
   type FormField,
   type FormFieldsConfig,
@@ -464,6 +468,30 @@ export function validateTracking(input: unknown): FormTracking {
   )
     fail('Google Ads needs both the conversion ID and the label.');
   return tracking;
+}
+
+/** F3: the selector goes into the copied snippet; keys are the site's input names. */
+export function validateCapture(input: unknown): FormCapture {
+  if (input === undefined || input === null)
+    return { ...DEFAULT_FORM_CAPTURE, fieldMap: {} };
+  if (!isRecord(input)) fail('capture must be an object.');
+  const formSelector = text(input.formSelector, 300, 'capture.formSelector');
+  if (formSelector && /[<>"`]/.test(formSelector))
+    fail('capture.formSelector has invalid characters.');
+  const map = input.fieldMap ?? {};
+  if (!isRecord(map)) fail('capture.fieldMap must be an object.');
+  const entries = Object.entries(map);
+  if (entries.length > 100)
+    fail('capture.fieldMap accepts at most 100 fields.');
+  const fieldMap: Record<string, FormCaptureTarget> = {};
+  for (const [key, target] of entries) {
+    if (!key.trim() || key.length > 120)
+      fail('capture.fieldMap has an invalid field name.');
+    if (!FORM_CAPTURE_TARGETS.includes(target as FormCaptureTarget))
+      fail(`capture.fieldMap["${key}"] is invalid.`);
+    fieldMap[key] = target as FormCaptureTarget;
+  }
+  return { formSelector, fieldMap };
 }
 
 export function assertPublishable(fields: FormFieldsConfig) {
