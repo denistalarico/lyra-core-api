@@ -15,6 +15,7 @@ import {
 import {
   detectMediaAssetMimeType,
   MediaAssetEntity,
+  mediaAssetPosterId,
   MediaAssetResolverService,
   MediaAssetUploadService,
 } from '../../common/media-assets';
@@ -367,7 +368,11 @@ export class CreativeAssetService {
       } catch {
         thumbnailId = null;
       }
-    } else file.body.destroy();
+    } else {
+      file.body.destroy();
+      // The still the browser captured at upload becomes the library thumbnail.
+      thumbnailId = mediaAssetPosterId(media);
+    }
     return this.dataSource.transaction(async (manager) => {
       const assets = manager.getRepository(CreativeAssetEntity);
       const versions = manager.getRepository(CreativeAssetVersionEntity);

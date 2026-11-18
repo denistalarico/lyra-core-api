@@ -193,6 +193,33 @@ export class MediaAssetController {
   }
 
   /**
+   * A still of an uploaded video, captured by the browser (2 MB at most).
+   * Best effort on the client: a video without a poster still publishes.
+   */
+  @Post(':mediaAssetId/poster')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(UPLOAD_PERMISSION)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 2 * 1024 * 1024, files: 1 },
+    }),
+  )
+  async attachPoster(
+    @RequestContextData() ctx: RequestContext,
+    @Param('mediaAssetId', ParseUUIDPipe) mediaAssetId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const asset = await this.uploadService.attachPoster(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      mediaAssetId,
+      file,
+    );
+    return toMediaAssetView(asset);
+  }
+
+  /**
    * Streams one asset's bytes, authenticated.
    *
    * Binary directly — not a public URL and not a redirect — because that is

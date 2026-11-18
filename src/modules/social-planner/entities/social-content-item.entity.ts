@@ -150,6 +150,13 @@ export class SocialContentItemEntity {
   calendarOnly!: boolean;
 
   /**
+   * Kept after a calendar-only post's file is removed (every destination
+   * published): the calendar and history still show what went out.
+   */
+  @Column({ name: 'thumbnail_media_asset_id', type: 'uuid', nullable: true })
+  thumbnailMediaAssetId!: string | null;
+
+  /**
    * Editorial day only. The exact channel/time belongs to a destination and
    * the actual provider schedule will later belong to SocialPublication.
    */

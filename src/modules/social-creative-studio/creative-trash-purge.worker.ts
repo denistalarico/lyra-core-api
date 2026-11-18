@@ -51,6 +51,10 @@ export const PURGEABLE_MEDIA = `
     JOIN media_assets m ON m.id IN (dv.media_asset_id, dv.thumbnail_media_asset_id)
    WHERE a.deleted_at IS NOT NULL
      AND m.deleted_at IS NULL
+     -- What remains of a standalone post after its file is gone.
+     AND NOT EXISTS (
+           SELECT 1 FROM social_content_items ci
+            WHERE ci.thumbnail_media_asset_id = m.id)
      AND NOT EXISTS (
            SELECT 1
              FROM social_creative_asset_versions lv

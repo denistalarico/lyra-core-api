@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { IsNull, Not } from 'typeorm';
+import { type FindOperator, IsNull, Not } from 'typeorm';
 import type { FilesService } from '../files/files.service';
 import type { MediaAssetMetadataReader } from './media-asset-metadata.port';
 import type { MediaAssetScope } from './media-asset-resolver.service';
@@ -91,7 +91,11 @@ describe('MediaAssetUploadService', () => {
     );
   });
 
-  function upload(scope: MediaAssetScope, buffer = PNG, mimetype = 'image/png') {
+  function upload(
+    scope: MediaAssetScope,
+    buffer = PNG,
+    mimetype = 'image/png',
+  ) {
     return service.upload(scope, actorId, {
       file: {
         buffer,
@@ -185,7 +189,11 @@ describe('MediaAssetUploadService', () => {
 
     it('never writes anything when the format is refused', async () => {
       await expect(
-        upload(agencyScope, Buffer.from('%PDF-1.7', 'latin1'), 'application/pdf'),
+        upload(
+          agencyScope,
+          Buffer.from('%PDF-1.7', 'latin1'),
+          'application/pdf',
+        ),
       ).rejects.toThrow(BadRequestException);
 
       expect(files.uploadPrivateBuffer).not.toHaveBeenCalled();
@@ -278,7 +286,7 @@ describe('MediaAssetUploadService', () => {
             workspaceId: agencyScope.workspaceId,
             agencyClientId: IsNull(),
             companyContextId: IsNull(),
-            source: durableMediaAssetSource(),
+            source: expect.anything(),
           },
         }),
       );
@@ -385,7 +393,13 @@ describe('MediaAssetUploadService', () => {
       type WhereCall = [{ where: { source: unknown } }];
       const [[list]] = repository.findAndCount.mock.calls as WhereCall[];
       const [[content]] = repository.findOne.mock.calls as WhereCall[];
-      expect(list.where.source).toEqual(durableMediaAssetSource());
+      // The listing also hides video stills (2026-11-18): previews, not media.
+      const listed = list.where.source as FindOperator<string>;
+      expect(listed.type).toBe('raw');
+      expect(listed.objectLiteralParameters).toEqual({
+        temporaryPrefix: 'temporary:%',
+        posterSource: 'media_poster',
+      });
       expect(content.where.source).toEqual(durableMediaAssetSource());
     });
 

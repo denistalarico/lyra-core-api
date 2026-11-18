@@ -32,10 +32,23 @@ export type MediaAssetView = {
   codec: string | null;
   source: string;
   createdAt: string;
+  /**
+   * Videos: a small still captured by the browser at upload, so previews never
+   * download the video itself. Read from `metadata` by name, never the bag.
+   */
+  posterMediaAssetId: string | null;
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function mediaAssetPosterId(asset: MediaAssetEntity): string | null {
+  const value = asset.metadata?.posterMediaAssetId;
+  return typeof value === 'string' && UUID.test(value) ? value : null;
+}
 
 export function toMediaAssetView(asset: MediaAssetEntity): MediaAssetView {
   return {
+    posterMediaAssetId: mediaAssetPosterId(asset),
     id: asset.id,
     mimeType: asset.mimeType,
     byteSize: asset.byteSize,

@@ -60,6 +60,46 @@ const PUBLISHED_UPLOADS = `
    ORDER BY a.id
    LIMIT $1`;
 
+/**
+ * Standalone (calendar-only) posts, owner's rule of 2026-11-18: once every
+ * destination is published, the file goes at once, whatever the retention
+ * setting says (that setting is for planned content). Only when nothing else
+ * holds the binary: no planned item, no other library version.
+ */
+export const PUBLISHED_STANDALONE_UPLOADS = `
+  SELECT a.id, i.id AS content_item_id, v.thumbnail_media_asset_id
+    FROM social_creative_assets a
+    JOIN social_creative_asset_versions v ON v.id = a.current_version_id
+    JOIN media_assets m ON m.id = v.media_asset_id AND m.deleted_at IS NULL
+    JOIN social_content_items i ON i.id = a.content_item_id
+     AND i.calendar_only = true AND i.deleted_at IS NULL
+   WHERE a.source_type = 'planner_upload'
+     AND a.trashed_at IS NULL
+     AND a.deleted_at IS NULL
+     AND a.restored_at IS NULL
+     AND EXISTS (SELECT 1 FROM social_destination_creatives d WHERE d.media_asset_id = m.id)
+     AND EXISTS (
+           SELECT 1 FROM social_publications p
+            WHERE p.content_item_id = i.id AND p.status = 'published')
+     AND NOT EXISTS (
+           SELECT 1
+             FROM social_destination_creatives d2
+             JOIN social_content_items i2 ON i2.id = d2.content_item_id
+            WHERE d2.media_asset_id = m.id AND i2.calendar_only = false)
+     AND NOT EXISTS (
+           SELECT 1 FROM social_creative_asset_versions v2
+            WHERE v2.creative_asset_id <> a.id
+              AND (v2.media_asset_id = m.id OR v2.thumbnail_media_asset_id = m.id))
+     AND ${ONLY_PUBLISHED_USE}
+   ORDER BY a.id
+   LIMIT $1`;
+
+/** Keeps the still on the item: the destination link goes with the file. */
+const KEEP_STANDALONE_THUMBNAIL = `
+  UPDATE social_content_items
+     SET thumbnail_media_asset_id = $2
+   WHERE id = $1 AND thumbnail_media_asset_id IS NULL`;
+
 const SEND_TO_TRASH = `
   UPDATE social_creative_assets
      SET status = 'archived',
@@ -102,12 +142,47 @@ export class CreativePlannerRetentionWorker {
 
   async run() {
     const adopted = await this.adopt();
+    const standalone = await this.expireStandalone();
     const trashed = await this.expire();
-    if (adopted || trashed)
+    if (adopted || trashed || standalone)
       this.logger.log(
-        `planner retention: adopted=${adopted} trashed=${trashed}`,
+        `planner retention: adopted=${adopted} trashed=${trashed} standalone=${standalone}`,
       );
-    return { adopted, trashed };
+    return { adopted, trashed, standalone };
+  }
+
+  /**
+   * Thumbnail first, then the Lixeira with `purge_after = now()`: the trash
+   * purge removes the file on its next pass and leaves the thumbnail, which
+   * the item now references. A restore from the Lixeira keeps the file.
+   */
+  private async expireStandalone() {
+    const rows = await this.dataSource.query<
+      {
+        id: string;
+        content_item_id: string;
+        thumbnail_media_asset_id: string | null;
+      }[]
+    >(PUBLISHED_STANDALONE_UPLOADS, [BATCH_SIZE]);
+    let trashed = 0;
+    for (const row of rows) {
+      try {
+        await this.dataSource.transaction(async (manager) => {
+          if (row.thumbnail_media_asset_id)
+            await manager.query(KEEP_STANDALONE_THUMBNAIL, [
+              row.content_item_id,
+              row.thumbnail_media_asset_id,
+            ]);
+          await manager.query(SEND_TO_TRASH, [row.id, 0]);
+        });
+        trashed += 1;
+      } catch (error) {
+        this.logger.warn(
+          `planner retention: standalone trash failed asset=${row.id} error=${(error as Error)?.name ?? typeof error}`,
+        );
+      }
+    }
+    return trashed;
   }
 
   private async adopt() {

@@ -60,6 +60,8 @@ export function toSocialContentItemView(
     creativeFormat: item.creativeFormat,
     planningStatus: item.planningStatus,
     calendarOnly: item.calendarOnly,
+    /** Calendar-only post whose file was removed after publishing: preview from here. */
+    thumbnailMediaAssetId: item.thumbnailMediaAssetId ?? null,
     plannedDate: item.plannedDate,
     sortOrder: item.sortOrder,
     campaignInstanceId: item.campaignInstanceId,

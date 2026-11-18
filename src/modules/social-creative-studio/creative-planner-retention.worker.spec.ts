@@ -10,18 +10,28 @@ const upload = {
   created_by_id: 'u',
 };
 
-function harness(untracked: object[], published: object[]) {
+function harness(
+  untracked: object[],
+  published: object[],
+  standalone: object[] = [],
+) {
   const updates: unknown[][] = [];
+  const query = jest.fn(async (sql: string, params: unknown[]) => {
+    if (sql.includes('UPDATE')) {
+      updates.push(params);
+      return [];
+    }
+    if (sql.includes('i.calendar_only = true')) return standalone;
+    return sql.includes('social_destination_creatives d\n    JOIN')
+      ? untracked
+      : published;
+  });
   const dataSource = {
-    query: jest.fn(async (sql: string, params: unknown[]) => {
-      if (sql.includes('UPDATE')) {
-        updates.push(params);
-        return [];
-      }
-      return sql.includes('social_destination_creatives d\n    JOIN')
-        ? untracked
-        : published;
-    }),
+    query,
+    transaction: jest.fn(
+      async (run: (manager: { query: typeof query }) => Promise<unknown>) =>
+        run({ query }),
+    ),
   };
   const assets = { adoptPlannerUpload: jest.fn(async () => ({})) };
   return {
@@ -38,7 +48,11 @@ function harness(untracked: object[], published: object[]) {
 describe('CreativePlannerRetentionWorker', () => {
   it('adopts an upload in the scope of its media', async () => {
     const h = harness([upload], []);
-    await expect(h.worker.run()).resolves.toEqual({ adopted: 1, trashed: 0 });
+    await expect(h.worker.run()).resolves.toEqual({
+      adopted: 1,
+      trashed: 0,
+      standalone: 0,
+    });
     expect(h.assets.adoptPlannerUpload).toHaveBeenCalledWith(
       {
         tenantId: 't',
@@ -54,13 +68,64 @@ describe('CreativePlannerRetentionWorker', () => {
   it('keeps going when one upload fails', async () => {
     const h = harness([upload, upload], []);
     h.assets.adoptPlannerUpload.mockRejectedValueOnce(new Error('storage'));
-    await expect(h.worker.run()).resolves.toEqual({ adopted: 1, trashed: 0 });
+    await expect(h.worker.run()).resolves.toEqual({
+      adopted: 1,
+      trashed: 0,
+      standalone: 0,
+    });
   });
 
   it('sends a published upload to the Lixeira with the period of its context', async () => {
     const h = harness([], [{ id: 'asset', days: 7 }]);
-    await expect(h.worker.run()).resolves.toEqual({ adopted: 0, trashed: 1 });
+    await expect(h.worker.run()).resolves.toEqual({
+      adopted: 0,
+      trashed: 1,
+      standalone: 0,
+    });
     expect(h.updates).toEqual([['asset', 7]]);
+  });
+
+  it('removes a published standalone post at once, keeping its thumbnail on the item', async () => {
+    const h = harness(
+      [],
+      [],
+      [
+        {
+          id: 'asset',
+          content_item_id: 'item',
+          thumbnail_media_asset_id: 'thumb',
+        },
+      ],
+    );
+    await expect(h.worker.run()).resolves.toEqual({
+      adopted: 0,
+      trashed: 0,
+      standalone: 1,
+    });
+    expect(h.updates).toEqual([
+      ['item', 'thumb'],
+      ['asset', 0],
+    ]);
+  });
+
+  it('still removes a standalone video that has no thumbnail', async () => {
+    const h = harness(
+      [],
+      [],
+      [
+        {
+          id: 'asset',
+          content_item_id: 'item',
+          thumbnail_media_asset_id: null,
+        },
+      ],
+    );
+    await expect(h.worker.run()).resolves.toEqual({
+      adopted: 0,
+      trashed: 0,
+      standalone: 1,
+    });
+    expect(h.updates).toEqual([['asset', 0]]);
   });
 
   it('ignores bindings from before the feature existed', async () => {

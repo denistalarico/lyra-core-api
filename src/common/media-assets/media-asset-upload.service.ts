@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
-import { IsNull, Not, Repository } from 'typeorm';
+import { IsNull, Not, Raw, Repository } from 'typeorm';
 import { FilesService } from '../files/files.service';
 import {
   MEDIA_ASSET_METADATA_READER,
@@ -40,7 +40,9 @@ import {
 import {
   durableMediaAssetSource,
   isTemporaryMediaAssetSource,
+  TEMPORARY_MEDIA_ASSET_SOURCE_PREFIX,
 } from './media-asset-retention';
+import { mediaAssetPosterId } from './views/media-asset.view';
 
 export type UploadMediaAssetInput = {
   readonly file: {
@@ -57,11 +59,16 @@ export type UploadMediaAssetInput = {
 /** Upper bound on one listing page, so a scope with thousands of assets cannot be asked for all of them at once. */
 const MAX_LIST_LIMIT = 100;
 const DEFAULT_LIST_LIMIT = 50;
+/** A video's still (`attachPoster`): a preview, never a library item of its own. */
+export const MEDIA_POSTER_SOURCE = 'media_poster';
+const MEDIA_POSTER_MAX_BYTES = 2 * 1024 * 1024;
+const MEDIA_POSTER_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 /** Everything else, Brand Kit and references included, stays where it is. */
 const R2_SOURCES = new Set([
   'creative_studio',
   'creative_studio_thumbnail',
   'planner_upload',
+  MEDIA_POSTER_SOURCE,
 ]);
 
 @Injectable()
@@ -251,6 +258,53 @@ export class MediaAssetUploadService {
   }
 
   /**
+   * Attaches a still of a video (captured by the browser at upload). The
+   * server has no video decoder, so the still is how calendar, picker and
+   * library preview a video without downloading it — and what remains of a
+   * standalone post once its file is removed after publishing.
+   *
+   * The first still wins: a video keeps one poster for its whole life.
+   */
+  async attachPoster(
+    scope: MediaAssetScope,
+    actorUserId: string | null,
+    videoId: string,
+    file: UploadMediaAssetInput['file'] | undefined,
+  ) {
+    const video = await this.mediaAssets.findOne({
+      where: {
+        id: videoId,
+        ...mediaAssetScopeWhere(scope),
+        source: durableMediaAssetSource(),
+      },
+    });
+    if (!video) throw new NotFoundException('Media asset not found.');
+    if (!video.mimeType.startsWith('video/')) {
+      throw new BadRequestException('A miniatura só se aplica a vídeos.');
+    }
+    if (mediaAssetPosterId(video)) return video;
+    if (!file?.buffer?.length || file.buffer.length > MEDIA_POSTER_MAX_BYTES) {
+      throw new BadRequestException('Miniatura inválida.');
+    }
+    if (
+      !MEDIA_POSTER_TYPES.has(
+        resolveMediaAssetContentType(file.buffer, file.mimetype),
+      )
+    ) {
+      throw new BadRequestException('Miniatura inválida.');
+    }
+    const poster = await this.upload(scope, actorUserId, {
+      file,
+      source: MEDIA_POSTER_SOURCE,
+    });
+    video.metadata = {
+      ...(video.metadata ?? {}),
+      posterMediaAssetId: poster.id,
+    };
+    return this.mediaAssets.save(video);
+  }
+
+  /**
    * Lists the scope's assets, newest first.
    *
    * `mediaAssetScopeWhere` is the whole authorization here: tenant,
@@ -270,7 +324,15 @@ export class MediaAssetUploadService {
     const [items, total] = await this.mediaAssets.findAndCount({
       where: {
         ...mediaAssetScopeWhere(scope),
-        source: durableMediaAssetSource(),
+        // Durable, minus video stills: those are previews, not media to pick.
+        source: Raw(
+          (column) =>
+            `${column} NOT LIKE :temporaryPrefix AND ${column} <> :posterSource`,
+          {
+            temporaryPrefix: `${TEMPORARY_MEDIA_ASSET_SOURCE_PREFIX}%`,
+            posterSource: MEDIA_POSTER_SOURCE,
+          },
+        ),
       },
       order: { createdAt: 'DESC' },
       take: limit,
