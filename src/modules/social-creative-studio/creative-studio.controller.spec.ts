@@ -68,6 +68,7 @@ describe('Creative Studio controller permission contract', () => {
       brandContext as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     const clientContext = {
       tenantId: 'tenant-a',
@@ -112,6 +113,7 @@ describe('Creative Studio controller permission contract', () => {
       {} as never,
       {} as never,
       versionApprovals as never,
+      {} as never,
       {} as never,
     );
     const ctx = {

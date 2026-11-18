@@ -55,6 +55,26 @@ type UploadFile = {
 };
 
 /**
+ * A video the browser already wrote to R2 (direct upload, 2026-11-18): the
+ * media row exists, so the Studio only creates its own rows around it.
+ */
+export type StoredCreativeUpload = { stored: MediaAssetEntity };
+export type CreativeUploadSource = UploadFile | StoredCreativeUpload;
+function isStoredUpload(
+  source: CreativeUploadSource,
+): source is StoredCreativeUpload {
+  return (
+    typeof source === 'object' &&
+    source !== null &&
+    'stored' in source &&
+    Boolean(source.stored)
+  );
+}
+function storedKind(media: MediaAssetEntity): 'image' | 'video' {
+  return media.mimeType.startsWith('image/') ? 'image' : 'video';
+}
+
+/**
  * CS3.2: runs inside the transaction that creates a version, once the version
  * row exists. A throw rolls the version back and compensates its binaries —
  * which is how a generation output records its promotion exactly once.
@@ -263,6 +283,37 @@ export class CreativeAssetService {
       manager,
     );
   }
+  /** Compensation for a direct upload no Studio row ended up referencing. */
+  async discardDirectUpload(scope: CreativeStudioScope, mediaAssetId: string) {
+    try {
+      await this.mediaUpload.removeAfterFailedConsumerOperation(
+        scope,
+        mediaAssetId,
+      );
+    } catch {
+      // Still referenced by a version (foreign key): it is not orphaned, keep it.
+    }
+  }
+  /**
+   * A directly uploaded video already exists before any Studio check runs;
+   * if one of those checks refuses it, it is removed instead of orphaned.
+   */
+  private async releasingStoredOnError<T>(
+    scope: CreativeStudioScope,
+    stored: MediaAssetEntity | null,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (stored)
+        await this.mediaUpload.removeAfterFailedConsumerOperation(
+          scope,
+          stored.id,
+        );
+      throw error;
+    }
+  }
   private kind(file: UploadFile | undefined): 'image' | 'video' {
     if (!file?.buffer?.length)
       throw new BadRequestException('Nenhum arquivo foi enviado.');
@@ -369,7 +420,7 @@ export class CreativeAssetService {
     scope: CreativeStudioScope,
     actor: string | null,
     input: {
-      file: UploadFile;
+      file: CreativeUploadSource;
       name?: string;
       folderId?: string;
       contentItemId?: string;
@@ -378,25 +429,36 @@ export class CreativeAssetService {
       onVersionCreated?: CreativeVersionCreatedHook;
     },
   ) {
-    const assetType = this.kind(input.file);
-    this.assertDomainLimit(input.file, assetType);
-    await this.assertFolder(scope, input.folderId);
-    const link = await this.assertContentItem(scope, input.contentItemId);
-    const folderId =
-      input.folderId ??
-      (link ? await this.plannerFolder(scope, actor, link) : null);
-    const original = await this.mediaUpload.upload(scope, actor, {
-      file: input.file,
-      source: 'creative_studio',
-    });
+    const stored = isStoredUpload(input.file) ? input.file.stored : null;
+    const file = isStoredUpload(input.file) ? null : input.file;
+    const { assetType, folderId } = await this.releasingStoredOnError(
+      scope,
+      stored,
+      async () => {
+        const assetType = stored
+          ? storedKind(stored)
+          : this.kind(file ?? undefined);
+        if (file) this.assertDomainLimit(file, assetType);
+        await this.assertFolder(scope, input.folderId);
+        const link = await this.assertContentItem(scope, input.contentItemId);
+        const folderId =
+          input.folderId ??
+          (link ? await this.plannerFolder(scope, actor, link) : null);
+        return { assetType, folderId };
+      },
+    );
+    const original =
+      stored ??
+      (await this.mediaUpload.upload(scope, actor, {
+        file: file!,
+        source: 'creative_studio',
+      }));
     let thumbnailId: string | null = null;
     try {
-      thumbnailId = await this.thumbnailFor(
-        scope,
-        actor,
-        input.file,
-        assetType,
-      );
+      // A directly uploaded video has no poster: same as an uploaded video today.
+      thumbnailId = file
+        ? await this.thumbnailFor(scope, actor, file, assetType)
+        : null;
       return await this.dataSource.transaction(async (manager) => {
         const assets = manager.getRepository(CreativeAssetEntity);
         const versions = manager.getRepository(CreativeAssetVersionEntity);
@@ -462,25 +524,40 @@ export class CreativeAssetService {
     scope: CreativeStudioScope,
     actor: string | null,
     assetId: string,
-    file: UploadFile,
+    source: CreativeUploadSource,
     revision?: { revisesVersionId: string },
     onVersionCreated?: CreativeVersionCreatedHook,
   ) {
-    const asset = await this.findWritable(scope, assetId);
-    if (revision) this.assertRevisable(asset, revision.revisesVersionId);
-    const assetType = this.kind(file);
-    if (asset.assetType !== assetType)
-      throw new BadRequestException(
-        'A nova versão deve manter o tipo do criativo.',
-      );
-    this.assertDomainLimit(file, assetType);
-    const original = await this.mediaUpload.upload(scope, actor, {
-      file,
-      source: 'creative_studio',
-    });
+    const stored = isStoredUpload(source) ? source.stored : null;
+    const file = isStoredUpload(source) ? null : source;
+    const { asset, assetType } = await this.releasingStoredOnError(
+      scope,
+      stored,
+      async () => {
+        const asset = await this.findWritable(scope, assetId);
+        if (revision) this.assertRevisable(asset, revision.revisesVersionId);
+        const assetType = stored
+          ? storedKind(stored)
+          : this.kind(file ?? undefined);
+        if (asset.assetType !== assetType)
+          throw new BadRequestException(
+            'A nova versão deve manter o tipo do criativo.',
+          );
+        if (file) this.assertDomainLimit(file, assetType);
+        return { asset, assetType };
+      },
+    );
+    const original =
+      stored ??
+      (await this.mediaUpload.upload(scope, actor, {
+        file: file!,
+        source: 'creative_studio',
+      }));
     let thumbnailId: string | null = null;
     try {
-      thumbnailId = await this.thumbnailFor(scope, actor, file, assetType);
+      thumbnailId = file
+        ? await this.thumbnailFor(scope, actor, file, assetType)
+        : null;
       return await this.dataSource.transaction(async (manager) => {
         const versions = manager.getRepository(CreativeAssetVersionEntity);
         const assets = manager.getRepository(CreativeAssetEntity);

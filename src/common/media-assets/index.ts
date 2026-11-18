@@ -1,4 +1,7 @@
+export * from './dto/direct-upload.dto';
 export * from './dto/list-media-assets-query.dto';
+export * from './media-asset-direct-upload.rules';
+export * from './media-asset-direct-upload.service';
 export * from './dto/upload-media-asset.dto';
 export * from './media-asset-metadata.port';
 export * from './media-asset-resolver.service';

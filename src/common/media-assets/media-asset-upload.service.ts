@@ -28,6 +28,10 @@ import {
   resolveMediaAssetContentType,
   sanitizeMediaAssetFilename,
 } from './media-asset-upload.rules';
+import {
+  assertDirectUploadSize,
+  readIsoMediaHead,
+} from './media-asset-direct-upload.rules';
 import { MediaAssetEntity } from './media-asset.entity';
 import {
   type MediaAssetScope,
@@ -160,6 +164,88 @@ export class MediaAssetUploadService {
       );
     } catch (error) {
       await this.bestEffortRemoveObject(storagePath);
+      throw error;
+    }
+  }
+
+  /**
+   * Registers a video the browser already wrote to R2 (direct upload).
+   *
+   * Same guarantees as `upload`, without holding the file: the real size comes
+   * from the object, the content type is sniffed from its first bytes and the
+   * metadata from its `moov` box, both through ranged reads. Anything refused
+   * here removes the object, so a rejected upload leaves nothing behind.
+   *
+   * Idempotent on `assetId`: a retried completion returns the row it created.
+   */
+  async registerStoredObject(
+    scope: MediaAssetScope,
+    actorUserId: string | null,
+    input: {
+      readonly storagePath: string;
+      readonly assetId: string;
+      readonly declaredBytes: number;
+      readonly declaredMimeType: string;
+      readonly originalFilename: string;
+      readonly source: string;
+    },
+  ) {
+    const existing = await this.mediaAssets.findOne({
+      where: { id: input.assetId, ...mediaAssetScopeWhere(scope) },
+    });
+    if (existing) return existing;
+
+    try {
+      const head = await this.filesService.headPrivateObject(input.storagePath);
+      assertDirectUploadSize(head.byteSize);
+      if (head.byteSize !== input.declaredBytes) {
+        throw new BadRequestException(
+          'O arquivo recebido não corresponde ao enviado. Envie novamente.',
+        );
+      }
+      const read = (start: number, end: number) =>
+        this.filesService.readPrivateRange(input.storagePath, start, end);
+      const contentType = resolveMediaAssetContentType(
+        await read(0, Math.min(4095, head.byteSize - 1)),
+        input.declaredMimeType,
+      );
+      if (!contentType.startsWith('video/')) {
+        throw new BadRequestException(
+          'O envio direto aceita apenas vídeo MP4 ou MOV.',
+        );
+      }
+      const metadata = await this.metadataReader.extract({
+        body: await readIsoMediaHead(read, head.byteSize),
+        mimeType: contentType,
+      });
+
+      return await this.mediaAssets.save(
+        this.mediaAssets.create({
+          id: input.assetId,
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          agencyClientId: scope.agencyClientId,
+          companyContextId: scope.companyContextId,
+          storagePath: input.storagePath,
+          mimeType: contentType,
+          byteSize: String(head.byteSize),
+          originalFilename: sanitizeMediaAssetFilename(input.originalFilename),
+          // Hashing would mean reading the whole video back: skipped.
+          checksum: null,
+          width: metadata.width,
+          height: metadata.height,
+          durationMs:
+            metadata.durationSeconds === null
+              ? null
+              : String(Math.round(metadata.durationSeconds * 1000)),
+          codec: metadata.codec || null,
+          source: input.source,
+          metadata: { upload: 'direct' },
+          createdById: actorUserId,
+        }),
+      );
+    } catch (error) {
+      await this.bestEffortRemoveObject(input.storagePath);
       throw error;
     }
   }

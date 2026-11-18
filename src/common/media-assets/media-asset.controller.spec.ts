@@ -50,6 +50,7 @@ describe('MediaAssetController', () => {
     jest.clearAllMocks();
     controller = new MediaAssetController(
       uploadService as unknown as MediaAssetUploadService,
+      {} as never,
     );
   });
 

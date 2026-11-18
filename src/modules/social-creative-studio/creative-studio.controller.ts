@@ -22,7 +22,13 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
-import { MEDIA_ASSET_MAX_UPLOAD_BYTES } from '../../common/media-assets';
+import {
+  DirectUploadTokenDto,
+  MEDIA_ASSET_MAX_UPLOAD_BYTES,
+  MediaAssetDirectUploadService,
+  SignDirectUploadPartsDto,
+  StartDirectUploadDto,
+} from '../../common/media-assets';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   PermissionsGuard,
@@ -34,6 +40,8 @@ import { CreativeStudioBrandContextService } from './creative-brand-context.serv
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeVersionApprovalService } from './creative-version-approval.service';
 import {
+  CompleteCreativeDirectUploadDto,
+  CompleteCreativeVersionDirectUploadDto,
   CreateCreativeAssetDto,
   CopyCreativeAssetDto,
   CreativeFolderDestinationDto,
@@ -68,7 +76,128 @@ export class CreativeStudioController {
     private readonly brandContext: CreativeStudioBrandContextService,
     private readonly versionApprovals: CreativeVersionApprovalService,
     private readonly settings: CreativeStudioSettingsService,
+    private readonly directUploads: MediaAssetDirectUploadService,
   ) {}
+  /**
+   * Direct upload of a heavy video (browser → R2 in parts, 2026-11-18).
+   * `start` is permitted by CREATE or UPDATE through the two routes below;
+   * the parts/abort calls are bound to the token (scope + actor) it issued.
+   */
+  @Post('direct-uploads')
+  @RequirePermission(CREATE)
+  startDirectUpload(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: StartDirectUploadDto,
+  ) {
+    return this.startStudioDirectUpload(ctx, dto);
+  }
+  @Post('assets/:id/versions/direct-uploads')
+  @RequirePermission(UPDATE)
+  startVersionDirectUpload(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) _id: string,
+    @Body() dto: StartDirectUploadDto,
+  ) {
+    return this.startStudioDirectUpload(ctx, dto);
+  }
+  @Post('direct-uploads/parts')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(VIEW)
+  signDirectUploadParts(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SignDirectUploadPartsDto,
+  ) {
+    return this.directUploads.signParts(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      dto.token,
+      dto.partNumbers,
+    );
+  }
+  @Post('direct-uploads/abort')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(VIEW)
+  async abortDirectUpload(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: DirectUploadTokenDto,
+  ) {
+    await this.directUploads.abort(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      dto.token,
+    );
+  }
+  @Post('direct-uploads/complete')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermission(CREATE)
+  async completeDirectUpload(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CompleteCreativeDirectUploadDto,
+  ) {
+    const scope = creativeStudioScope(ctx);
+    const actor = ctx.userId ?? null;
+    const stored = await this.directUploads.complete(
+      scope,
+      actor,
+      dto.token,
+      dto.parts,
+      'creative_studio',
+    );
+    return this.assets.upload(scope, actor, {
+      file: { stored },
+      name: dto.name,
+      folderId: dto.folderId,
+      contentItemId: dto.contentItemId,
+    });
+  }
+  @Post('assets/:id/versions/direct-uploads/complete')
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermission(UPDATE)
+  async completeVersionDirectUpload(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CompleteCreativeVersionDirectUploadDto,
+  ) {
+    const scope = creativeStudioScope(ctx);
+    const actor = ctx.userId ?? null;
+    const stored = await this.directUploads.complete(
+      scope,
+      actor,
+      dto.token,
+      dto.parts,
+      'creative_studio',
+    );
+    try {
+      if (dto.revisesVersionId)
+        return await this.versionApprovals.startRevision(
+          scope,
+          actor,
+          id,
+          dto.revisesVersionId,
+          { stored },
+        );
+      return await this.assets.createVersion(scope, actor, id, { stored });
+    } catch (error) {
+      // Approvals may refuse before the Studio sees the video: never orphan it.
+      await this.assets.discardDirectUpload(scope, stored.id);
+      throw error;
+    }
+  }
+  private startStudioDirectUpload(
+    ctx: RequestContext,
+    dto: StartDirectUploadDto,
+  ) {
+    return this.directUploads.start(
+      creativeStudioScope(ctx),
+      ctx.userId ?? null,
+      {
+        filename: dto.filename,
+        mimeType: dto.mimeType,
+        byteSize: dto.byteSize,
+        source: 'creative_studio',
+      },
+    );
+  }
   @ClientAreaExposed('social_creative_studio')
   @Get('brand-context')
   @RequirePermission(VIEW)

@@ -27,6 +27,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -48,8 +50,15 @@ import {
   RequirePermission,
   RequireProductEntitlement,
 } from '../../modules/permissions';
+import {
+  CompleteDirectUploadDto,
+  DirectUploadTokenDto,
+  SignDirectUploadPartsDto,
+  StartPlannerDirectUploadDto,
+} from './dto/direct-upload.dto';
 import { ListMediaAssetsQueryDto } from './dto/list-media-assets-query.dto';
 import { UploadMediaAssetDto } from './dto/upload-media-asset.dto';
+import { MediaAssetDirectUploadService } from './media-asset-direct-upload.service';
 import type { MediaAssetScope } from './media-asset-resolver.service';
 import { MEDIA_ASSET_MAX_UPLOAD_BYTES } from './media-asset-upload.rules';
 import { MediaAssetUploadService } from './media-asset-upload.service';
@@ -73,7 +82,10 @@ const MEDIA_ASSET_UPLOAD_OPTIONS = {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequireProductEntitlement('social')
 export class MediaAssetController {
-  constructor(private readonly uploadService: MediaAssetUploadService) {}
+  constructor(
+    private readonly uploadService: MediaAssetUploadService,
+    private readonly directUploads: MediaAssetDirectUploadService,
+  ) {}
 
   @ClientAreaExposed('social_planner')
   @Get()
@@ -110,6 +122,74 @@ export class MediaAssetController {
     );
 
     return toMediaAssetView(asset);
+  }
+
+  /**
+   * Direct upload of a heavy video (browser → R2 in parts, 2026-11-18). Not
+   * Client-Area exposed yet: the client surface keeps the regular upload.
+   */
+  @Post('direct-uploads')
+  @RequirePermission(UPLOAD_PERMISSION)
+  startDirectUpload(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: StartPlannerDirectUploadDto,
+  ) {
+    return this.directUploads.start(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      {
+        filename: dto.filename,
+        mimeType: dto.mimeType,
+        byteSize: dto.byteSize,
+        source: dto.source ?? 'planner_upload',
+      },
+    );
+  }
+
+  @Post('direct-uploads/parts')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(UPLOAD_PERMISSION)
+  signDirectUploadParts(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SignDirectUploadPartsDto,
+  ) {
+    return this.directUploads.signParts(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto.token,
+      dto.partNumbers,
+    );
+  }
+
+  @Post('direct-uploads/complete')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission(UPLOAD_PERMISSION)
+  async completeDirectUpload(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: CompleteDirectUploadDto,
+  ) {
+    const asset = await this.directUploads.complete(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto.token,
+      dto.parts,
+      'planner_upload',
+    );
+    return toMediaAssetView(asset);
+  }
+
+  @Post('direct-uploads/abort')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission(UPLOAD_PERMISSION)
+  async abortDirectUpload(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: DirectUploadTokenDto,
+  ) {
+    await this.directUploads.abort(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto.token,
+    );
   }
 
   /**

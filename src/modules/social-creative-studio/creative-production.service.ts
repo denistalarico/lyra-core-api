@@ -38,8 +38,10 @@ import {
 } from '../social-planner/entities';
 import {
   CreativeAssetService,
+  type CreativeUploadSource,
   type CreativeVersionCreatedHook,
   databaseConstraint,
+  type StoredCreativeUpload,
 } from './creative-asset.service';
 import { CreativeCostMaterializer } from './creative-cost.materializer';
 import {
@@ -474,7 +476,7 @@ export class CreativeProductionService {
     ctx: RequestContext,
     scope: CreativeStudioScope,
     contentItemId: string,
-    file: Parameters<CreativeAssetService['createVersion']>[3],
+    file: Exclude<CreativeUploadSource, StoredCreativeUpload>,
     input: UploadProductionCreativeDto,
   ) {
     await this.assertPermission(ctx, P.create);

@@ -1,4 +1,5 @@
 import { Type } from 'class-transformer';
+import { CompleteDirectUploadDto } from '../../../common/media-assets/dto/direct-upload.dto';
 import {
   IsIn,
   IsISO8601,
@@ -36,6 +37,16 @@ export class CreateCreativeVersionDto {
    * CS2B.6: the version whose `changes_requested` approval this new version
    * answers. Absent for a plain replacement.
    */
+  @IsOptional() @IsUUID() revisesVersionId?: string;
+}
+/** Direct upload (browser → R2) of a video that becomes a new creative. */
+export class CompleteCreativeDirectUploadDto extends CompleteDirectUploadDto {
+  @IsOptional() @IsString() @MaxLength(255) name?: string;
+  @IsOptional() @IsUUID() folderId?: string;
+  @IsOptional() @IsUUID() contentItemId?: string;
+}
+/** Direct upload of a video that becomes a new version of `:id`. */
+export class CompleteCreativeVersionDirectUploadDto extends CompleteDirectUploadDto {
   @IsOptional() @IsUUID() revisesVersionId?: string;
 }
 export class UpdateCreativeAssetDto {

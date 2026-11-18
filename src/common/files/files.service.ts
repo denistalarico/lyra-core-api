@@ -6,13 +6,18 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CreateBucketCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   PutBucketPolicyCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'stream';
@@ -357,6 +362,145 @@ export class FilesService {
     );
 
     return { url, expiresInSeconds };
+  }
+
+  /** Direct browser uploads exist only for R2: the VPS bucket never receives them. */
+  hasR2(): boolean {
+    return Boolean(this.r2);
+  }
+
+  /**
+   * Direct upload (browser → R2 in parts). R2 only, so a path outside `r2/`
+   * is refused: the VPS bucket must never be the target of a browser upload.
+   */
+  private directTarget(path: string) {
+    const key = this.normalizeAssetPath(path);
+    if (!this.r2 || !key.startsWith(R2_PATH_PREFIX)) {
+      throw new BadRequestException('Direct uploads require R2 storage.');
+    }
+    return {
+      client: this.r2.client,
+      bucket: this.r2.bucket,
+      key: key.slice(R2_PATH_PREFIX.length),
+    };
+  }
+
+  async createPrivateMultipartUpload(input: {
+    path: string;
+    contentType: string;
+  }): Promise<string> {
+    const target = this.directTarget(input.path);
+    const result = await target.client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: target.bucket,
+        Key: target.key,
+        ContentType: input.contentType,
+        CacheControl: 'private, no-store',
+      }),
+    );
+    if (!result.UploadId) {
+      throw new InternalServerErrorException('Multipart upload unavailable.');
+    }
+    return result.UploadId;
+  }
+
+  /** Presigned PUT for one part; the browser reads the part's ETag back. */
+  async presignUploadPart(input: {
+    path: string;
+    uploadId: string;
+    partNumber: number;
+    ttlSeconds: number;
+  }): Promise<string> {
+    const target = this.directTarget(input.path);
+    return getSignedUrl(
+      target.client,
+      new UploadPartCommand({
+        Bucket: target.bucket,
+        Key: target.key,
+        UploadId: input.uploadId,
+        PartNumber: input.partNumber,
+      }),
+      { expiresIn: this.clampPresignedTtl(input.ttlSeconds) },
+    );
+  }
+
+  async completePrivateMultipartUpload(input: {
+    path: string;
+    uploadId: string;
+    parts: ReadonlyArray<{ partNumber: number; etag: string }>;
+  }): Promise<void> {
+    const target = this.directTarget(input.path);
+    await target.client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: target.bucket,
+        Key: target.key,
+        UploadId: input.uploadId,
+        MultipartUpload: {
+          Parts: input.parts.map((part) => ({
+            PartNumber: part.partNumber,
+            ETag: part.etag,
+          })),
+        },
+      }),
+    );
+  }
+
+  /** Idempotent: an upload that is already gone (completed or aborted) is not an error. */
+  async abortPrivateMultipartUpload(input: {
+    path: string;
+    uploadId: string;
+  }): Promise<void> {
+    const target = this.directTarget(input.path);
+    try {
+      await target.client.send(
+        new AbortMultipartUploadCommand({
+          Bucket: target.bucket,
+          Key: target.key,
+          UploadId: input.uploadId,
+        }),
+      );
+    } catch (error) {
+      const name = (error as { name?: string }).name;
+      const status = (error as { $metadata?: { httpStatusCode?: number } })
+        .$metadata?.httpStatusCode;
+      if (name !== 'NoSuchUpload' && status !== 404) throw error;
+    }
+  }
+
+  async headPrivateObject(
+    path: string,
+  ): Promise<{ byteSize: number; contentType: string | null }> {
+    const target = await this.privateTarget(path);
+    const head = await target.client.send(
+      new HeadObjectCommand({ Bucket: target.bucket, Key: target.key }),
+    );
+    return {
+      byteSize: Number(head.ContentLength ?? 0),
+      contentType: head.ContentType ?? null,
+    };
+  }
+
+  /** Reads `[start, endInclusive]` of a private object — headers, never whole videos. */
+  async readPrivateRange(
+    path: string,
+    start: number,
+    endInclusive: number,
+  ): Promise<Buffer> {
+    const target = await this.privateTarget(path);
+    const object = await target.client.send(
+      new GetObjectCommand({
+        Bucket: target.bucket,
+        Key: target.key,
+        Range: `bytes=${start}-${endInclusive}`,
+      }),
+    );
+    if (!object.Body) {
+      throw new InternalServerErrorException('Asset stream is unavailable.');
+    }
+    const bytes = await (
+      object.Body as { transformToByteArray(): Promise<Uint8Array> }
+    ).transformToByteArray();
+    return Buffer.from(bytes);
   }
 
   private clampPresignedTtl(ttlSeconds?: number): number {

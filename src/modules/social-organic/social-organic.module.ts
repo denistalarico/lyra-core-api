@@ -7,6 +7,7 @@ import { FilesModule } from '../../common/files/files.module';
 import {
   MEDIA_ASSET_METADATA_READER,
   MediaAssetController,
+  MediaAssetDirectUploadService,
   MediaAssetUploadService,
   MediaAssetsModule,
 } from '../../common/media-assets';
@@ -350,6 +351,7 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     MediaPreparationService,
     MediaMetadataService,
     MediaAssetUploadService,
+    MediaAssetDirectUploadService,
     // Binds M2's extractor to the port `common/media-assets` declares, so the
     // shared boundary reads media metadata without importing a product module.
     // The arrow stays social-organic → common, never the reverse.
@@ -369,6 +371,7 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     // CS5-B: Creative Studio production hands a selected version off through it.
     DestinationCreativeService,
     MediaAssetUploadService,
+    MediaAssetDirectUploadService,
     MEDIA_ASSET_METADATA_READER,
     SocialOrganicCredentialResolver,
     SocialOrganicOAuthProviderRegistry,
