@@ -101,7 +101,8 @@ export class FinanceFiscalProfile {
   @Column({ name: 'certificate_file_name', type: 'varchar', length: 255, nullable: true })
   certificateFileName!: string | null;
 
-  @Column({ name: 'certificate_password_encrypted', type: 'text', nullable: true })
+  // F5: encrypted with FISCAL_CERT_ENCRYPTION_KEY; never selected by default.
+  @Column({ name: 'certificate_password_encrypted', type: 'text', nullable: true, select: false })
   certificatePasswordEncrypted!: string | null;
 
   @Column({ name: 'certificate_expires_at', type: 'timestamptz', nullable: true })
@@ -153,6 +154,40 @@ export class FinanceFiscalProfile {
 
   @Column({ name: 'metadata', type: 'jsonb', default: () => "'{}'::jsonb" })
   metadata!: Record<string, unknown>;
+
+  // ── F5 (2026-11-17): accountant intake + A1 certificate (§8) ──────────────
+  /** Company identity, address, services, issuer and accountant (no secrets). */
+  @Column({ name: 'company_data', type: 'jsonb', default: () => "'{}'::jsonb" })
+  companyData!: Record<string, unknown>;
+
+  /** AES-256-GCM (iv|tag|ciphertext) of the .pfx; only FiscalProfileReader decrypts. */
+  @Column({ name: 'certificate_encrypted', type: 'bytea', nullable: true, select: false })
+  certificateEncrypted!: Buffer | null;
+
+  @Column({ name: 'certificate_key_version', type: 'integer', nullable: true })
+  certificateKeyVersion!: number | null;
+
+  /** Holder, CNPJ, issuer, validity and SHA-256 fingerprint. Safe to return. */
+  @Column({ name: 'certificate_meta', type: 'jsonb', nullable: true })
+  certificateMeta!: Record<string, unknown> | null;
+
+  /** Smallest expiry alert already sent (30 or 7 days); reset on a new certificate. */
+  @Column({ name: 'certificate_alert_level', type: 'integer', nullable: true })
+  certificateAlertLevel!: number | null;
+
+  @Column({
+    name: 'municipal_portal_password_encrypted',
+    type: 'text',
+    nullable: true,
+    select: false,
+  })
+  municipalPortalPasswordEncrypted!: string | null;
+
+  @Column({ name: 'intake_approved_at', type: 'timestamptz', nullable: true })
+  intakeApprovedAt!: Date | null;
+
+  @Column({ name: 'intake_approved_by_user_id', type: 'uuid', nullable: true })
+  intakeApprovedByUserId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

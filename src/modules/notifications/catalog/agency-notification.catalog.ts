@@ -1038,6 +1038,23 @@ export const AGENCY_NOTIFICATION_CATALOG: readonly NotificationDefinition[] = [
     NotificationCategory.FINANCIAL,
     NotificationRecipientStrategy.RESPONSIBLE_ROLE,
   ),
+  // Forms addon F5: accountant fiscal intake + A1 certificate expiry.
+  standard(
+    'finance.fiscal_intake_submitted',
+    'finance',
+    NotificationCategory.FINANCIAL,
+    NotificationRecipientStrategy.RESPONSIBLE_ROLE,
+  ),
+  standard(
+    'finance.fiscal_certificate_expiring',
+    'finance',
+    NotificationCategory.DEADLINE,
+    NotificationRecipientStrategy.RESPONSIBLE_ROLE,
+    {
+      defaultPriority: NotificationPriority.HIGH,
+      selfNotificationPolicy: NotificationSelfPolicy.ALLOW_ACTOR,
+    },
+  ),
   standard(
     'finance.entry_requires_review',
     'finance',

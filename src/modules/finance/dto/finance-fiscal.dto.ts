@@ -1,6 +1,5 @@
 import {
   IsBoolean,
-  IsDateString,
   IsEnum,
   IsInt,
   IsNumberString,
@@ -105,23 +104,9 @@ export class UpdateFinanceFiscalProfileDto {
   @IsBoolean()
   hasIssImmunity?: boolean;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  certificateObjectKey?: string | null;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  certificateFileName?: string | null;
-
-  @IsOptional()
-  @IsString()
-  certificatePasswordEncrypted?: string | null;
-
-  @IsOptional()
-  @IsDateString()
-  certificateExpiresAt?: string | null;
+  // F5 (2026-11-17): the certificate fields are no longer writable here. The
+  // A1 only arrives through the accountant link (fiscal-intake), encrypted
+  // with FISCAL_CERT_ENCRYPTION_KEY, and is never read back by the API.
 
   @IsOptional()
   @IsBoolean()

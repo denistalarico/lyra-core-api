@@ -16,7 +16,10 @@ export class FinanceFiscalService {
     return this.findOrCreateProfile(ctx);
   }
 
-  async updateProfile(ctx: FinanceRequestContext, dto: UpdateFinanceFiscalProfileDto) {
+  async updateProfile(
+    ctx: FinanceRequestContext,
+    dto: UpdateFinanceFiscalProfileDto,
+  ) {
     const profile = await this.findOrCreateProfile(ctx);
 
     Object.assign(profile, {
@@ -24,12 +27,6 @@ export class FinanceFiscalService {
       fiscalCountry: dto.fiscalCountry?.toUpperCase() ?? profile.fiscalCountry,
       metadata: dto.metadata ?? profile.metadata,
       providerConfig: dto.providerConfig ?? profile.providerConfig,
-      certificateExpiresAt:
-        dto.certificateExpiresAt === undefined
-          ? profile.certificateExpiresAt
-          : dto.certificateExpiresAt
-            ? new Date(dto.certificateExpiresAt)
-            : null,
     });
 
     return this.fiscalProfilesRepo.save(profile);

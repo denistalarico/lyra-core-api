@@ -70,6 +70,8 @@ import { ContactEntity } from '../modules/contacts/entities/contact.entity';
 import { FormEntity } from '../modules/forms/entities/form.entity';
 import { FormSubmissionEntity } from '../modules/forms/entities/form-submission.entity';
 import { FormEmailSyncStateEntity } from '../modules/forms/entities/form-email-sync-state.entity';
+import { FiscalIntakeRequestEntity } from '../modules/fiscal-intake/entities/fiscal-intake-request.entity';
+import { FiscalProfileAuditEventEntity } from '../modules/fiscal-intake/entities/fiscal-profile-audit-event.entity';
 import { LeadFlowContactCompanyEntity } from '../modules/contacts/entities/leadflow-contact-company.entity';
 import { ContactMethodEntity } from '../modules/contacts/entities/contact-method.entity';
 import { ContactAddressEntity } from '../modules/contacts/entities/contact-address.entity';
@@ -820,6 +822,8 @@ export const agencyEntities = [
   FormEntity,
   FormSubmissionEntity,
   FormEmailSyncStateEntity,
+  FiscalIntakeRequestEntity,
+  FiscalProfileAuditEventEntity,
 ];
 
 export function getTypeOrmConfig(): TypeOrmModuleOptions {

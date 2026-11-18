@@ -190,10 +190,11 @@ export class FormsService {
   async create(ctx: RequestContext, dto: CreateFormDto) {
     const scope = requireScope(ctx);
     await this.addon.assertEnabled(scope.tenantId, scope.workspaceId);
-    // F5 brings the fiscal schema, link and certificate; until then only lead capture exists.
+    // The fiscal intake (F5) has a fixed schema and lives in Settings > Finance >
+    // Fiscal (modules/fiscal-intake); the builder only creates lead capture forms.
     if (dto.type !== 'lead_capture')
       throw new BadRequestException(
-        'Only lead_capture forms are available in this release.',
+        'Only lead_capture forms are created here; the fiscal intake lives in Finance settings.',
       );
     const { agencyClientId, companyContextId } = this.validateClientScope(dto);
     const destination = validateDestination(dto.destination);
