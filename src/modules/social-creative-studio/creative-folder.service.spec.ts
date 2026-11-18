@@ -84,6 +84,47 @@ describe('CreativeFolderService tree operations', () => {
     expect(h.folders.save).not.toHaveBeenCalled();
   });
 
+  it('keeps the item folder in the Lixeira only while its automatic uploads can be restored', async () => {
+    const item = { ...folder('i', 'p'), contentItemId: 'item' };
+    const plan = { ...folder('p', null), socialPlanId: 'plan' };
+    const expired = {
+      sourceType: 'planner_upload',
+      folderId: null,
+      contentItemId: 'item',
+      restoreFolderId: 'i',
+      trashedAt: new Date(),
+      purgeAfter: new Date(),
+    } as CreativeAssetEntity;
+    const h = harness([plan, item]);
+    h.assets.find.mockResolvedValueOnce([expired]);
+    expect(await h.service.list(scope)).toEqual([
+      expect.objectContaining({ id: 'p', plannerTrashCount: null }),
+      expect.objectContaining({ id: 'i', plannerTrashCount: 1 }),
+    ]);
+
+    h.assets.find.mockResolvedValueOnce([
+      expired,
+      { ...expired, folderId: 'i', status: 'archived', purgeAfter: null },
+    ]);
+    expect((await h.service.list(scope))[1]).toMatchObject({
+      archivedCount: 1,
+      plannerTrashCount: null,
+    });
+
+    h.assets.find.mockResolvedValueOnce([
+      { ...expired, deletedAt: new Date() },
+    ]);
+    expect((await h.service.list(scope))[1]).toMatchObject({
+      plannerTrashCount: 0,
+    });
+
+    const withChild = harness([plan, item, folder('subfolder', 'i')]);
+    withChild.assets.find.mockResolvedValueOnce([expired]);
+    expect((await withChild.service.list(scope))[1]).toMatchObject({
+      plannerTrashCount: null,
+    });
+  });
+
   it('moves a folder to the root', async () => {
     const h = harness();
     await expect(h.service.move(scope, 'b', null)).resolves.toMatchObject({

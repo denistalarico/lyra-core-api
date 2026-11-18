@@ -951,6 +951,10 @@ export class CreativeAssetService {
       sourceType: asset.sourceType,
       status: asset.status,
       folderId: asset.folderId,
+      plannerTrashFolderId:
+        asset.sourceType === 'planner_upload' && asset.purgeAfter
+          ? asset.restoreFolderId
+          : null,
       contentItemId: asset.contentItemId,
       currentVersionId: asset.currentVersionId,
       version: version ? this.versionView(version) : null,

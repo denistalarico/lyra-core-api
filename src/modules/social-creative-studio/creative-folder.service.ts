@@ -49,30 +49,68 @@ export class CreativeFolderService {
     };
   }
   async list(scope: CreativeStudioScope) {
+    const scoped = this.where(scope);
     const [folders, assets] = await Promise.all([
-      this.folders.find({ where: this.where(scope), order: { name: 'ASC' } }),
+      this.folders.find({ where: scoped, order: { name: 'ASC' } }),
       this.assets.find({
-        where: {
-          ...this.where(scope),
-          folderId: Not(IsNull()),
-          deletedAt: IsNull(),
+        where: [
+          { ...scoped, folderId: Not(IsNull()), deletedAt: IsNull() },
+          {
+            ...scoped,
+            sourceType: 'planner_upload',
+            restoreFolderId: Not(IsNull()),
+            purgeAfter: Not(IsNull()),
+          },
+        ],
+        select: {
+          folderId: true,
+          sourceType: true,
+          status: true,
+          contentItemId: true,
+          restoreFolderId: true,
+          purgeAfter: true,
+          trashedAt: true,
+          deletedAt: true,
         },
-        select: { folderId: true, status: true },
       }),
     ]);
     const count = (folderId: string, archived: boolean) =>
       assets.filter(
         (asset) =>
           asset.folderId === folderId &&
+          !asset.deletedAt &&
           (asset.status === 'archived') === archived,
       ).length;
     const names = await this.plannerNames(folders);
-    return folders.map((folder) => ({
-      ...folder,
-      name: names.get(folder.id) ?? folder.name,
-      assetCount: count(folder.id, false),
-      archivedCount: count(folder.id, true),
-    }));
+    return folders.map((folder) => {
+      const assetCount = count(folder.id, false);
+      const archivedCount = count(folder.id, true);
+      // The original folder remains the restore target. Once the last
+      // automatic upload is purged, an empty folder stays out of both views.
+      const retainedUploads =
+        folder.contentItemId &&
+        !assetCount &&
+        !archivedCount &&
+        !folders.some((child) => child.parentId === folder.id)
+          ? assets.filter(
+              (asset) =>
+                asset.sourceType === 'planner_upload' &&
+                asset.restoreFolderId === folder.id &&
+                asset.contentItemId === folder.contentItemId &&
+                asset.purgeAfter &&
+                asset.trashedAt,
+            )
+          : [];
+      return {
+        ...folder,
+        name: names.get(folder.id) ?? folder.name,
+        assetCount,
+        archivedCount,
+        plannerTrashCount: retainedUploads.length
+          ? retainedUploads.filter((asset) => !asset.deletedAt).length
+          : null,
+      };
+    });
   }
   async create(
     scope: CreativeStudioScope,
