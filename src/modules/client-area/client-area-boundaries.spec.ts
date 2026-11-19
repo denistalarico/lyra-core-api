@@ -31,7 +31,8 @@ describe('CA7 production route boundaries and Agency preservation', () => {
       );
     expect(digest(method)).toBe(
       // Re-baselined 2026-11 (Settings > Users: module levels / Manager scope).
-      'dc319053199e99c4ade41ccc423950332a2d3f4f9d872c12828efe64f5276080',
+      // Re-baselined 2026-11-19 (d922b0c): 403 when the user's level in the requested product is null.
+      '011cad37bca1c67f7ac7c9565d8ec99fddeccc7946cc14a3f2673b777e5b39d3',
     );
   });
   it('keeps every existing Agency scope evaluator method byte-for-byte', () => {
