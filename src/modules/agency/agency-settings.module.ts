@@ -4,6 +4,7 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { FilesModule } from '../../common/files/files.module';
 import { EmailModule } from '../email/email.module';
 import { PermissionsModule } from '../permissions';
+import { AgencyAuthModule } from './agency-auth.module';
 import { AgencySessionsCleanupService } from './agency-sessions-cleanup.service';
 import { AgencySettingsController } from './agency-settings.controller';
 import { AgencySettingsService } from './agency-settings.service';
@@ -37,6 +38,7 @@ const AGENCY_CONNECTION = 'agency';
   imports: [
     FilesModule,
     EmailModule,
+    AgencyAuthModule,
     PermissionsModule,
     TypeOrmModule.forFeature(
       [

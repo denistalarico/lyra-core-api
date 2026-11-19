@@ -132,6 +132,15 @@ export class PermissionsGuard implements CanActivate {
 
     const managedContext = request.managedContext;
     let clientProductAccessSatisfied = false;
+    const requestedProduct =
+      productKey ??
+      clientProductAccess?.productKey ??
+      (managedContext?.operatingMode === 'client'
+        ? managedContext.productKey
+        : undefined);
+    if (requestedProduct && request.moduleAccess?.[requestedProduct] === null) {
+      throw new ForbiddenException('You do not have access to this product.');
+    }
 
     // The client id in `managedContext` was requested through a browser header;
     // the managed tenant was resolved from the agency's client directory. The

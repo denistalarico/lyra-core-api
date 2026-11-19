@@ -71,6 +71,24 @@ const clientSocialContext: ManagedContext = {
 const MODULE_ACCESS = { projects: 'manager' as const };
 
 describe('PermissionsGuard product context separation', () => {
+  it.each([agencySocialContext, clientSocialContext])(
+    'rejects an entitled Social context when the user product is blocked',
+    async (context) => {
+      const { guard, permissionService } = createGuard({
+        routeProduct: 'social',
+        agencyEntitled: true,
+        clientProductAllowed: true,
+      });
+      permissionService.getModuleAccess.mockResolvedValue({ social: null });
+
+      await expect(
+        guard.canActivate(executionContext(context)),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(permissionService.canAccessProduct).not.toHaveBeenCalled();
+      expect(permissionService.canAccessClientProduct).not.toHaveBeenCalled();
+    },
+  );
+
   it('requires the agency entitlement in agency mode', async () => {
     const { guard, permissionService } = createGuard({
       routeProduct: 'social',

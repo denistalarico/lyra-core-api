@@ -1,12 +1,18 @@
 import { emailFrontendUrl } from '../email/email-frontend-url';
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import type { Request } from 'express';
-import { Repository } from 'typeorm';
+import { In, IsNull, MoreThan, Repository } from 'typeorm';
 import {
   AuthRateLimitService,
   IDENTITY_AUTH_RATE_LIMIT_RULES,
@@ -32,6 +38,8 @@ import {
   AgencyWorkspaceUserPermissionEntity,
 } from './entities/agency-settings.entities';
 import { isDevOnlyAgencyLoginBlocked } from './dev-agency-login.policy';
+import type { InviteAgencyWorkspaceUserDto } from './dto/agency-settings.dto';
+import { ACCESS_PRODUCTS } from '../permissions/catalog/module-access.catalog';
 import {
   AgencyIdentityCredentialsService,
   type TwoFactorMethod,
@@ -267,29 +275,166 @@ export class AgencyAuthService {
       throw new UnauthorizedException('Invalid or expired reset token');
     }
 
-    const security = await this.securityRepo.findOne({
-      where: {
-        tenantId: resetRequest.tenantId,
-        userId: resetRequest.userId,
-      },
+    const passwordHash = await argon2.hash(password);
+    const { tenantId, userId } = resetRequest;
+    await this.passwordResetRepo.manager.transaction(async (manager) => {
+      const pendingUser = await manager.findOne(AgencyWorkspaceUserEntity, {
+        where: { tenantId, userId, status: 'invited' },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const now = new Date();
+      const consumed = await manager.update(
+        AgencyPasswordResetEntity,
+        { id: resetRequest.id, usedAt: IsNull(), expiresAt: MoreThan(now) },
+        { usedAt: now },
+      );
+      if (!consumed.affected) {
+        throw new UnauthorizedException('Invalid or expired reset token');
+      }
+
+      const security = await manager.findOneBy(AgencyUserSecuritySettingsEntity, {
+        tenantId,
+        userId,
+      });
+      if (pendingUser && !security) {
+        await manager.insert(AgencyUserSecuritySettingsEntity, {
+          tenantId,
+          userId,
+          currentEmail: pendingUser.email,
+          passwordHash,
+          passwordUpdatedAt: now,
+        });
+        await manager.update(AgencyWorkspaceUserEntity, pendingUser.id, {
+          status: 'active',
+          lastAccess: '',
+        });
+        return;
+      }
+      if (!security || pendingUser) {
+        throw new UnauthorizedException('Invalid or expired reset token');
+      }
+
+      await manager.update(AgencyUserSecuritySettingsEntity, security.id, {
+        passwordHash,
+        passwordUpdatedAt: now,
+      });
+      await manager.update(
+        AgencyUserSessionEntity,
+        { tenantId, userId },
+        { status: 'expired', revokedAt: now },
+      );
     });
 
-    if (!security) {
-      throw new UnauthorizedException('Invalid or expired reset token');
+    return { success: true };
+  }
+
+  async sendWorkspaceInvitation(
+    tenantId: string,
+    workspaceId: string,
+    dto: InviteAgencyWorkspaceUserDto,
+  ) {
+    if (this.configService.get('EMAIL_DELIVERY_MODE') === 'disabled') {
+      throw new ServiceUnavailableException('O envio de e-mails está desativado.');
     }
 
-    security.passwordHash = await argon2.hash(password);
-    security.passwordUpdatedAt = new Date();
-    resetRequest.usedAt = new Date();
+    const email = dto.email.trim().toLowerCase();
+    const token = randomBytes(32).toString('hex');
+    await this.workspaceUsersRepo.manager.transaction(async (manager) => {
+      const existing = await manager.findOne(AgencyWorkspaceUserEntity, {
+        where: { tenantId, workspaceId, email },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (existing && existing.status !== 'invited') {
+        throw new ConflictException('Este e-mail já pertence à agência.');
+      }
+      if (
+        await manager.existsBy(AgencyUserSecuritySettingsEntity, {
+          tenantId,
+          currentEmail: email,
+        })
+      ) {
+        throw new ConflictException(
+          'Este e-mail já possui uma conta nesta organização.',
+        );
+      }
 
-    await this.securityRepo.save(security);
-    await this.passwordResetRepo.save(resetRequest);
-    await this.sessionsRepo.update(
-      { tenantId: security.tenantId, userId: security.userId },
-      { status: 'expired', revokedAt: new Date() },
-    );
+      const userId = existing?.userId ?? randomUUID();
+      let workspaceUserId: string;
+      if (existing) {
+        workspaceUserId = existing.id;
+        await manager.update(AgencyWorkspaceUserEntity, existing.id, { userId });
+      } else {
+        const user = await manager.save(
+          manager.create(AgencyWorkspaceUserEntity, {
+            tenantId,
+            workspaceId,
+            userId,
+            name: email.split('@')[0].slice(0, 120),
+            email,
+            role: dto.role,
+            status: 'invited',
+            lastAccess: 'Convite pendente',
+          }),
+        );
+        workspaceUserId = user.id;
+      }
 
-    return { success: true };
+      if (
+        (existing?.role ?? dto.role) !== 'admin' &&
+        !existing?.userId &&
+        !(await manager.existsBy(AgencyWorkspaceUserPermissionEntity, {
+          tenantId,
+          workspaceId,
+          workspaceUserId,
+          appKey: In([...ACCESS_PRODUCTS]),
+        }))
+      ) {
+        await manager.insert(
+          AgencyWorkspaceUserPermissionEntity,
+          ACCESS_PRODUCTS.map((appKey) => ({
+            tenantId,
+            workspaceId,
+            workspaceUserId,
+            appKey,
+            access: 'blocked' as const,
+          })),
+        );
+      }
+
+      await manager.update(
+        AgencyPasswordResetEntity,
+        { tenantId, userId, surface: AGENCY_SURFACE, usedAt: IsNull() },
+        { usedAt: new Date() },
+      );
+      await manager.insert(AgencyPasswordResetEntity, {
+        tenantId,
+        userId,
+        surface: AGENCY_SURFACE,
+        tokenHash: this.hashToken(token),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * MINUTE),
+      });
+    });
+
+    const { html, text } = renderTransactionalEmail({
+      title: 'Convite para a agência',
+      intro: 'Você recebeu um convite para acessar uma agência no Lyra Suite.',
+      buttonLabel: 'Definir senha e aceitar convite',
+      buttonUrl: `${this.getFrontendUrl()}/reset-password?token=${token}`,
+      secondaryText: 'O link expira em 7 dias.',
+    });
+    try {
+      await this.emailService.sendEmail({
+        to: email,
+        subject: `Convite para acessar o ${this.getProductName()}`,
+        html,
+        text,
+        override: await this.credentials.getEmailTransportOverride(tenantId),
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'O envio do convite falhou. Você pode tentar novamente pelo mesmo e-mail.',
+      );
+    }
   }
 
   async loginWith2FA(token: string, code: string, req: Request) {

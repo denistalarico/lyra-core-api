@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomInt, randomUUID } from 'crypto';
 import { generateSecret, generateURI, verify } from 'otplib';
 import * as QRCode from 'qrcode';
 import { In, IsNull, Repository } from 'typeorm';
@@ -72,6 +72,7 @@ import {
 } from '../permissions/catalog/module-access.catalog';
 import { PlatformRoleKey } from '../permissions/enums/permission.enums';
 import { syncAgencySelfContact } from './agency-self-contact';
+import { AgencyAuthService } from './agency-auth.service';
 
 const AGENCY_APP_KEYS = [
   'dashboard',
@@ -147,6 +148,7 @@ export class AgencySettingsService {
     private readonly cryptoService: SettingsCryptoService,
     private readonly emailService: EmailService,
     private readonly platformPermissionService: PlatformPermissionService,
+    private readonly agencyAuthService: AgencyAuthService,
   ) {}
 
   async getPreferences(tenantId: string, userId: string) {
@@ -1085,23 +1087,11 @@ export class AgencySettingsService {
     workspaceId: string,
     dto: InviteAgencyWorkspaceUserDto,
   ) {
-    const normalizedEmail = dto.email.trim().toLowerCase();
-
-    const user = await this.workspaceUsersRepo.save(
-      this.workspaceUsersRepo.create({
-        tenantId,
-        workspaceId,
-        userId: null,
-        name: normalizedEmail.split('@')[0] || 'Novo membro',
-        email: normalizedEmail,
-        role: dto.role,
-        status: 'invited',
-        lastAccess: 'Convite pendente',
-      }),
+    await this.agencyAuthService.sendWorkspaceInvitation(
+      tenantId,
+      workspaceId,
+      dto,
     );
-
-    // No access rows on invite: the role defaults apply until an Admin
-    // customizes them in "Gerenciar acesso".
     return this.getWorkspaceUsers(tenantId, workspaceId);
   }
 
@@ -1218,65 +1208,68 @@ export class AgencySettingsService {
     dto: PatchAgencyWorkspaceUserAccessDto,
     actorUserId?: string,
   ) {
-    const user = await this.workspaceUsersRepo.findOne({
-      where: { tenantId, workspaceId, id: workspaceUserId },
-    });
-
-    if (!user) {
-      throw new NotFoundException('Agency workspace user not found.');
-    }
-
-    if (user.role === 'owner') {
-      throw new ForbiddenException(
-        'Owner access cannot be changed through this endpoint.',
-      );
-    }
-
     if (dto.role === 'owner') {
       throw new ForbiddenException('Ownership cannot be transferred.');
     }
 
-    await this.workspaceUsersRepo.update(
-      { tenantId, workspaceId, id: workspaceUserId },
-      { role: dto.role },
-    );
+    await this.workspaceUsersRepo.manager.transaction(async (manager) => {
+      const user = await manager.findOne(AgencyWorkspaceUserEntity, {
+        where: { tenantId, workspaceId, id: workspaceUserId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!user) {
+        throw new NotFoundException('Agency workspace user not found.');
+      }
+      if (user.role === 'owner') {
+        throw new ForbiddenException(
+          'Owner access cannot be changed through this endpoint.',
+        );
+      }
 
-    // Full replacement: also drops the legacy per-app rows (`full`/`partial`).
-    await this.permissionsRepo.delete({ tenantId, workspaceId, workspaceUserId });
-    const rows = [
-      ...new Map(dto.permissions.map((item) => [item.appKey, item])).values(),
-    ];
-    if (rows.length > 0) {
-      await this.permissionsRepo.save(
-        rows.map((permission) =>
-          this.permissionsRepo.create({
+      const userId =
+        user.userId ?? (user.status === 'invited' ? randomUUID() : null);
+      await manager.update(AgencyWorkspaceUserEntity, user.id, {
+        role: dto.role,
+        userId,
+      });
+
+      const rows = [
+        ...new Map(dto.permissions.map((item) => [item.appKey, item])).values(),
+      ];
+      await manager.delete(AgencyWorkspaceUserPermissionEntity, {
+        tenantId,
+        workspaceId,
+        workspaceUserId,
+      });
+      if (rows.length > 0) {
+        await manager.insert(
+          AgencyWorkspaceUserPermissionEntity,
+          rows.map((permission) => ({
             tenantId,
             workspaceId,
             workspaceUserId,
-            appKey: permission.appKey,
-            access: permission.access,
-          }),
-        ),
-      );
-    }
+            ...permission,
+          })),
+        );
+      }
+
+      if (dto.clientProducts && userId) {
+        const levels = resolveModuleAccess(dto.role as PlatformRoleKey, rows);
+        await this.platformPermissionService.replaceUserClientProductAccess(
+          {
+            tenantId,
+            workspaceId,
+            userId,
+            actorUserId: actorUserId ?? null,
+            grants: dto.clientProducts,
+            levels: { leadflow: levels.leadflow, social: levels.social },
+          },
+          manager,
+        );
+      }
+    });
 
     this.platformPermissionService.invalidateModuleAccess();
-
-    if (dto.clientProducts && user.userId) {
-      const levels = resolveModuleAccess(
-        dto.role as PlatformRoleKey,
-        rows,
-      );
-      await this.platformPermissionService.replaceUserClientProductAccess({
-        tenantId,
-        workspaceId,
-        userId: user.userId,
-        actorUserId: actorUserId ?? null,
-        grants: dto.clientProducts,
-        levels: { leadflow: levels.leadflow, social: levels.social },
-      });
-    }
-
     return this.getWorkspaceUsers(tenantId, workspaceId);
   }
 

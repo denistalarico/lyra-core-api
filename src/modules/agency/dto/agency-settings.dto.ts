@@ -435,7 +435,7 @@ export class PatchAgencyIntegrationsDto {
 }
 
 export class AgencyWorkspaceUserPermissionDto {
-  /** A product (`agency`, `leadflow`, `social`) or an Agency module key. */
+  /** A product or a module access key from the permission catalog. */
   @IsIn([...ACCESS_KEYS])
   appKey!: string;
 

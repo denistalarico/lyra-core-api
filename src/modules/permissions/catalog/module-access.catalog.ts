@@ -11,15 +11,20 @@ import {
  * get a level per product/module instead of per-key overrides:
  * - `agency` is a product switch: blocked hides the whole Agency product.
  * - each Agency module has a level (`manager` | `member`) or no access.
- * - `leadflow` / `social` carry the user's level in that product; which
- *   managed clients they reach is `agency_client_product_access`.
+ * - `leadflow` / `social` gate the product and supply its default level.
+ * - product-qualified module keys can restrict that level independently.
+ * - managed client grants are stored in `agency_client_product_access`.
  *
  * A level never exceeds the role: a Member is always `member`.
  * The keys a level grants are the catalog keys whose `roles` include that
  * level's role, so the catalog stays the single source of truth.
  */
 export type ModuleAccessLevel = 'manager' | 'member';
-export type StoredModuleAccess = ModuleAccessLevel | 'blocked' | 'full' | 'partial';
+export type StoredModuleAccess =
+  | ModuleAccessLevel
+  | 'blocked'
+  | 'full'
+  | 'partial';
 
 export const AGENCY_ACCESS_MODULES = [
   'dashboard',
@@ -40,9 +45,30 @@ export type AgencyAccessModule = (typeof AGENCY_ACCESS_MODULES)[number];
 export const ACCESS_PRODUCTS = ['agency', 'leadflow', 'social'] as const;
 export type AccessProduct = (typeof ACCESS_PRODUCTS)[number];
 
+function clientProductModuleKey(productKey: string, moduleKey: string): string {
+  if (productKey === 'social') {
+    if (moduleKey === 'publishing') return 'social.planner';
+    if (moduleKey === 'ads') return 'social.campaigns';
+  }
+  return `${productKey}.${moduleKey}`;
+}
+
+const CLIENT_PRODUCT_MODULES = [
+  ...new Set(
+    PERMISSION_DEFINITIONS.filter(
+      ({ productKey, roles }) =>
+        (productKey === 'leadflow' || productKey === 'social') &&
+        roles.includes(PlatformRoleKey.Manager),
+    ).map(({ productKey, moduleKey }) =>
+      clientProductModuleKey(productKey, moduleKey),
+    ),
+  ),
+];
+
 export const ACCESS_KEYS: readonly string[] = [
   ...ACCESS_PRODUCTS,
   ...AGENCY_ACCESS_MODULES,
+  ...CLIENT_PRODUCT_MODULES,
 ];
 
 const MEMBER_DEFAULT_MODULES = new Set<AgencyAccessModule>([
@@ -82,8 +108,11 @@ export function resolveAccessKey(
 ): string | null {
   if (definition.productKey === 'shared' && definition.moduleKey === 'contacts')
     return 'contacts';
-  if (definition.productKey === 'leadflow') return 'leadflow';
-  if (definition.productKey === 'social') return 'social';
+  if (
+    definition.productKey === 'leadflow' ||
+    definition.productKey === 'social'
+  )
+    return clientProductModuleKey(definition.productKey, definition.moduleKey);
   if (definition.productKey === 'agency')
     return AGENCY_MODULE_BY_CATALOG_MODULE[definition.moduleKey] ?? null;
   return null;
@@ -121,8 +150,8 @@ function storedLevel(
 
 /**
  * Resolves the level for every access key. Stored rows win over the role
- * defaults; a level is clamped to the role; Agency modules are off when the
- * Agency product is off. Owner/Admin get `manager` everywhere.
+ * defaults. Client product modules inherit their product level unless narrowed.
+ * Owner/Admin get `manager` everywhere.
  */
 export function resolveModuleAccess(
   role: PlatformRoleKey,
@@ -138,11 +167,28 @@ export function resolveModuleAccess(
     }
     const access = stored.get(key);
     levels[key] =
-      access === undefined ? defaultLevel(role, key) : storedLevel(role, access);
+      access === undefined
+        ? defaultLevel(role, key)
+        : storedLevel(role, access);
   }
 
   if (isModuleScopedRole(role) && levels.agency === null) {
     for (const module of AGENCY_ACCESS_MODULES) levels[module] = null;
+  }
+
+  if (isModuleScopedRole(role)) {
+    for (const key of CLIENT_PRODUCT_MODULES) {
+      const productLevel = levels[key.split('.')[0]];
+      const access = stored.get(key);
+      const level =
+        access === undefined ? productLevel : storedLevel(role, access);
+      levels[key] =
+        !productLevel || !level
+          ? null
+          : productLevel === 'member'
+            ? 'member'
+            : level;
+    }
   }
 
   return levels;

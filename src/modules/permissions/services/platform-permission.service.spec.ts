@@ -4,6 +4,8 @@ import {
 } from '../enums/permission.enums';
 import { ProductEntitlementStatus } from '../../platform';
 import { ManagedContextDirectoryService } from '../../../common/context/managed-context-directory.service';
+import { AgencyClientAccessEntity } from '../entities/agency-client-access.entity';
+import { AgencyClientProductAccessEntity } from '../entities/agency-client-product-access.entity';
 import { PlatformPermissionService } from './platform-permission.service';
 
 function createRepositoryMock() {
@@ -102,6 +104,45 @@ const activeEntitlement = {
 };
 
 describe('PlatformPermissionService', () => {
+  it('removes prior client grants and saves only selected clients in enabled products', async () => {
+    const { service, clientsRepository } = createService();
+    clientsRepository.find.mockResolvedValue([activeClient]);
+    const productGrants = { ...createRepositoryMock(), delete: jest.fn() };
+    const clientAccess = createRepositoryMock();
+    const audit = createRepositoryMock();
+    const manager = {
+      getRepository: (entity: unknown) =>
+        entity === AgencyClientProductAccessEntity
+          ? productGrants
+          : entity === AgencyClientAccessEntity ? clientAccess : audit,
+    };
+
+    await service.replaceUserClientProductAccess(
+      {
+        tenantId: activeClient.tenantId,
+        workspaceId: activeClient.workspaceId,
+        userId: 'reviewer',
+        actorUserId: 'admin',
+        grants: [
+          { clientId: activeClient.id, productKey: 'social' },
+          { clientId: activeClient.id, productKey: 'social' },
+          { clientId: activeClient.id, productKey: 'leadflow' },
+        ],
+        levels: { social: 'manager', leadflow: null },
+      },
+      manager as never,
+    );
+
+    expect(productGrants.delete).toHaveBeenCalledWith({
+      tenantId: activeClient.tenantId,
+      workspaceId: activeClient.workspaceId,
+      userId: 'reviewer',
+    });
+    expect(productGrants.save).toHaveBeenCalledWith([
+      expect.objectContaining({ clientId: activeClient.id, productKey: 'social' }),
+    ]);
+  });
+
   it('scopes client access checks to the active workspace when present', async () => {
     const { service, clientAccessRepository } = createService();
     clientAccessRepository.findOne.mockResolvedValue({

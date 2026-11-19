@@ -4,7 +4,13 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type FindOptionsWhere, In, IsNull, Repository } from 'typeorm';
+import {
+  type EntityManager,
+  type FindOptionsWhere,
+  In,
+  IsNull,
+  Repository,
+} from 'typeorm';
 import {
   getPermissionDefinition,
   isKnownPermissionKey,
@@ -405,16 +411,30 @@ export class PlatformPermissionService {
    * the `agency_client_access` row the managed-context check requires. The
    * stored product role mirrors the user's level in that product.
    */
-  async replaceUserClientProductAccess(params: {
-    tenantId: string;
-    workspaceId: string;
-    userId: string;
-    actorUserId: string | null;
-    grants: Array<{ clientId: string; productKey: ClientProductKey }>;
-    levels: Partial<Record<ClientProductKey, ModuleAccessLevel | null>>;
-  }): Promise<void> {
+  async replaceUserClientProductAccess(
+    params: {
+      tenantId: string;
+      workspaceId: string;
+      userId: string;
+      actorUserId: string | null;
+      grants: Array<{ clientId: string; productKey: ClientProductKey }>;
+      levels: Partial<Record<ClientProductKey, ModuleAccessLevel | null>>;
+    },
+    manager: EntityManager,
+  ): Promise<void> {
     const { tenantId, workspaceId, userId } = params;
-    const clientIds = [...new Set(params.grants.map((grant) => grant.clientId))];
+    const clientProductAccess = manager.getRepository(
+      AgencyClientProductAccessEntity,
+    );
+    const clientAccess = manager.getRepository(AgencyClientAccessEntity);
+    const grants = [
+      ...new Map(
+        params.grants
+          .filter(({ productKey }) => params.levels[productKey])
+          .map((grant) => [`${grant.productKey}:${grant.clientId}`, grant] as const),
+      ).values(),
+    ];
+    const clientIds = [...new Set(grants.map((grant) => grant.clientId))];
     const clients = clientIds.length
       ? await this.managedContextDirectory.findWorkspaceClients(
           tenantId,
@@ -426,16 +446,16 @@ export class PlatformPermissionService {
       clients.map((client) => [client.id, client.managedTenantId]),
     );
 
-    await this.clientProductAccessRepository.delete({
+    await clientProductAccess.delete({
       tenantId,
       workspaceId,
       userId,
     });
 
-    const rows = params.grants
+    const rows = grants
       .filter((grant) => managedTenantByClientId.has(grant.clientId))
       .map((grant) =>
-        this.clientProductAccessRepository.create({
+        clientProductAccess.create({
           tenantId,
           workspaceId,
           userId,
@@ -450,11 +470,11 @@ export class PlatformPermissionService {
           createdById: params.actorUserId,
         }),
       );
-    if (rows.length > 0) await this.clientProductAccessRepository.save(rows);
+    if (rows.length > 0) await clientProductAccess.save(rows);
 
     const grantedClientIds = [...new Set(rows.map((row) => row.clientId))];
     const existingAccess = grantedClientIds.length
-      ? await this.clientAccessRepository.find({
+      ? await clientAccess.find({
           where: {
             tenantId,
             workspaceId,
@@ -466,9 +486,9 @@ export class PlatformPermissionService {
     const withAccess = new Set(existingAccess.map((row) => row.clientId));
     const missing = grantedClientIds.filter((id) => !withAccess.has(id));
     if (missing.length > 0) {
-      await this.clientAccessRepository.save(
+      await clientAccess.save(
         missing.map((clientId) =>
-          this.clientAccessRepository.create({
+          clientAccess.create({
             tenantId,
             workspaceId,
             userId,
@@ -482,19 +502,22 @@ export class PlatformPermissionService {
       );
     }
 
-    await this.auditPermissionDecision({
-      tenantId,
-      workspaceId,
-      actorUserId: params.actorUserId,
-      targetUserId: userId,
-      action: 'client_product_access_granted',
-      metadata: {
-        grants: rows.map((row) => ({
-          clientId: row.clientId,
-          productKey: row.productKey,
-        })),
+    await this.auditPermissionDecision(
+      {
+        tenantId,
+        workspaceId,
+        actorUserId: params.actorUserId,
+        targetUserId: userId,
+        action: 'client_product_access_granted',
+        metadata: {
+          grants: rows.map((row) => ({
+            clientId: row.clientId,
+            productKey: row.productKey,
+          })),
+        },
       },
-    });
+      manager.getRepository(PlatformPermissionAuditEventEntity),
+    );
   }
 
   isDangerousAction(permissionKey: string): boolean {
@@ -503,8 +526,9 @@ export class PlatformPermissionService {
 
   async auditPermissionDecision(
     decision: PermissionAuditDecision,
+    repository = this.auditRepository,
   ): Promise<void> {
-    const event = this.auditRepository.create({
+    const event = repository.create({
       tenantId: decision.tenantId,
       workspaceId: decision.workspaceId ?? null,
       actorUserId: decision.actorUserId ?? null,
@@ -519,7 +543,7 @@ export class PlatformPermissionService {
       metadata: decision.metadata ?? {},
     });
 
-    await this.auditRepository.save(event);
+    await repository.save(event);
   }
 
   /**
