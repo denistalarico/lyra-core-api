@@ -526,6 +526,35 @@ export class AgencySettingsController {
     );
   }
 
+  @Post('users/:workspaceUserId/reactivate')
+  @RequirePermission('agency.settings.users.manage.admin')
+  reactivateWorkspaceUser(
+    @RequestContextData() ctx: RequestContext,
+    @Param('workspaceUserId') workspaceUserId: string,
+  ) {
+    this.assertWorkspaceContext(ctx);
+    return this.agencySettingsService.reactivateWorkspaceUser(
+      ctx.tenantId,
+      ctx.workspaceId,
+      workspaceUserId,
+    );
+  }
+
+  @Post('users/:workspaceUserId/cancel-invitation')
+  @RequirePermission('agency.settings.users.manage.admin')
+  cancelWorkspaceInvitation(
+    @RequestContextData() ctx: RequestContext,
+    @Param('workspaceUserId') workspaceUserId: string,
+  ) {
+    this.assertWorkspaceContext(ctx);
+    return this.agencySettingsService.cancelWorkspaceInvitation(
+      ctx.tenantId,
+      ctx.workspaceId,
+      workspaceUserId,
+      ctx.userId,
+    );
+  }
+
   @Get('permissions/groups')
   @RequirePermission('agency.settings.permissions.manage.admin')
   getPermissionFunctionalGroups() {

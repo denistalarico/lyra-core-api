@@ -422,17 +422,32 @@ export class AgencyAuthService {
       buttonUrl: `${this.getFrontendUrl()}/reset-password?token=${token}`,
       secondaryText: 'O link expira em 7 dias.',
     });
+    const override = await this.credentials.getEmailTransportOverride(tenantId);
     try {
       await this.emailService.sendEmail({
         to: email,
         subject: `Convite para acessar o ${this.getProductName()}`,
         html,
         text,
-        override: await this.credentials.getEmailTransportOverride(tenantId),
+        override,
       });
-    } catch {
+    } catch (error) {
+      const smtp = error as { code?: string; responseCode?: number; message?: string };
+      this.logger.warn(
+        `Agency invitation email failed: ${JSON.stringify({
+          tenantId,
+          code: smtp.code ?? null,
+          responseCode: smtp.responseCode ?? null,
+          reason: smtp.message?.slice(0, 300) ?? null,
+        })}`,
+      );
+      // 553 = the SMTP account refuses this From address (it does not own it).
+      const senderRejected =
+        smtp.responseCode === 553 || /sender address rejected/i.test(smtp.message ?? '');
       throw new ServiceUnavailableException(
-        'O envio do convite falhou. Você pode tentar novamente pelo mesmo e-mail.',
+        senderRejected
+          ? `O servidor de e-mail recusou o remetente${override?.fromEmail ? ` ${override.fromEmail}` : ''}. Em Configurações > E-mail, use como remetente o próprio usuário SMTP ou um alias dele e tente de novo.`
+          : 'O envio do convite falhou. Confira o SMTP em Configurações > E-mail e tente novamente pelo mesmo e-mail.',
       );
     }
   }

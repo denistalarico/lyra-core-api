@@ -18,6 +18,7 @@ import {
 import { renderTransactionalEmail } from '../email/templates/transactional-email.template';
 import {
   AgencyEmailTwoFactorCodeEntity,
+  AgencyPasswordResetEntity,
   AgencyUserLoginEventEntity,
   AgencyUserSecuritySettingsEntity,
   AgencyUserSessionEntity,
@@ -1459,6 +1460,102 @@ export class AgencySettingsService {
       { status: 'inactive' },
     );
 
+    return this.getWorkspaceUsers(tenantId, workspaceId);
+  }
+
+  /**
+   * Undoes a deactivation. Someone who already set a password goes back to
+   * `active`; someone who never accepted the invitation goes back to `invited`
+   * so the Admin can resend it.
+   */
+  async reactivateWorkspaceUser(
+    tenantId: string,
+    workspaceId: string,
+    workspaceUserId: string,
+  ) {
+    const user = await this.workspaceUsersRepo.findOne({
+      where: { tenantId, workspaceId, id: workspaceUserId },
+    });
+    if (!user) {
+      throw new NotFoundException('Agency workspace user not found.');
+    }
+    if (user.status !== 'inactive') {
+      throw new BadRequestException('Only inactive users can be reactivated.');
+    }
+
+    const hasAccount = user.userId
+      ? await this.userSecurityRepo.existsBy({ tenantId, userId: user.userId })
+      : false;
+    await this.workspaceUsersRepo.update(
+      { tenantId, workspaceId, id: workspaceUserId },
+      hasAccount
+        ? { status: 'active' }
+        : { status: 'invited', lastAccess: 'Convite pendente' },
+    );
+
+    return this.getWorkspaceUsers(tenantId, workspaceId);
+  }
+
+  /**
+   * Cancels an invitation that was never accepted: removes the pending user,
+   * its access rows and any open invitation link.
+   */
+  async cancelWorkspaceInvitation(
+    tenantId: string,
+    workspaceId: string,
+    workspaceUserId: string,
+    actorUserId?: string,
+  ) {
+    await this.workspaceUsersRepo.manager.transaction(async (manager) => {
+      const user = await manager.findOne(AgencyWorkspaceUserEntity, {
+        where: { tenantId, workspaceId, id: workspaceUserId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!user) {
+        throw new NotFoundException('Agency workspace user not found.');
+      }
+      if (user.role === 'owner') {
+        throw new BadRequestException('Agency workspace owner cannot be removed.');
+      }
+      const hasAccount = user.userId
+        ? await manager.existsBy(AgencyUserSecuritySettingsEntity, {
+            tenantId,
+            userId: user.userId,
+          })
+        : false;
+      if (hasAccount || user.status === 'active') {
+        throw new BadRequestException(
+          'Este usuário já aceitou o convite. Use Desativar.',
+        );
+      }
+
+      if (user.userId) {
+        await manager.update(
+          AgencyPasswordResetEntity,
+          { tenantId, userId: user.userId, usedAt: IsNull() },
+          { usedAt: new Date() },
+        );
+        await this.platformPermissionService.replaceUserClientProductAccess(
+          {
+            tenantId,
+            workspaceId,
+            userId: user.userId,
+            actorUserId: actorUserId ?? null,
+            grants: [],
+            levels: {},
+          },
+          manager,
+        );
+      }
+      await manager.delete(AgencyWorkspaceUserPermissionEntity, {
+        tenantId,
+        workspaceId,
+        workspaceUserId,
+      });
+      await manager.delete(AgencyWorkspaceUserEntity, { id: user.id });
+    });
+
+    this.platformPermissionService.invalidateModuleAccess();
     return this.getWorkspaceUsers(tenantId, workspaceId);
   }
 
