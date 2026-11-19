@@ -51,6 +51,7 @@ import {
 import { CREATIVE_PRODUCTION_PERMISSIONS as P } from './creative-production.permissions';
 import type { CreativeStudioScope } from './creative-studio.scope';
 import { CreativeVersionApprovalService } from './creative-version-approval.service';
+import { AGENCY_SELF_CONTACT_SOURCE } from '../agency/agency-self-contact';
 import type {
   CreateProductionTaskDto,
   HandoffProductionDestinationDto,
@@ -922,8 +923,10 @@ export class CreativeProductionService {
     const search = query.search?.trim();
     if (search)
       qb.andWhere('project.name ILIKE :search', { search: `%${search}%` });
+    // Most recently active first: the modal preselects the client's project.
     const rows = await qb
-      .orderBy('project.name', 'ASC')
+      .orderBy('project.updatedAt', 'DESC')
+      .addOrderBy('project.name', 'ASC')
       .take(query.limit ?? CANDIDATE_LIMIT)
       .getMany();
     return { items: rows.map(({ id, name }) => ({ id, name })) };
@@ -1336,8 +1339,16 @@ export class CreativeProductionService {
         { tenantId: scope.tenantId, workspaceId: scope.workspaceId },
       )
       .andWhere('project.archivedAt IS NULL');
+    // The agency's own work: projects without a client or linked to the
+    // agency's own contact (synced from /settings/company).
     return scope.agencyClientId === null
-      ? qb.andWhere('project.clientId IS NULL')
+      ? qb.andWhere(
+          `(project.clientId IS NULL OR project.clientId IN (
+            SELECT own_contact.id FROM contacts own_contact
+            WHERE own_contact.tenant_id = :tenantId AND own_contact.workspace_id = :workspaceId
+              AND own_contact.source = :selfSource))`,
+          { selfSource: AGENCY_SELF_CONTACT_SOURCE },
+        )
       : qb.andWhere('project.clientId = :clientId', {
           clientId: scope.agencyClientId,
         });

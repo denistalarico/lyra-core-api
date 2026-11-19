@@ -71,6 +71,7 @@ import {
   resolveModuleAccess,
 } from '../permissions/catalog/module-access.catalog';
 import { PlatformRoleKey } from '../permissions/enums/permission.enums';
+import { syncAgencySelfContact } from './agency-self-contact';
 
 const AGENCY_APP_KEYS = [
   'dashboard',
@@ -263,6 +264,11 @@ export class AgencySettingsService {
       },
       ['tenantId', 'workspaceId'],
     );
+    // Keeps the agency's own contact in step; settings save never fails on it.
+    await syncAgencySelfContact(this.companyRepo.manager, {
+      tenantId,
+      workspaceId,
+    }).catch(() => null);
 
     return this.getCompany(tenantId, workspaceId);
   }

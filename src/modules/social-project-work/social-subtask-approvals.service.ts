@@ -36,6 +36,7 @@ import {
   type SocialWorkCompany,
 } from './social-work-gate.service';
 import { SocialWorkStatusService } from './social-work-status.service';
+import { isAgencySelfContact } from '../agency/agency-self-contact';
 
 const VIEW_APPROVALS = 'social.approvals.review.view.assigned';
 const SEND_STANDALONE = 'social.approvals.review.comment.assigned';
@@ -120,7 +121,10 @@ export class SocialSubtaskApprovalsService {
         })
       : null;
     const clientId = task.clientId ?? project?.clientId ?? null;
-    if (!clientId)
+    if (
+      !clientId ||
+      (await isAgencySelfContact(this.dataSource.manager, task, clientId))
+    )
       return (await this.gate.ownAvailable(ctx))
         ? { available: true, own: true, companies: [] }
         : { available: false };

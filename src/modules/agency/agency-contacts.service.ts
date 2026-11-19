@@ -63,6 +63,7 @@ import { PatchContactSegmentDto } from '../contacts/dto/patch-contact-segment.dt
 import { UpdateContactCompanyLinkDto } from '../contacts/dto/contact-company-link.dto';
 import { ClientAreaMembershipService } from '../client-area/services/client-area-membership.service';
 import { CLIENT_AREA_ACTOR_ROLE } from '../client-area/client-area.types';
+import { syncAgencySelfContact } from './agency-self-contact';
 
 const AGENCY_CONNECTION = 'agency';
 
@@ -1492,6 +1493,12 @@ export class AgencyContactsService {
 
   async listContacts(ctx: RequestContext, query: ListAgencyContactsQuery = {}) {
     const workspaceId = this.requireWorkspaceId(ctx);
+    // The agency's own contact exists by default; a failure never blocks the list.
+    await syncAgencySelfContact(
+      this.contactsRepo.manager,
+      { tenantId: ctx.tenantId, workspaceId },
+      { onlyIfMissing: true },
+    ).catch(() => null);
     const limit = this.normalizeLimit(query.limit);
     const offset = this.normalizeOffset(query.offset);
 
