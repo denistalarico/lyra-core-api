@@ -3,6 +3,7 @@ import {
   PlatformRoleKey,
 } from '../enums/permission.enums';
 import { ProductEntitlementStatus } from '../../platform';
+import { ClientProductKey } from '../enums/permission.enums';
 import { ManagedContextDirectoryService } from '../../../common/context/managed-context-directory.service';
 import { AgencyClientAccessEntity } from '../entities/agency-client-access.entity';
 import { AgencyClientProductAccessEntity } from '../entities/agency-client-product-access.entity';
@@ -114,7 +115,9 @@ describe('PlatformPermissionService', () => {
       getRepository: (entity: unknown) =>
         entity === AgencyClientProductAccessEntity
           ? productGrants
-          : entity === AgencyClientAccessEntity ? clientAccess : audit,
+          : entity === AgencyClientAccessEntity
+            ? clientAccess
+            : audit,
     };
 
     await service.replaceUserClientProductAccess(
@@ -124,9 +127,9 @@ describe('PlatformPermissionService', () => {
         userId: 'reviewer',
         actorUserId: 'admin',
         grants: [
-          { clientId: activeClient.id, productKey: 'social' },
-          { clientId: activeClient.id, productKey: 'social' },
-          { clientId: activeClient.id, productKey: 'leadflow' },
+          { clientId: activeClient.id, productKey: ClientProductKey.Social },
+          { clientId: activeClient.id, productKey: ClientProductKey.Social },
+          { clientId: activeClient.id, productKey: ClientProductKey.LeadFlow },
         ],
         levels: { social: 'manager', leadflow: null },
       },
@@ -139,7 +142,10 @@ describe('PlatformPermissionService', () => {
       userId: 'reviewer',
     });
     expect(productGrants.save).toHaveBeenCalledWith([
-      expect.objectContaining({ clientId: activeClient.id, productKey: 'social' }),
+      expect.objectContaining({
+        clientId: activeClient.id,
+        productKey: ClientProductKey.Social,
+      }),
     ]);
   });
 
@@ -453,9 +459,9 @@ describe('PlatformPermissionService', () => {
       false,
     );
     // Finance and Team are off by default.
-    expect(permissions.has('agency.finance.summary.view.finance_or_owner')).toBe(
-      false,
-    );
+    expect(
+      permissions.has('agency.finance.summary.view.finance_or_owner'),
+    ).toBe(false);
     expect(permissions.has('agency.team.directory.view.all_members')).toBe(
       false,
     );
@@ -491,9 +497,9 @@ describe('PlatformPermissionService', () => {
       true,
     );
     expect(permissions.has('agency.projects.stages.manage.admin')).toBe(false);
-    expect(permissions.has('agency.finance.summary.view.finance_or_owner')).toBe(
-      true,
-    );
+    expect(
+      permissions.has('agency.finance.summary.view.finance_or_owner'),
+    ).toBe(true);
     expect(
       permissions.has('agency.finance.transactions.manage.finance_or_owner'),
     ).toBe(false);
@@ -538,7 +544,9 @@ describe('PlatformPermissionService', () => {
     expect(permissions.has('agency.settings.billing.manage.owner_only')).toBe(
       true,
     );
-    expect(permissions.has('agency.finance.fiscal.manage.owner_only')).toBe(true);
+    expect(permissions.has('agency.finance.fiscal.manage.owner_only')).toBe(
+      true,
+    );
     expect(
       permissions.has('agency.settings.danger_zone.manage.owner_only'),
     ).toBe(false);
