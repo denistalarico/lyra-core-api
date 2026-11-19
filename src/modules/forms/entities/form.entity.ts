@@ -11,6 +11,7 @@ import type {
   FormCapture,
   FormDestination,
   FormFieldsConfig,
+  FormGoogleAdsLeads,
   FormInboundEmail,
   FormPresentation,
   FormSecurity,
@@ -91,6 +92,24 @@ export class FormEntity {
     default: () => "'{}'::jsonb",
   })
   inboundEmail!: FormInboundEmail;
+
+  /** GL1: Google Ads lead-form webhook settings and counters (no secret in here). */
+  @Column({
+    name: 'google_ads_leads',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  googleAdsLeads!: FormGoogleAdsLeads;
+
+  /** sha256 of the webhook key; never selected by default, so no read of a form can leak it. */
+  @Column({
+    name: 'google_ads_key_hash',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+    select: false,
+  })
+  googleAdsKeyHash?: string | null;
 
   /** F3: capture script settings (selector + field mapping). */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })

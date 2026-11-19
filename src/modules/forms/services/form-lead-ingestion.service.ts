@@ -7,11 +7,13 @@ import { AgencySalesOpportunityEntity } from '../../agency/entities/agency-sales
 import { CrmService } from '../../crm/crm.service';
 import { CrmOpportunityEntity } from '../../crm/entities/crm-opportunity.entity';
 import { CrmOpportunityCommandService } from '../../crm/services/crm-opportunity-command.service';
+import { SocialAdEntity } from '../../social-integrations/entities/social-ad-entity.entity';
 import { FormEntity } from '../entities/form.entity';
 import { FormSubmissionEntity } from '../entities/form-submission.entity';
 import { hasLeadIdentity } from '../form-capture.mapper';
 import type {
   FormSubmissionOutcome,
+  NormalizedLead,
   NormalizedSubmission,
 } from '../forms.types';
 import {
@@ -24,7 +26,52 @@ const SOURCE_LABEL: Record<FormSubmissionEntity['source'], string> = {
   embed: 'formulário incorporado',
   script: 'captura de formulário do site',
   email: 'e-mail',
+  google_ads: 'formulário do Google Ads',
+  meta_lead_ads: 'formulário do Meta Lead Ads',
 };
+
+/**
+ * Ad-network lead forms (D-L1/D-L6): where the lead is labelled in each CRM and
+ * which mirror rows name its campaign. Sources not listed here keep the
+ * original behaviour untouched.
+ */
+type AdLeadSource = {
+  /** `social_ad_entities.provider` of the campaign mirror. */
+  provider: string;
+  /** Agency CRM `metadata.source` (a default opportunity source of that CRM). */
+  agencySource: string;
+  /** LeadFlow CRM `source` (free string). */
+  leadflowSource: string;
+};
+
+const AD_LEAD_SOURCES: Partial<
+  Record<FormSubmissionEntity['source'], AdLeadSource>
+> = {
+  google_ads: {
+    provider: 'google_ads',
+    agencySource: 'Google Ads',
+    leadflowSource: 'google_ads',
+  },
+  meta_lead_ads: {
+    provider: 'meta_ads',
+    agencySource: 'Meta Ads',
+    leadflowSource: 'meta_lead_ads',
+  },
+};
+
+/**
+ * Error text of an ad lead must not carry the lead's own data (PII rule): the
+ * values we hold are cut out first, then anything that looks like an e-mail or a phone.
+ */
+export function scrubLeadPii(message: string, lead: NormalizedLead): string {
+  let text = message;
+  for (const value of [lead.name, lead.email, lead.phone, lead.company])
+    if (value && value.length >= 3)
+      text = text.split(value).join('[dado do lead]');
+  return text
+    .replace(/[^\s@<>"']+@[^\s@<>"']+/g, '[e-mail]')
+    .replace(/\+?\d[\d\s().-]{6,}\d/g, '[telefone]');
+}
 
 /** The context a public request lacks: tenant/workspace and scope come from the form, never from the payload. */
 export function formRequestContext(form: FormEntity): RequestContext {
@@ -50,6 +97,7 @@ export function buildOpportunityDescription(
   form: FormEntity,
   submission: Pick<FormSubmissionEntity, 'source' | 'attribution'>,
   normalized: NormalizedSubmission,
+  campaignName: string | null = null,
 ): string {
   const attribution = Object.entries(submission.attribution ?? {})
     .filter(
@@ -57,8 +105,16 @@ export function buildOpportunityDescription(
         key.startsWith('utm_') || key === 'pageUrl' || key === 'referrer',
     )
     .map(([key, value]) => `${key}: ${value}`);
+  const campaignId = submission.attribution?.campaignId;
+  const origin = AD_LEAD_SOURCES[submission.source]
+    ? `Lead recebido pelo ${SOURCE_LABEL[submission.source]}${
+        campaignName || campaignId
+          ? ` — campanha ${campaignName ?? campaignId}`
+          : ''
+      }.`
+    : `Lead recebido pelo formulário "${form.name}" (${SOURCE_LABEL[submission.source]}).`;
   return [
-    `Lead recebido pelo formulário "${form.name}" (${SOURCE_LABEL[submission.source]}).`,
+    origin,
     normalized.opportunity.notes,
     normalized.summaryLines.length ? '' : null,
     ...normalized.summaryLines,
@@ -90,6 +146,8 @@ export class FormLeadIngestionService {
     private readonly crm: CrmService,
     private readonly crmCommands: CrmOpportunityCommandService,
     private readonly sales: AgencySalesService,
+    @InjectRepository(SocialAdEntity, 'agency')
+    private readonly adEntities: Repository<SocialAdEntity>,
   ) {}
 
   async process(
@@ -142,16 +200,24 @@ export class FormLeadIngestionService {
         submission.contactId = contactId;
       }
 
+      const campaignName = await this.campaignName(form, submission);
       const description = buildOpportunityDescription(
         form,
         submission,
         normalized,
+        campaignName,
       );
       const existingId = contactId
         ? await this.findRecentOpenOpportunity(form, contactId)
         : null;
       if (existingId) {
-        await this.appendToExisting(form, existingId, submission, description);
+        await this.appendToExisting(
+          form,
+          existingId,
+          submission,
+          description,
+          campaignName,
+        );
         submission.opportunityId = existingId;
         submission.outcome = { ...outcome, opportunityAction: 'appended' };
         return this.finish(submission, 'duplicate');
@@ -163,6 +229,7 @@ export class FormLeadIngestionService {
         normalized,
         contactId,
         description,
+        campaignName,
       );
       submission.outcome = { ...outcome, opportunityAction: 'created' };
       return this.finish(
@@ -172,14 +239,14 @@ export class FormLeadIngestionService {
           : 'needs_review',
       );
     } catch (error) {
+      const raw = (error as Error).message?.slice(0, 1000) ?? 'Unknown error';
+      const message = AD_LEAD_SOURCES[submission.source]
+        ? scrubLeadPii(raw, normalized.lead)
+        : raw;
       this.logger.warn(
-        `Form ${form.id} submission ${submission.id} failed: ${(error as Error).message}`,
+        `Form ${form.id} submission ${submission.id} failed: ${message}`,
       );
-      return this.finish(
-        submission,
-        'failed',
-        (error as Error).message?.slice(0, 1000) ?? 'Unknown error',
-      );
+      return this.finish(submission, 'failed', message);
     }
   }
 
@@ -206,13 +273,62 @@ export class FormLeadIngestionService {
     );
   }
 
-  private metadata(form: FormEntity, submission: FormSubmissionEntity) {
-    return {
+  /** Campaign name from the ad mirror; absent mirror or any failure never blocks the lead (D-L6). */
+  private async campaignName(
+    form: FormEntity,
+    submission: FormSubmissionEntity,
+  ): Promise<string | null> {
+    const adSource = AD_LEAD_SOURCES[submission.source];
+    const campaignId = submission.attribution?.campaignId;
+    if (!adSource || !campaignId) return null;
+    try {
+      const row = await this.adEntities.findOne({
+        select: { id: true, name: true },
+        where: {
+          tenantId: form.tenantId,
+          workspaceId: form.workspaceId,
+          agencyClientId: form.agencyClientId ?? IsNull(),
+          provider: adSource.provider,
+          entityLevel: 'campaign',
+          externalId: campaignId,
+        },
+        order: { lastSeenAt: 'DESC' },
+      });
+      return row?.name?.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private metadata(
+    form: FormEntity,
+    submission: FormSubmissionEntity,
+    campaignName: string | null = null,
+  ) {
+    const base = {
       formId: form.id,
       formName: form.name,
       formSubmissionId: submission.id,
       formSource: submission.source,
       attribution: submission.attribution ?? {},
+    };
+    const adSource = AD_LEAD_SOURCES[submission.source];
+    if (!adSource) return base;
+    // D-L6. `formId` above stays the Lyra form (existing readers use it), so the
+    // provider's own form id travels as `providerFormId`.
+    const a = submission.attribution ?? {};
+    return {
+      ...base,
+      provider: adSource.provider,
+      ...(a.campaignId ? { campaignId: a.campaignId } : {}),
+      ...(campaignName ? { campaignName } : {}),
+      ...(a.adGroupId ? { adGroupId: a.adGroupId } : {}),
+      ...(a.assetGroupId ? { assetGroupId: a.assetGroupId } : {}),
+      ...(a.adId ? { adId: a.adId } : {}),
+      ...(a.formId ? { providerFormId: a.formId } : {}),
+      ...(a.leadId ? { leadId: a.leadId } : {}),
+      ...(a.gclid ? { gclid: a.gclid } : {}),
+      ...(a.submittedAt ? { submittedAt: a.submittedAt } : {}),
     };
   }
 
@@ -222,8 +338,10 @@ export class FormLeadIngestionService {
     normalized: NormalizedSubmission,
     contactId: string | null,
     description: string,
+    campaignName: string | null,
   ): Promise<string> {
     const destination = form.destination;
+    const adSource = AD_LEAD_SOURCES[submission.source];
     if (destination.target === 'leadflow_crm') {
       const saved = await this.crm.createOpportunity(
         formRequestContext(form),
@@ -241,9 +359,9 @@ export class FormLeadIngestionService {
             normalized.opportunity.valueAmount === null
               ? undefined
               : normalized.opportunity.valueAmount.toFixed(2),
-          source: 'form',
+          source: adSource?.leadflowSource ?? 'form',
           assignedUserId: destination.ownerUserId ?? undefined,
-          metadata: this.metadata(form, submission),
+          metadata: this.metadata(form, submission, campaignName),
         },
         {
           idempotencyKey: `form-submission:${submission.id}`,
@@ -267,7 +385,10 @@ export class FormLeadIngestionService {
             ? undefined
             : Math.round(normalized.opportunity.valueAmount * 100),
         // The Agency CRM shows `metadata.source`; "Formulário" is one of its default sources.
-        metadata: { source: 'Formulário', ...this.metadata(form, submission) },
+        metadata: {
+          source: adSource?.agencySource ?? 'Formulário',
+          ...this.metadata(form, submission, campaignName),
+        },
       },
     );
     return saved.id;
@@ -322,6 +443,7 @@ export class FormLeadIngestionService {
     opportunityId: string,
     submission: FormSubmissionEntity,
     description: string,
+    campaignName: string | null,
   ) {
     const title = `Novo envio do formulário "${form.name}"`.slice(0, 200);
     if (form.destination.target === 'leadflow_crm') {
@@ -334,7 +456,7 @@ export class FormLeadIngestionService {
           description,
           actor: { type: 'system', userId: null },
           idempotencyKey: `form-submission:${submission.id}`,
-          metadata: this.metadata(form, submission),
+          metadata: this.metadata(form, submission, campaignName),
         },
       );
       return;

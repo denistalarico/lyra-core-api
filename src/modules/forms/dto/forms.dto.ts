@@ -219,3 +219,14 @@ export class UpdateFormInboundEmailDto {
   @IsBoolean()
   aiExtraction?: boolean;
 }
+
+/** GL1: settings of the Google Ads lead-form channel (§5.4). */
+export class UpdateFormGoogleAdsLeadsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  sendTestLeadsToCrm?: boolean;
+}

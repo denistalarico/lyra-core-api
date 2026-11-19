@@ -67,6 +67,15 @@ export class FormSubmissionEntity {
   })
   emailMessageId!: string | null;
 
+  /** GL1/ML1: provider lead id (Google `lead_id`, Meta `leadgen_id`); unique per form + source. */
+  @Column({
+    name: 'external_lead_id',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  externalLeadId!: string | null;
+
   @Column({ name: 'ip_hash', type: 'varchar', length: 64, nullable: true })
   ipHash!: string | null;
 

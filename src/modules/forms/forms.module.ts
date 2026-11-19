@@ -19,6 +19,7 @@ import { CrmModule } from '../crm/crm.module';
 import { EmailModule } from '../email/email.module';
 import { CrmOpportunityEntity } from '../crm/entities/crm-opportunity.entity';
 import { PermissionsModule } from '../permissions';
+import { SocialAdEntity } from '../social-integrations/entities/social-ad-entity.entity';
 import { FormEmailSyncStateEntity } from './entities/form-email-sync-state.entity';
 import { FormSubmissionEntity } from './entities/form-submission.entity';
 import { FormEntity } from './entities/form.entity';
@@ -26,6 +27,7 @@ import { FormsController } from './forms.controller';
 import { PublicFormsController } from './public-forms.controller';
 import { FormEmailAiExtractor } from './services/form-email-ai.extractor';
 import { FormEmailImapGateway } from './services/form-email-imap.gateway';
+import { FormGoogleAdsLeadsService } from './services/form-google-ads-leads.service';
 import { FormInboundEmailService } from './services/form-inbound-email.service';
 import { FormLeadContactResolver } from './services/form-lead-contact.resolver';
 import { FormLeadIngestionService } from './services/form-lead-ingestion.service';
@@ -59,6 +61,7 @@ import { FormsService } from './services/forms.service';
         ContactListEntity,
         ContactListMemberEntity,
         LeadFlowContactCompanyEntity,
+        SocialAdEntity,
       ],
       'agency',
     ),
@@ -70,6 +73,7 @@ import { FormsService } from './services/forms.service';
     FormLeadIngestionService,
     FormLeadContactResolver,
     FormInboundEmailService,
+    FormGoogleAdsLeadsService,
     FormEmailImapGateway,
     FormEmailAiExtractor,
     SettingsCryptoService,

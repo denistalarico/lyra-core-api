@@ -250,11 +250,45 @@ export const DEFAULT_FORM_INBOUND_EMAIL: FormInboundEmail = {
   forwardingConfirmation: null,
 };
 
+/**
+ * Lead-form channels of the ad networks (GL1/ML1, D-L1): the provider's own
+ * form feeds `form_submissions`, and the form's `destination` routes it to a CRM.
+ */
+export type FormGoogleAdsLeads = {
+  enabled: boolean;
+  keyHint: string | null;
+  keyCreatedAt: string | null;
+  /** D-L4: Google's "send test data" button also opens a CRM opportunity. */
+  sendTestLeadsToCrm: boolean;
+  lastReceivedAt: string | null;
+  lastTestAt: string | null;
+  receivedCount: number;
+  lastError: string | null;
+};
+
+export const DEFAULT_FORM_GOOGLE_ADS_LEADS: FormGoogleAdsLeads = {
+  enabled: false,
+  keyHint: null,
+  keyCreatedAt: null,
+  sendTestLeadsToCrm: true,
+  lastReceivedAt: null,
+  lastTestAt: null,
+  receivedCount: 0,
+  lastError: null,
+};
+
+/** Read DTO of the channel (§5.4): the stored settings plus the URL to paste in Google Ads. */
+export type FormGoogleAdsLeadsView = FormGoogleAdsLeads & {
+  webhookUrl: string;
+};
+
 export const FORM_SUBMISSION_SOURCES = [
   'page',
   'embed',
   'script',
   'email',
+  'google_ads',
+  'meta_lead_ads',
 ] as const;
 export type FormSubmissionSource = (typeof FORM_SUBMISSION_SOURCES)[number];
 

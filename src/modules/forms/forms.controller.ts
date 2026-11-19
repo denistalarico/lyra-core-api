@@ -22,8 +22,13 @@ import {
   ListFormsQueryDto,
   PatchFormDto,
   SetFormsAddonDto,
+  UpdateFormGoogleAdsLeadsDto,
   UpdateFormInboundEmailDto,
 } from './dto/forms.dto';
+import {
+  FormGoogleAdsLeadsService,
+  withGoogleAdsLeadsView,
+} from './services/form-google-ads-leads.service';
 import { FormInboundEmailService } from './services/form-inbound-email.service';
 import { FormsAddonService } from './services/forms-addon.service';
 import { FormsService } from './services/forms.service';
@@ -42,6 +47,7 @@ export class FormsController {
     private readonly forms: FormsService,
     private readonly addon: FormsAddonService,
     private readonly inboundEmail: FormInboundEmailService,
+    private readonly googleAdsLeads: FormGoogleAdsLeadsService,
   ) {}
 
   @Get('addon')
@@ -72,7 +78,9 @@ export class FormsController {
     @RequestContextData() ctx: RequestContext,
     @Query() query: ListFormsQueryDto,
   ) {
-    return this.forms.list(ctx, query);
+    return this.forms
+      .list(ctx, query)
+      .then((items) => items.map(withGoogleAdsLeadsView));
   }
 
   @Post()
@@ -81,7 +89,7 @@ export class FormsController {
     @RequestContextData() ctx: RequestContext,
     @Body() dto: CreateFormDto,
   ) {
-    return this.forms.create(ctx, dto);
+    return this.forms.create(ctx, dto).then(withGoogleAdsLeadsView);
   }
 
   /** F4: is the agency IMAP box set up, and how is the reader doing (§6.3). */
@@ -131,7 +139,7 @@ export class FormsController {
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.forms.get(ctx, id);
+    return this.forms.get(ctx, id).then(withGoogleAdsLeadsView);
   }
 
   @Patch(':id')
@@ -141,7 +149,7 @@ export class FormsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PatchFormDto,
   ) {
-    return this.forms.patch(ctx, id, dto);
+    return this.forms.patch(ctx, id, dto).then(withGoogleAdsLeadsView);
   }
 
   @Delete(':id')
@@ -159,7 +167,7 @@ export class FormsController {
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.forms.publish(ctx, id);
+    return this.forms.publish(ctx, id).then(withGoogleAdsLeadsView);
   }
 
   @Post(':id/deactivate')
@@ -168,7 +176,7 @@ export class FormsController {
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.forms.deactivate(ctx, id);
+    return this.forms.deactivate(ctx, id).then(withGoogleAdsLeadsView);
   }
 
   @Post(':id/archive')
@@ -177,7 +185,7 @@ export class FormsController {
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.forms.archive(ctx, id);
+    return this.forms.archive(ctx, id).then(withGoogleAdsLeadsView);
   }
 
   @Post(':id/rotate-key')
@@ -186,7 +194,7 @@ export class FormsController {
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.forms.rotateKey(ctx, id);
+    return this.forms.rotateKey(ctx, id).then(withGoogleAdsLeadsView);
   }
 
   @Put(':id/inbound-email')
@@ -197,6 +205,29 @@ export class FormsController {
     @Body() dto: UpdateFormInboundEmailDto,
   ) {
     return this.inboundEmail.configure(ctx, await this.forms.get(ctx, id), dto);
+  }
+
+  /** GL1: the key is shown once, in this response; only its hash is stored. */
+  @Post(':id/google-ads-leads/key')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async generateGoogleAdsLeadsKey(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.googleAdsLeads.generateKey(await this.forms.get(ctx, id));
+  }
+
+  @Patch(':id/google-ads-leads')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async updateGoogleAdsLeads(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateFormGoogleAdsLeadsDto,
+  ) {
+    return this.googleAdsLeads.updateSettings(
+      await this.forms.get(ctx, id),
+      dto,
+    );
   }
 
   @Post(':id/inbound-email/test')

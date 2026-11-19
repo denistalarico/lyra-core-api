@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { CapturePublicFormDto, SubmitPublicFormDto } from './dto/forms.dto';
+import { FormGoogleAdsLeadsService } from './services/form-google-ads-leads.service';
 import { FormsService } from './services/forms.service';
 
 /**
@@ -20,7 +21,10 @@ import { FormsService } from './services/forms.service';
  */
 @Controller('public/forms')
 export class PublicFormsController {
-  constructor(private readonly forms: FormsService) {}
+  constructor(
+    private readonly forms: FormsService,
+    private readonly googleAdsLeads: FormGoogleAdsLeadsService,
+  ) {}
 
   @Get(':publicKey')
   @Header('Cache-Control', 'no-store')
@@ -63,5 +67,21 @@ export class PublicFormsController {
       origin: origin ?? null,
       referer: referer ?? null,
     });
+  }
+
+  /**
+   * GL1: Google Ads lead-form webhook. Auth is the key in the body (`google_key`),
+   * not a user; the raw body is read by hand because the parser must ignore
+   * fields Google adds (the global pipe rejects unknown properties).
+   * 200 `{}` is what Google expects; 4XX is not retried, 5XX is.
+   */
+  @Post(':publicKey/google-ads-leads')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  receiveGoogleAdsLead(
+    @Param('publicKey') publicKey: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.googleAdsLeads.receive(publicKey, body);
   }
 }

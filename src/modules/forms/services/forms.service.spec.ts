@@ -14,6 +14,7 @@ import type { FormSubmissionEntity } from '../entities/form-submission.entity';
 import {
   DEFAULT_FORM_AFTER_SUBMIT,
   DEFAULT_FORM_DESTINATION,
+  DEFAULT_FORM_GOOGLE_ADS_LEADS,
   DEFAULT_FORM_INBOUND_EMAIL,
   DEFAULT_FORM_SECURITY,
 } from '../forms.types';
@@ -66,6 +67,7 @@ function activeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     capture: { formSelector: null, fieldMap: {} },
     inboundEmailAddress: null,
     inboundEmail: { ...DEFAULT_FORM_INBOUND_EMAIL },
+    googleAdsLeads: { ...DEFAULT_FORM_GOOGLE_ADS_LEADS },
     createdByUserId: null,
     publishedAt: new Date(),
     archivedAt: null,
@@ -275,6 +277,41 @@ describe('FormsService admin', () => {
       fields: { fields: [{ key: 'nome', label: 'Nome', type: 'text' }] },
     });
     expect(forms.save.mock.calls[0][0].schemaVersion).toBe(4);
+  });
+
+  it('publishes a form with no fields only when the Google Ads lead channel is on (D-L2)', async () => {
+    const empty = { fields: [] } as FormEntity['fields'];
+    await expect(
+      setup(activeForm({ status: 'draft', fields: empty })).service.publish(
+        CTX,
+        'form-1',
+      ),
+    ).rejects.toThrow(/visible field/);
+    const { service, forms } = setup(
+      activeForm({
+        status: 'draft',
+        fields: empty,
+        googleAdsLeads: { ...DEFAULT_FORM_GOOGLE_ADS_LEADS, enabled: true },
+      }),
+    );
+    // The destination lookup has its own tests; here only the fields rule matters.
+    jest
+      .spyOn(service as never, 'assertDestinationExists')
+      .mockResolvedValue(undefined as never);
+    await service.publish(CTX, 'form-1');
+    expect(forms.save.mock.calls[0][0].status).toBe('active');
+  });
+
+  it('a fieldless form never answers on the public page, embed or capture', async () => {
+    const { service } = setup(
+      activeForm({ fields: { fields: [] } as FormEntity['fields'] }),
+    );
+    await expect(service.getPublicConfig(KEY)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(
+      service.submitPublic(KEY, { values: {} }, META),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('generatePublicKey is random and well-formed', () => {

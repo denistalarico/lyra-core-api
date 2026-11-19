@@ -250,7 +250,7 @@ export class FormsService {
       form.destination = destination;
     }
     if (form.status === 'active') {
-      assertPublishable(form.fields);
+      this.assertCanPublish(form);
       await this.assertDestinationExists(form);
     }
     return this.forms.save(form);
@@ -260,11 +260,19 @@ export class FormsService {
     const form = await this.get(ctx, id);
     if (form.status === 'archived')
       throw new ConflictException('Archived forms cannot be published.');
-    assertPublishable(form.fields);
+    this.assertCanPublish(form);
     await this.assertDestinationExists(form);
     form.status = 'active';
     form.publishedAt ??= new Date();
     return this.forms.save(form);
+  }
+
+  /**
+   * D-L2: a form fed by an ad network's lead form has no fields of its own, so
+   * the "at least one visible field" rule only applies when that channel is off.
+   */
+  private assertCanPublish(form: FormEntity) {
+    if (form.googleAdsLeads?.enabled !== true) assertPublishable(form.fields);
   }
 
   async deactivate(ctx: RequestContext, id: string) {
@@ -390,7 +398,13 @@ export class FormsService {
             where: { publicKey, status: 'active', type: 'lead_capture' },
           })
         : null;
-    if (!form || !(await this.addon.isEnabled(form.tenantId, form.workspaceId)))
+    // A form without fields only exists for ad-network leads (D-L2): the public
+    // page, embed and capture must not turn into an open door for blank leads.
+    if (
+      !form ||
+      !form.fields?.fields?.length ||
+      !(await this.addon.isEnabled(form.tenantId, form.workspaceId))
+    )
       throw new NotFoundException('Form not found.');
     return form;
   }

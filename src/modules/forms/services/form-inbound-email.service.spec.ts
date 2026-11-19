@@ -9,6 +9,7 @@ import type { FormSubmissionEntity } from '../entities/form-submission.entity';
 import {
   DEFAULT_FORM_AFTER_SUBMIT,
   DEFAULT_FORM_DESTINATION,
+  DEFAULT_FORM_GOOGLE_ADS_LEADS,
   DEFAULT_FORM_INBOUND_EMAIL,
   DEFAULT_FORM_PRESENTATION,
   DEFAULT_FORM_SECURITY,
@@ -44,6 +45,7 @@ function makeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     capture: { formSelector: null, fieldMap: {} },
     inboundEmailAddress: ADDRESS,
     inboundEmail: { ...DEFAULT_FORM_INBOUND_EMAIL },
+    googleAdsLeads: { ...DEFAULT_FORM_GOOGLE_ADS_LEADS },
     createdByUserId: null,
     publishedAt: new Date(),
     archivedAt: null,

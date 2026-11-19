@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { RequestContext } from '../../../common/context/request-context.interface';
 import type { FormEntity } from '../entities/form.entity';
 import type { FormSubmissionEntity } from '../entities/form-submission.entity';
@@ -6,6 +7,7 @@ import {
   DEFAULT_FORM_PRESENTATION,
   DEFAULT_FORM_TRACKING,
   DEFAULT_FORM_DESTINATION,
+  DEFAULT_FORM_GOOGLE_ADS_LEADS,
   DEFAULT_FORM_INBOUND_EMAIL,
   DEFAULT_FORM_SECURITY,
 } from '../forms.types';
@@ -13,6 +15,7 @@ import {
   FormLeadIngestionService,
   buildOpportunityDescription,
   formRequestContext,
+  scrubLeadPii,
 } from './form-lead-ingestion.service';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
@@ -42,6 +45,7 @@ function makeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     capture: { formSelector: null, fieldMap: {} },
     inboundEmailAddress: null,
     inboundEmail: { ...DEFAULT_FORM_INBOUND_EMAIL },
+    googleAdsLeads: { ...DEFAULT_FORM_GOOGLE_ADS_LEADS },
     createdByUserId: null,
     publishedAt: new Date(),
     archivedAt: null,
@@ -79,6 +83,7 @@ function makeSubmission(
     attribution: { utm_source: 'meta', gclid: 'g1' },
     clientNonce: null,
     emailMessageId: null,
+    externalLeadId: null,
     ipHash: null,
     userAgent: null,
     status: 'received',
@@ -111,6 +116,7 @@ function setup() {
     createQuickOpportunity: jest.fn().mockResolvedValue({ id: 'sales-opp' }),
     createOpportunityActivity: jest.fn().mockResolvedValue({}),
   };
+  const adEntities = { findOne: jest.fn().mockResolvedValue(null) };
   const service = new FormLeadIngestionService(
     submissions as never,
     crmOpportunities as never,
@@ -119,6 +125,7 @@ function setup() {
     crm as never,
     crmCommands as never,
     sales as never,
+    adEntities as never,
   );
   return {
     service,
@@ -129,6 +136,7 @@ function setup() {
     crm,
     crmCommands,
     sales,
+    adEntities,
   };
 }
 
@@ -336,5 +344,141 @@ describe('FormLeadIngestionService', () => {
     expect(text).toContain('Nome: Maria Silva');
     expect(text).toContain('utm_source: meta');
     expect(text).not.toContain('gclid');
+  });
+
+  describe('Google Ads lead (D-L6)', () => {
+    const googleSubmission = (overrides: Partial<FormSubmissionEntity> = {}) =>
+      makeSubmission({
+        source: 'google_ads',
+        attribution: {
+          gclid: 'gclid-fixture',
+          campaignId: '123',
+          assetGroupId: '456',
+          formId: 'gform-9',
+          leadId: 'lead-9',
+          submittedAt: '2026-11-19T13:15:00.000Z',
+          isTest: 'false',
+        },
+        ...overrides,
+      });
+
+    it('Agency CRM: metadata.source "Google Ads" and the ids of the ad', async () => {
+      const { service, sales, adEntities } = setup();
+      adEntities.findOne.mockResolvedValue({ name: 'Campanha Verão' });
+      await service.process(makeForm(), googleSubmission());
+
+      const dto = (
+        sales.createQuickOpportunity.mock.calls[0] as unknown[]
+      )[1] as {
+        description: string;
+        metadata: Record<string, unknown>;
+      };
+      expect(dto.metadata).toMatchObject({
+        source: 'Google Ads',
+        provider: 'google_ads',
+        campaignId: '123',
+        campaignName: 'Campanha Verão',
+        assetGroupId: '456',
+        providerFormId: 'gform-9',
+        formId: 'form-1',
+        leadId: 'lead-9',
+        gclid: 'gclid-fixture',
+        submittedAt: '2026-11-19T13:15:00.000Z',
+      });
+      expect(dto.description).toContain(
+        'Lead recebido pelo formulário do Google Ads — campanha Campanha Verão.',
+      );
+    });
+
+    it('looks the campaign up in the mirror of the form scope', async () => {
+      const { service, adEntities } = setup();
+      await service.process(makeForm(), googleSubmission());
+      const query = (adEntities.findOne.mock.calls[0] as unknown[])[0] as {
+        where: Record<string, unknown>;
+      };
+      expect(query.where).toMatchObject({
+        tenantId: TENANT,
+        provider: 'google_ads',
+        entityLevel: 'campaign',
+        externalId: '123',
+      });
+    });
+
+    it('a missing or failing mirror never blocks the lead and the description falls back to the id', async () => {
+      const { service, sales, adEntities } = setup();
+      adEntities.findOne.mockRejectedValue(new Error('db down'));
+      const result = await service.process(makeForm(), googleSubmission());
+      expect(result.status).toBe('accepted');
+      const dto = (
+        sales.createQuickOpportunity.mock.calls[0] as unknown[]
+      )[1] as {
+        description: string;
+        metadata: Record<string, unknown>;
+      };
+      expect(dto.description).toContain('— campanha 123.');
+      expect(dto.metadata).not.toHaveProperty('campaignName');
+    });
+
+    it('LeadFlow CRM: source "google_ads"', async () => {
+      const { service, crm } = setup();
+      const form = makeForm({
+        agencyClientId: CLIENT,
+        companyContextId: COMPANY,
+        destination: { ...DEFAULT_FORM_DESTINATION, target: 'leadflow_crm' },
+      });
+      await service.process(form, googleSubmission());
+      expect(
+        (crm.createOpportunity.mock.calls[0] as unknown[])[1],
+      ).toMatchObject({
+        source: 'google_ads',
+        metadata: { provider: 'google_ads', campaignId: '123' },
+      });
+    });
+
+    it('older sources keep "form" / "Formulário" and no provider metadata', async () => {
+      const { service, sales } = setup();
+      await service.process(makeForm(), makeSubmission());
+      const dto = (
+        sales.createQuickOpportunity.mock.calls[0] as unknown[]
+      )[1] as {
+        metadata: Record<string, unknown>;
+      };
+      expect(dto.metadata.source).toBe('Formulário');
+      expect(dto.metadata).not.toHaveProperty('provider');
+    });
+
+    it('keeps the lead data out of the stored error and the log', async () => {
+      const { service, sales } = setup();
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      sales.createQuickOpportunity.mockRejectedValue(
+        new Error('invalid contact maria@x.com / +5511987654321 / Maria Silva'),
+      );
+      const result = await service.process(makeForm(), googleSubmission());
+      expect(result.status).toBe('failed');
+      for (const text of [
+        result.error,
+        ...(warn.mock.calls.flat() as unknown[]),
+      ]) {
+        expect(String(text)).not.toMatch(
+          /maria@x\.com|5511987654321|Maria Silva/,
+        );
+      }
+      warn.mockRestore();
+    });
+  });
+
+  it('scrubLeadPii cuts known values, e-mails and phone numbers', () => {
+    const lead = {
+      name: 'Maria Silva',
+      email: null,
+      phone: null,
+      company: null,
+      position: null,
+    };
+    expect(scrubLeadPii('Maria Silva a@b.co +55 11 98765-4321 ok', lead)).toBe(
+      '[dado do lead] [e-mail] [telefone] ok',
+    );
   });
 });
