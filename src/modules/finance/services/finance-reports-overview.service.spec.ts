@@ -233,6 +233,23 @@ describe('FinanceService reports overview', () => {
     expect(result.cards.activeContracts).toBe(4);
   });
 
+  it('links recurrences through the legacy metadata.contactId when contact_id is empty', async () => {
+    const legacyClient = {
+      ...client('legacy', 'active', 800),
+      contactId: null,
+      metadata: { contactId: 'legacy-contact', billing: { monthlyFee: 800 } },
+    };
+    const { service } = makeService({
+      clients: [legacyClient],
+      profiles: [profile('legacy-profile', 'legacy-contact', 800)],
+    });
+
+    const result = await service.getReportsOverview(context);
+
+    expect(result.cards.mrr).toBe(800);
+    expect(result.cards.activeContracts).toBe(1);
+  });
+
   it('counts only one monthly recurrence per active Agency client', async () => {
     const { service } = makeService({
       clients: [client('duplicated', 'active', 4897)],
