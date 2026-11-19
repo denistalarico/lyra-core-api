@@ -1491,6 +1491,29 @@ export class AgencyContactsService {
     return [...labels].join(' e ');
   }
 
+  /** `{ contact: null }` until /settings/company has a name. */
+  async getSelfContact(ctx: RequestContext) {
+    const workspaceId = this.requireWorkspaceId(ctx);
+    const contact = await syncAgencySelfContact(
+      this.contactsRepo.manager,
+      { tenantId: ctx.tenantId, workspaceId },
+      { onlyIfMissing: true },
+    );
+    if (!contact) return { contact: null };
+    const profile = await this.profilesRepo.findOne({
+      where: { workspaceId, contactId: contact.id },
+    });
+    return {
+      contact: {
+        id: contact.id,
+        displayName: contact.displayName,
+        legalName: contact.legalName,
+        documentNumber: contact.documentNumber,
+        avatarUrl: profile?.avatarUrl ?? null,
+      },
+    };
+  }
+
   async listContacts(ctx: RequestContext, query: ListAgencyContactsQuery = {}) {
     const workspaceId = this.requireWorkspaceId(ctx);
     // The agency's own contact exists by default; a failure never blocks the list.

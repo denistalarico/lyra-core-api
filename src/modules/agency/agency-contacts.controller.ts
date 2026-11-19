@@ -184,6 +184,13 @@ export class AgencyContactsController {
     return this.agencyContactsService.deleteList(ctx, listId, query);
   }
 
+  /** The agency's own contact (from /settings/company), for internal projects. */
+  @Get('self')
+  @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
+  getSelfContact(@RequestContextData() ctx: RequestContext) {
+    return this.agencyContactsService.getSelfContact(ctx);
+  }
+
   @Get()
   @RequireAnyPermission(...CONTACT_VIEW_PERMISSIONS)
   listContacts(

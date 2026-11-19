@@ -434,6 +434,21 @@ export class ProjectBoardsService {
       names.set(row.id, row.name);
     });
 
+    // A project may also point at a contact, such as the agency's own one.
+    const missing = uniqueClientIds.filter((id) => !names.has(id));
+    if (missing.length) {
+      const contacts = await this.projectsRepository.manager
+        .createQueryBuilder()
+        .select('contact.id', 'id')
+        .addSelect('contact.display_name', 'name')
+        .from('contacts', 'contact')
+        .where('contact.tenant_id = :tenantId', { tenantId: context.tenantId })
+        .andWhere('contact.workspace_id = :workspaceId', { workspaceId: context.workspaceId })
+        .andWhere('contact.id IN (:...missing)', { missing })
+        .getRawMany<{ id: string; name: string }>();
+      contacts.forEach((row) => names.set(row.id, row.name));
+    }
+
     return names;
   }
 

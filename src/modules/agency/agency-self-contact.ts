@@ -4,6 +4,8 @@ import {
   ContactMethodEntity,
   ContactMethodType,
 } from '../contacts/entities/contact-method.entity';
+import { ContactAddressEntity } from '../contacts/entities/contact-address.entity';
+import { AgencyContactProfileEntity } from './entities/agency-contact-details.entities';
 import { AgencyWorkspaceCompanySettingsEntity } from './entities/agency-settings.entities';
 
 /** `contacts.source` of the one contact that represents the agency itself. */
@@ -109,8 +111,80 @@ export async function syncAgencySelfContact(
         }),
       );
     }
+    await syncAddress(tx, where, contact.id, company);
+    await syncAvatar(tx, where, contact.id, company);
     return contact;
   });
+}
+
+const COUNTRY_NAMES: Record<string, string> = { BR: 'Brasil' };
+
+/** "Rua X, 1407 - Bairro" → street, number, district; otherwise all street. */
+export function splitAddressLine(line: string) {
+  const match = /^(.+?),\s*([^,-]+?)\s*(?:-\s*(.+))?$/.exec(line.trim());
+  if (!match) return { street: line.trim(), number: null, district: null };
+  return {
+    street: match[1].trim(),
+    number: match[2].trim() || null,
+    district: match[3]?.trim() || null,
+  };
+}
+
+async function syncAddress(
+  tx: EntityManager,
+  where: Scope,
+  contactId: string,
+  company: AgencyWorkspaceCompanySettingsEntity,
+) {
+  const line = company.addressLine?.trim();
+  const metadata = (company.metadata ?? {}) as Record<string, unknown>;
+  const text = (key: string) =>
+    typeof metadata[key] === 'string' && (metadata[key] as string).trim()
+      ? (metadata[key] as string).trim().slice(0, 120)
+      : null;
+  if (!line && !text('city')) return;
+  const repo = tx.getRepository(ContactAddressEntity);
+  const current = await repo.findOne({
+    where: { ...where, contactId, type: 'main' },
+    order: { createdAt: 'ASC' },
+  });
+  const parts = line
+    ? splitAddressLine(line)
+    : { street: null, number: null, district: null };
+  const country = company.country?.trim() || null;
+  await repo.save(
+    repo.merge(current ?? repo.create({ ...where, contactId, type: 'main' }), {
+      street: parts.street?.slice(0, 255) ?? null,
+      number: parts.number?.slice(0, 30) ?? null,
+      district: parts.district?.slice(0, 120) ?? null,
+      city: text('city'),
+      state: text('state'),
+      country: country ? (COUNTRY_NAMES[country] ?? country) : null,
+    }),
+  );
+}
+
+/** The company's square mark (avatar), else its logo. Never clears one. */
+async function syncAvatar(
+  tx: EntityManager,
+  where: Scope,
+  contactId: string,
+  company: AgencyWorkspaceCompanySettingsEntity,
+) {
+  const url = company.avatarUrl?.trim() || company.logoUrl?.trim();
+  if (!url) return;
+  const key = company.avatarUrl?.trim()
+    ? company.avatarPath
+    : company.logoPath;
+  const repo = tx.getRepository(AgencyContactProfileEntity);
+  const profile = await repo.findOne({ where: { ...where, contactId } });
+  if (profile?.avatarUrl === url) return;
+  await repo.save(
+    repo.merge(profile ?? repo.create({ ...where, contactId }), {
+      avatarUrl: url,
+      avatarObjectKey: key ?? null,
+    }),
+  );
 }
 
 /** True when `contactId` is the agency's own contact in this workspace. */

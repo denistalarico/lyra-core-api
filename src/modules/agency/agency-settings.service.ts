@@ -293,6 +293,10 @@ export class AgencySettingsService {
       },
       ['tenantId', 'workspaceId'],
     );
+    await syncAgencySelfContact(this.companyRepo.manager, {
+      tenantId,
+      workspaceId,
+    }).catch(() => null);
 
     return {
       logoUrl: stored.url,
@@ -320,6 +324,10 @@ export class AgencySettingsService {
       },
       ['tenantId', 'workspaceId'],
     );
+    await syncAgencySelfContact(this.companyRepo.manager, {
+      tenantId,
+      workspaceId,
+    }).catch(() => null);
 
     return {
       avatarUrl: stored.url,
