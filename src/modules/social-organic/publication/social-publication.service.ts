@@ -615,6 +615,15 @@ export class SocialPublicationService {
               },
             }
           : {}),
+      // Video cover (reference only, like the media). A Story has no cover.
+      ...(options.cover && !destination.placement.startsWith('story')
+        ? {
+            cover: {
+              mediaAssetId: options.cover.mediaAssetId ?? null,
+              timestampMs: options.cover.timestampMs ?? null,
+            },
+          }
+        : {}),
       placement: destination.placement,
       caption,
       copy: contentItem.copy,

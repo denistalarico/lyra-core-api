@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { coverFailureCode, readCoverImage } from '../cover-image';
 import type {
   MediaPreparationInput,
   PreparedMedia,
@@ -31,6 +32,7 @@ export class FacebookPublisherAdapter implements SocialPublisherAdapter {
   readonly provider = 'meta';
   readonly assetTypes = [FACEBOOK_PAGE_ASSET_TYPE] as const;
   readonly retrySafety = 'non_retryable_after_send' as const;
+  private readonly logger = new Logger(FacebookPublisherAdapter.name);
 
   constructor(private readonly graph: MetaOrganicGraphService) {}
 
@@ -125,6 +127,9 @@ export class FacebookPublisherAdapter implements SocialPublisherAdapter {
         pageAccessToken: input.credential.accessToken,
         sourceUrl: input.sourceUrl,
       });
+      if (edge === 'video_reels') {
+        await this.applyCover(input, upload.videoId);
+      }
 
       return this.prepared(
         edge === 'video_reels' ? 'facebook_reel' : 'facebook_story_video',
@@ -134,6 +139,27 @@ export class FacebookPublisherAdapter implements SocialPublisherAdapter {
       if (error instanceof SocialPublisherOperationError) throw error;
       const failure = metaPublicationFailure(error);
       throw new SocialPublisherOperationError(failure.reason, failure.code);
+    }
+  }
+
+  /** Best effort: the Reel is already uploaded and must not fail on this. */
+  private async applyCover(
+    input: MediaPreparationInput,
+    videoId: string,
+  ): Promise<void> {
+    const image = input.payload.cover?.image;
+    if (!image) return;
+    try {
+      await this.graph.setFacebookVideoThumbnail({
+        videoId,
+        pageAccessToken: input.credential.accessToken,
+        data: await readCoverImage(image),
+        mimeType: image.mimeType,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `facebook reel ${videoId}: cover not applied (${coverFailureCode(error)})`,
+      );
     }
   }
 

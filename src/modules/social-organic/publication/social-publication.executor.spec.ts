@@ -618,4 +618,122 @@ describe('SocialPublicationExecutorService', () => {
       ).resolves.toEqual({ outcome: 'unsafe_to_retry' });
     });
   });
+  describe('video cover (2026-11-18)', () => {
+    const media = {
+      id: 'media-asset-1',
+      storagePath: 'r2/media/video.mp4',
+      mimeType: 'image/jpeg',
+      byteSize: '1000',
+      width: 1080,
+      height: 1080,
+      durationMs: null,
+      codec: null,
+    };
+    const coverMedia = {
+      ...media,
+      id: 'cover-1',
+      storagePath: 'r2/media/cover.jpg',
+      byteSize: '5000',
+    };
+
+    function withCover(placement = 'feed') {
+      return buildPublication({
+        mediaAssetId: media.id,
+        payloadSnapshot: {
+          placement,
+          caption: 'caption',
+          cta: null,
+          hashtags: [],
+          firstComment: null,
+          mediaAssetIds: [media.id],
+          cover: { mediaAssetId: 'cover-1', timestampMs: 1500 },
+        },
+      });
+    }
+
+    it('signs the cover in the item scope and hands it to the adapter', async () => {
+      const adapter = buildAdapter();
+      registry.resolve.mockReturnValue(adapter);
+      mediaAssetResolver.resolve.mockImplementation(
+        ({ mediaAssetId }: { mediaAssetId: string }) =>
+          Promise.resolve(mediaAssetId === 'cover-1' ? coverMedia : media),
+      );
+      mediaPreparationService.prepare.mockImplementation(
+        ({ media: object }: { media: { storagePath: string } }) =>
+          Promise.resolve({
+            sourceUrl: `https://signed.example/${object.storagePath}`,
+            mimeType: 'image/jpeg',
+            bytes: 5000,
+          }),
+      );
+
+      await executor.publish(withCover());
+
+      expect(mediaAssetResolver.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mediaAssetId: 'cover-1',
+          tenantId: 'tenant-1',
+          workspaceId: 'workspace-1',
+        }),
+      );
+      const cover = {
+        image: {
+          sourceUrl: 'https://signed.example/r2/media/cover.jpg',
+          mimeType: 'image/jpeg',
+          bytes: 5000,
+        },
+        timestampMs: 1500,
+      };
+      expect(adapter.prepareMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ cover }) as unknown,
+        }),
+      );
+      expect(adapter.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ cover }) as unknown,
+        }),
+      );
+    });
+
+    it('publishes without the image when the cover cannot be resolved', async () => {
+      const adapter = buildAdapter();
+      registry.resolve.mockReturnValue(adapter);
+      mediaAssetResolver.resolve.mockImplementation(
+        ({ mediaAssetId }: { mediaAssetId: string }) =>
+          mediaAssetId === 'cover-1'
+            ? Promise.reject(new NotFoundException())
+            : Promise.resolve(media),
+      );
+
+      await expect(executor.publish(withCover())).resolves.toBeDefined();
+      expect(adapter.prepareMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            cover: { image: null, timestampMs: 1500 },
+          }) as unknown,
+        }),
+      );
+    });
+
+    it('never sends a cover with a Story', async () => {
+      const adapter = buildAdapter({
+        capabilities: jest.fn(() => ({
+          ...IMAGE_CAPABILITIES,
+          placements: ['story'],
+          media: { story: IMAGE_CAPABILITIES.media.feed },
+        })),
+      });
+      registry.resolve.mockReturnValue(adapter);
+      mediaAssetResolver.resolve.mockResolvedValue(media);
+
+      await executor.publish(withCover('story'));
+
+      const [[input]] = (adapter.prepareMedia as jest.Mock).mock.calls as [
+        [{ payload: { cover?: unknown } }],
+      ];
+      expect(input.payload.cover).toBeUndefined();
+      expect(mediaAssetResolver.resolve).toHaveBeenCalledTimes(1);
+    });
+  });
 });

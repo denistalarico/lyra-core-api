@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { coverFailureCode, readCoverImage } from '../cover-image';
 import type { PublisherCapabilities } from '../provider-capabilities';
 import type {
   MediaPreparationInput,
@@ -48,6 +49,7 @@ export class LinkedInPublisherAdapter implements SocialPublisherAdapter {
   readonly assetTypes = [LINKEDIN_ORGANIZATION_ASSET_TYPE] as const;
   /** A lost 201 cannot be told apart from a failure: never resend a post. */
   readonly retrySafety = 'non_retryable_after_send' as const;
+  private readonly logger = new Logger(LinkedInPublisherAdapter.name);
 
   /** Overridable in specs; not a provider dependency. */
   sleep: (ms: number) => Promise<void> = (ms) =>
@@ -121,15 +123,30 @@ export class LinkedInPublisherAdapter implements SocialPublisherAdapter {
     const owner = organizationUrn(input.credential.externalAssetId);
     try {
       if (isVideo) {
+        const coverImage = input.payload.cover?.image ?? null;
         const session = await this.api.initializeVideoUpload(accessToken, {
           ownerUrn: owner,
           fileSizeBytes: input.bytes,
+          withThumbnail: coverImage !== null,
         });
         const etags = await this.api.uploadVideoParts({
           instructions: session.instructions,
           sourceUrl: input.sourceUrl,
           totalBytes: input.bytes,
         });
+        if (coverImage && session.thumbnailUploadUrl) {
+          // A feed video serves even when its thumbnail fails (DOCUMENTED).
+          try {
+            await this.api.uploadVideoThumbnail({
+              uploadUrl: session.thumbnailUploadUrl,
+              data: await readCoverImage(coverImage),
+            });
+          } catch (error) {
+            this.logger.warn(
+              `linkedin video: cover not applied (${coverFailureCode(error)})`,
+            );
+          }
+        }
         await this.api.finalizeVideoUpload(accessToken, {
           video: session.video,
           uploadToken: session.uploadToken,

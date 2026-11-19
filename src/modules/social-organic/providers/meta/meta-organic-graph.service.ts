@@ -794,6 +794,33 @@ export class MetaOrganicGraphService {
     };
   }
 
+  /**
+   * Custom cover of a Page video/Reel: `POST /{video-id}/thumbnails` with the
+   * image file (`source`) and `is_preferred=true`.
+   */
+  async setFacebookVideoThumbnail(input: {
+    videoId: string;
+    pageAccessToken: string;
+    data: Uint8Array;
+    mimeType: string;
+  }): Promise<void> {
+    const form = new FormData();
+    form.set('is_preferred', 'true');
+    form.set(
+      'source',
+      new Blob([input.data as unknown as BlobPart], { type: input.mimeType }),
+      input.mimeType === 'image/png' ? 'cover.png' : 'cover.jpg',
+    );
+    await this.requestJson(
+      this.graphUrl(`${encodeURIComponent(input.videoId)}/thumbnails`),
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${input.pageAccessToken}` },
+        body: form,
+      },
+    );
+  }
+
   async getFacebookVideoStatus(input: {
     videoId: string;
     pageAccessToken: string;
@@ -839,6 +866,9 @@ export class MetaOrganicGraphService {
     caption: string | null;
     carouselItem?: boolean;
     apiHost?: MetaInstagramApiHost;
+    /** Reels only: an image URL (`cover_url`) wins over a frame (`thumb_offset`). */
+    coverUrl?: string | null;
+    thumbOffsetMs?: number | null;
   }): Promise<MetaOrganicPublishedObject> {
     const fields: Record<string, string> = {};
     fields[input.mediaKind === 'video' ? 'video_url' : 'image_url'] =
@@ -848,6 +878,10 @@ export class MetaOrganicGraphService {
     if (input.placement === 'reel') {
       fields.media_type = 'REELS';
       fields.share_to_feed = 'true';
+      if (input.coverUrl) fields.cover_url = input.coverUrl;
+      else if (input.thumbOffsetMs != null) {
+        fields.thumb_offset = String(input.thumbOffsetMs);
+      }
     } else if (input.placement === 'story') {
       fields.media_type = 'STORIES';
     }

@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { coverFailureCode, readCoverImage } from '../cover-image';
 import type { PublisherCapabilities } from '../provider-capabilities';
 import type {
   MediaPreparationInput,
@@ -40,6 +41,7 @@ export class YoutubePublisherAdapter implements SocialPublisherAdapter {
   readonly assetTypes = [YOUTUBE_CHANNEL_ASSET_TYPE] as const;
   /** A lost response after the last chunk could otherwise duplicate the video. */
   readonly retrySafety = 'non_retryable_after_send' as const;
+  private readonly logger = new Logger(YoutubePublisherAdapter.name);
 
   constructor(
     private readonly api: YoutubeApiClient,
@@ -119,6 +121,7 @@ export class YoutubePublisherAdapter implements SocialPublisherAdapter {
         totalBytes: input.bytes,
         mimeType: input.mimeType,
       });
+      await this.applyCover(input, videoId);
       return {
         providerMediaRef: `${VIDEO_PREFIX}${videoId}`,
         expiresAt: new Date(Date.now() + PREPARED_MEDIA_TTL_MS),
@@ -126,6 +129,27 @@ export class YoutubePublisherAdapter implements SocialPublisherAdapter {
     } catch (error) {
       const failure = youtubeFailure(error);
       throw new SocialPublisherOperationError(failure.reason, failure.code);
+    }
+  }
+
+  /** Best effort: the video is already uploaded and must not fail on this. */
+  private async applyCover(
+    input: MediaPreparationInput,
+    videoId: string,
+  ): Promise<void> {
+    const image = input.payload.cover?.image;
+    if (!image) return;
+    try {
+      await this.api.setThumbnail({
+        accessToken: input.credential.accessToken,
+        videoId,
+        data: await readCoverImage(image),
+        mimeType: image.mimeType,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `youtube video ${videoId}: cover not applied (${coverFailureCode(error)})`,
+      );
     }
   }
 

@@ -16,6 +16,23 @@ export type PublicationPayload = {
   readonly providerOptions?: Readonly<Record<string, unknown>>;
   /** Lyra-owned desired publish time; never a provider-side schedule (ADR-015). */
   readonly scheduledAt: Date;
+  /**
+   * Video cover chosen by the operator (single video only). Best effort: an
+   * adapter applies what its network accepts and never fails the publication
+   * because of it.
+   */
+  readonly cover?: PublicationCover;
+};
+
+export type PublicationCover = {
+  /** Signed, time-limited image the adapter may fetch; null = frame only. */
+  readonly image: {
+    readonly sourceUrl: string;
+    readonly mimeType: string;
+    readonly bytes: number;
+  } | null;
+  /** Moment of the video to use as cover, where only a frame is accepted. */
+  readonly timestampMs: number | null;
 };
 
 export type ValidationIssue = {

@@ -220,4 +220,58 @@ describe('InstagramPublisherAdapter', () => {
       expect.objectContaining({ childContainerIds: ['child-1', 'child-2'] }),
     );
   });
+  describe('reel cover', () => {
+    const cover = {
+      image: {
+        sourceUrl: 'https://signed.test/cover.jpg',
+        mimeType: 'image/jpeg',
+        bytes: 10,
+      },
+      timestampMs: 2000,
+    };
+    const reel = {
+      credential: CREDENTIAL,
+      payload: payload({ placement: 'reel', cover }),
+      sourceUrl: 'https://signed.test/video',
+      mimeType: 'video/mp4',
+      bytes: 100,
+      mediaIndex: 0,
+      mediaCount: 1,
+    };
+
+    it('sends the cover image with the Reel container', async () => {
+      const { adapter, graph } = adapterWithMock();
+      await adapter.prepareMedia(reel);
+      expect(graph.createInstagramContainer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          coverUrl: 'https://signed.test/cover.jpg',
+          thumbOffsetMs: 2000,
+        }),
+      );
+    });
+
+    it('publishes without the cover when Meta refuses it', async () => {
+      const { adapter, graph } = adapterWithMock();
+      graph.createInstagramContainer
+        .mockRejectedValueOnce(new Error('cover refused'))
+        .mockResolvedValueOnce({ id: 'container-2' });
+      await adapter.prepareMedia(reel);
+      expect(graph.createInstagramContainer).toHaveBeenCalledTimes(2);
+      expect(graph.createInstagramContainer).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({ coverUrl: expect.anything() as unknown }),
+      );
+    });
+
+    it('never sends a cover with a feed image', async () => {
+      const { adapter, graph } = adapterWithMock();
+      await adapter.prepareMedia({
+        ...reel,
+        payload: payload({ placement: 'feed', cover }),
+        mimeType: 'image/jpeg',
+      });
+      expect(graph.createInstagramContainer).toHaveBeenCalledWith(
+        expect.not.objectContaining({ coverUrl: expect.anything() as unknown }),
+      );
+    });
+  });
 });

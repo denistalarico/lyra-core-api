@@ -184,6 +184,9 @@ export class TiktokPublisherAdapter implements SocialPublisherAdapter {
         disableComment: options.disableComment || creator.commentDisabled,
         disableDuet: options.disableDuet || creator.duetDisabled,
         disableStitch: options.disableStitch || creator.stitchDisabled,
+        ...(input.payload.cover?.timestampMs != null
+          ? { coverTimestampMs: input.payload.cover.timestampMs }
+          : {}),
       };
       const init = await this.api.initDirectPost({
         accessToken,

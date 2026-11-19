@@ -23,6 +23,7 @@ import {
 } from '../dto';
 import {
   SocialContentDestinationEntity,
+  type SocialContentDestinationCover,
   type SocialContentDestinationOptions,
   SocialContentItemEntity,
   SocialPlanEntity,
@@ -90,22 +91,45 @@ export class SocialPlannerService {
   }
 
   async listCalendarContent(scope: SocialPlannerScope) {
-    const plans = await this.plansRepository.find({ where: { ...this.planScopeWhere(scope), calendarContainer: true } });
-    const responses = await Promise.all(plans.map((plan) => this.listContent(scope, plan.id)));
+    const plans = await this.plansRepository.find({
+      where: { ...this.planScopeWhere(scope), calendarContainer: true },
+    });
+    const responses = await Promise.all(
+      plans.map((plan) => this.listContent(scope, plan.id)),
+    );
     const items = responses.flatMap((response) => response.items);
     return { items, total: items.length };
   }
 
-  async createCalendarContent(scope: SocialPlannerScope, actorUserId: string | null, dto: CreateSocialContentItemDto) {
-    let plan = await this.plansRepository.findOne({ where: { ...this.planScopeWhere(scope), calendarContainer: true } });
+  async createCalendarContent(
+    scope: SocialPlannerScope,
+    actorUserId: string | null,
+    dto: CreateSocialContentItemDto,
+  ) {
+    let plan = await this.plansRepository.findOne({
+      where: { ...this.planScopeWhere(scope), calendarContainer: true },
+    });
     if (!plan) {
-      plan = await this.plansRepository.save(this.plansRepository.create({
-        tenantId: scope.tenantId, workspaceId: scope.workspaceId, agencyClientId: scope.agencyClientId,
-        companyContextId: scope.companyContextId, title: 'Publicações avulsas', calendarContainer: true,
-        periodStart: '2000-01-01', periodEnd: '9999-12-31', status: 'draft', createdById: actorUserId, updatedById: actorUserId,
-      }));
+      plan = await this.plansRepository.save(
+        this.plansRepository.create({
+          tenantId: scope.tenantId,
+          workspaceId: scope.workspaceId,
+          agencyClientId: scope.agencyClientId,
+          companyContextId: scope.companyContextId,
+          title: 'Publicações avulsas',
+          calendarContainer: true,
+          periodStart: '2000-01-01',
+          periodEnd: '9999-12-31',
+          status: 'draft',
+          createdById: actorUserId,
+          updatedById: actorUserId,
+        }),
+      );
     }
-    return this.createContent(scope, plan.id, actorUserId, { ...dto, calendarOnly: true });
+    return this.createContent(scope, plan.id, actorUserId, {
+      ...dto,
+      calendarOnly: true,
+    });
   }
 
   async createPlan(
@@ -979,5 +1003,16 @@ export function normalizeDestinationOptions(
     options.madeForKids = input.madeForKids;
   }
   if (input.categoryId) options.categoryId = input.categoryId;
+  const cover: SocialContentDestinationCover = {};
+  if (input.cover?.mediaAssetId) cover.mediaAssetId = input.cover.mediaAssetId;
+  if (
+    Number.isInteger(input.cover?.timestampMs) &&
+    (input.cover?.timestampMs ?? -1) >= 0
+  ) {
+    cover.timestampMs = input.cover?.timestampMs;
+  }
+  if (cover.mediaAssetId || cover.timestampMs !== undefined) {
+    options.cover = cover;
+  }
   return options;
 }

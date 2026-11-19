@@ -50,6 +50,10 @@ export type TiktokBusinessPostInfo = {
   disableComment: boolean;
   disableDuet: boolean;
   disableStitch: boolean;
+  /** Verified-domain image URL; wins over `thumbnailOffsetMs` (DOCUMENTED). */
+  customThumbnailUrl?: string | null;
+  /** Frame of the video used as cover (ms). */
+  thumbnailOffsetMs?: number | null;
 };
 
 export type TiktokBusinessPublishStatus = {
@@ -250,6 +254,9 @@ export class TiktokBusinessApiClient {
       {
         business_id: input.businessId,
         video_url: input.videoUrl,
+        ...(input.post.customThumbnailUrl
+          ? { custom_thumbnail_url: input.post.customThumbnailUrl }
+          : {}),
         post_info: {
           caption: input.post.caption,
           is_brand_organic: input.post.isBrandOrganic,
@@ -258,6 +265,10 @@ export class TiktokBusinessApiClient {
           disable_comment: input.post.disableComment,
           disable_duet: input.post.disableDuet,
           disable_stitch: input.post.disableStitch,
+          ...(!input.post.customThumbnailUrl &&
+          input.post.thumbnailOffsetMs != null
+            ? { thumbnail_offset: input.post.thumbnailOffsetMs }
+            : {}),
         },
       },
       input.accessToken,

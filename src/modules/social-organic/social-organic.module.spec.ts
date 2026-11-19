@@ -18,6 +18,7 @@ import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-org
 import {
   MEDIA_ASSET_METADATA_READER,
   MediaAssetController,
+  MediaAssetDirectUploadService,
   MediaAssetUploadService,
   MediaAssetsModule,
 } from '../../common/media-assets';
@@ -322,6 +323,7 @@ describe('SocialOrganicModule', () => {
       MediaPreparationService,
       MediaMetadataService,
       MediaAssetUploadService,
+      MediaAssetDirectUploadService,
       // The port binding that lets `common/media-assets` read media metadata
       // without importing this product module.
       {
@@ -347,6 +349,7 @@ describe('SocialOrganicModule', () => {
       // bound here. Without them the Creative Studio's providers cannot be
       // constructed.
       MediaAssetUploadService,
+      MediaAssetDirectUploadService,
       MEDIA_ASSET_METADATA_READER,
       SocialOrganicCredentialResolver,
       SocialOrganicOAuthProviderRegistry,

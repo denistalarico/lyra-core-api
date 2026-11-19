@@ -187,6 +187,11 @@ export class TiktokBusinessPublisherAdapter implements SocialPublisherAdapter {
           disableComment: options.disableComment || settings.commentDisabled,
           disableDuet: options.disableDuet || settings.duetDisabled,
           disableStitch: options.disableStitch || settings.stitchDisabled,
+          ...(input.payload.cover?.image
+            ? { customThumbnailUrl: input.payload.cover.image.sourceUrl }
+            : input.payload.cover?.timestampMs != null
+              ? { thumbnailOffsetMs: input.payload.cover.timestampMs }
+              : {}),
         },
       });
       return {

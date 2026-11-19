@@ -5,7 +5,11 @@ import {
   IsBoolean,
   IsIn,
   IsISO8601,
+  IsInt,
   IsOptional,
+  IsUUID,
+  Max,
+  Min,
   IsString,
   Matches,
   MaxLength,
@@ -13,6 +17,19 @@ import {
 } from 'class-validator';
 
 const CANONICAL_KEY = /^[a-z0-9][a-z0-9_-]*$/;
+
+/** Video cover: an uploaded image and/or a moment of the video (ms). */
+export class SocialContentDestinationCoverDto {
+  @IsOptional()
+  @IsUUID()
+  mediaAssetId?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(4 * 60 * 60 * 1000)
+  timestampMs?: number;
+}
 
 /** Network-specific options; an omitted key inherits the item. */
 export class SocialContentDestinationOptionsDto {
@@ -38,6 +55,11 @@ export class SocialContentDestinationOptionsDto {
   @IsString()
   @Matches(/^\d{1,3}$/)
   categoryId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SocialContentDestinationCoverDto)
+  cover?: SocialContentDestinationCoverDto;
 }
 
 export class SocialContentDestinationInputDto {

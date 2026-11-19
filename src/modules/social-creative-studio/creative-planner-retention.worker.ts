@@ -67,7 +67,19 @@ const PUBLISHED_UPLOADS = `
  * holds the binary: no planned item, no other library version.
  */
 export const PUBLISHED_STANDALONE_UPLOADS = `
-  SELECT a.id, i.id AS content_item_id, v.thumbnail_media_asset_id
+  SELECT a.id, i.id AS content_item_id,
+         -- The cover the operator chose for the networks wins over the still.
+         COALESCE(
+           (SELECT c.id
+              FROM social_content_destinations cd
+              JOIN media_assets c
+                ON c.id::text = cd.options->'cover'->>'mediaAssetId'
+               AND c.tenant_id = m.tenant_id
+               AND c.deleted_at IS NULL
+             WHERE cd.content_item_id = i.id
+             LIMIT 1),
+           v.thumbnail_media_asset_id
+         ) AS thumbnail_media_asset_id
     FROM social_creative_assets a
     JOIN social_creative_asset_versions v ON v.id = a.current_version_id
     JOIN media_assets m ON m.id = v.media_asset_id AND m.deleted_at IS NULL

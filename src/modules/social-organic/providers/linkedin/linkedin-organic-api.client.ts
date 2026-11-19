@@ -272,11 +272,13 @@ export class LinkedInOrganicApiClient {
 
   async initializeVideoUpload(
     accessToken: string,
-    input: { ownerUrn: string; fileSizeBytes: number },
+    input: { ownerUrn: string; fileSizeBytes: number; withThumbnail?: boolean },
   ): Promise<{
     video: string;
     uploadToken: string;
     instructions: LinkedInVideoUploadInstruction[];
+    /** Present only when `withThumbnail` was asked and LinkedIn answered one. */
+    thumbnailUploadUrl: string | null;
   }> {
     const body = await this.post(
       accessToken,
@@ -286,7 +288,7 @@ export class LinkedInOrganicApiClient {
           owner: input.ownerUrn,
           fileSizeBytes: input.fileSizeBytes,
           uploadCaptions: false,
-          uploadThumbnail: false,
+          uploadThumbnail: input.withThumbnail === true,
         },
       },
     );
@@ -321,7 +323,34 @@ export class LinkedInOrganicApiClient {
     ) {
       throw new LinkedInUploadFault('linkedin_upload_session_invalid');
     }
-    return { video, uploadToken, instructions };
+    const thumbnailUrl = text(value.thumbnailUploadUrl);
+    return {
+      video,
+      uploadToken,
+      instructions,
+      thumbnailUploadUrl:
+        thumbnailUrl && isLinkedInUploadUrl(thumbnailUrl) ? thumbnailUrl : null,
+    };
+  }
+
+  /** Custom video thumbnail (DOCUMENTED: PUT, STILLIMAGE, before finalize). */
+  async uploadVideoThumbnail(input: {
+    uploadUrl: string;
+    data: Uint8Array;
+  }): Promise<void> {
+    if (!isLinkedInUploadUrl(input.uploadUrl)) {
+      throw new LinkedInUploadFault('linkedin_upload_session_invalid');
+    }
+    const response = await this.send(input.uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'media-type-family': 'STILLIMAGE',
+        'Content-Type': 'application/octet-stream',
+      },
+      body: input.data as unknown as BodyInit,
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+    });
+    if (!response.ok) throw await toApiError(response);
   }
 
   /** Streams the source into the parts in order; returns the ETags. */

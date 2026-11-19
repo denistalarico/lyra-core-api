@@ -7,6 +7,7 @@ import { SocialOrganicAssetEntity } from '../entities/social-organic-asset.entit
 import { checkMediaAssetCapability } from '../media/media-capability-check';
 import { MediaPreparationService } from '../media/media-preparation.service';
 import type {
+  PublicationCover,
   PublicationExecutionInput,
   PublicationPayload,
 } from '../providers/social-publisher.adapter';
@@ -32,7 +33,12 @@ type PayloadSnapshotShape = {
   readonly firstComment?: unknown;
   readonly mediaAssetIds?: unknown;
   readonly providerOptions?: unknown;
+  readonly cover?: unknown;
 };
+
+/** Network-accepted cover images; larger or other types are left out. */
+const COVER_IMAGE_TYPES = new Set(['image/jpeg', 'image/png']);
+const COVER_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 
 /**
  * The real `SocialPublicationExecutor`: turns a claimed row into a call
@@ -103,13 +109,13 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       );
     }
 
-    const payload = this.buildPayload(
+    const basePayload = this.buildPayload(
       publication,
       asset.assetType,
       adapter.capabilities(asset.assetType).supportsFirstComment,
     );
 
-    const providerValidation = adapter.validate(payload);
+    const providerValidation = adapter.validate(basePayload);
     if (!providerValidation.valid) {
       this.logger.warn(
         `publication ${publication.id} rejected by ${publication.provider} validation: ${JSON.stringify(providerValidation.issues)}`,
@@ -121,6 +127,15 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
     }
 
     const credential = await this.resolveCredential(publication, asset);
+    const cover = await this.prepareCover(
+      publication,
+      basePayload,
+      asset.companyContextId ?? null,
+      adapter.sourceUrlTtlSeconds,
+    );
+    const payload: PublicationPayload = cover
+      ? { ...basePayload, cover }
+      : basePayload;
 
     const preparedMedia = await Promise.all(
       payload.mediaAssetIds.map((mediaAssetId, mediaIndex) =>
@@ -295,6 +310,72 @@ export class SocialPublicationExecutorService implements SocialPublicationExecut
       }
       throw error;
     }
+  }
+
+  /**
+   * The operator's video cover, signed for the adapter. Best effort by rule: a
+   * cover that cannot be resolved (deleted, foreign scope, wrong type) is left
+   * out and the video still publishes with the network's own cover.
+   */
+  private async prepareCover(
+    publication: SocialPublicationEntity,
+    payload: PublicationPayload,
+    companyContextId: string | null,
+    ttlSeconds: number | undefined,
+  ): Promise<PublicationCover | null> {
+    const snapshot = (publication.payloadSnapshot as PayloadSnapshotShape)
+      .cover;
+    if (
+      !snapshot ||
+      typeof snapshot !== 'object' ||
+      payload.mediaAssetIds.length !== 1 ||
+      payload.placement.startsWith('story')
+    ) {
+      return null;
+    }
+    const raw = snapshot as { mediaAssetId?: unknown; timestampMs?: unknown };
+    const timestampMs =
+      typeof raw.timestampMs === 'number' &&
+      Number.isInteger(raw.timestampMs) &&
+      raw.timestampMs >= 0
+        ? raw.timestampMs
+        : null;
+    let image: PublicationCover['image'] = null;
+    if (typeof raw.mediaAssetId === 'string') {
+      try {
+        const media = await this.mediaAssetResolver.resolve({
+          mediaAssetId: raw.mediaAssetId,
+          tenantId: publication.tenantId,
+          workspaceId: publication.workspaceId,
+          agencyClientId: publication.agencyClientId,
+          companyContextId,
+        });
+        const bytes = Number(media.byteSize);
+        if (
+          COVER_IMAGE_TYPES.has(media.mimeType) &&
+          Number.isFinite(bytes) &&
+          bytes > 0 &&
+          bytes <= COVER_IMAGE_MAX_BYTES
+        ) {
+          image = await this.mediaPreparationService.prepare({
+            media: {
+              storagePath: media.storagePath,
+              mimeType: media.mimeType,
+              bytes,
+            },
+            provider: publication.provider,
+            placement: `cover:${payload.placement}`,
+            // Networks that pull the file later need it to stay valid as long.
+            ...(ttlSeconds ? { ttlSeconds } : {}),
+          });
+        }
+      } catch (error) {
+        this.logger.warn(
+          `publication ${publication.id}: cover left out (${error instanceof Error ? error.message : 'unknown'})`,
+        );
+      }
+    }
+    return image || timestampMs !== null ? { image, timestampMs } : null;
   }
 
   private buildPayload(

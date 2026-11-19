@@ -24,6 +24,8 @@ export const MEDIA_ASSET_SOURCES = [
    * durable library media — the link, not the source, makes it a reference.
    */
   'planner_reference',
+  /** A video's cover for the networks (`options.cover`); not a library item. */
+  'video_cover',
 ] as const;
 
 export class UploadMediaAssetDto {

@@ -3,6 +3,8 @@ import type { SocialPublicationFailureReason } from '../../publication/entities/
 
 const UPLOAD_HOST = 'https://www.googleapis.com/upload/youtube/v3/videos';
 const API_HOST = 'https://www.googleapis.com/youtube/v3';
+const THUMBNAIL_HOST =
+  'https://www.googleapis.com/upload/youtube/v3/thumbnails/set';
 /** Multiple of 256 KiB, as the resumable protocol requires. */
 export const YOUTUBE_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 120_000;
@@ -214,6 +216,28 @@ export class YoutubeApiClient {
       rejectionReason: text(item.status?.rejectionReason),
       processingStatus: text(item.processingDetails?.processingStatus),
     };
+  }
+
+  /**
+   * Custom thumbnail (`thumbnails.set`, 50 quota units). JPEG/PNG up to 2 MB;
+   * the channel must be verified for custom thumbnails, otherwise YouTube
+   * answers 403 and the video keeps its automatic thumbnail.
+   */
+  async setThumbnail(input: {
+    accessToken: string;
+    videoId: string;
+    data: Uint8Array;
+    mimeType: string;
+  }): Promise<void> {
+    const query = new URLSearchParams({ videoId: input.videoId });
+    await this.fetchJson(`${THUMBNAIL_HOST}?${query}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+        'Content-Type': input.mimeType,
+      },
+      body: input.data as unknown as BodyInit,
+    });
   }
 
   private async putChunk(input: {

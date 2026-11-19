@@ -209,4 +209,36 @@ describe('TiktokBusinessPublisherAdapter', () => {
       publishId: 'v_pub_url~1',
     });
   });
+  it('sends the cover image, which TikTok prefers over a frame', async () => {
+    const { api, adapter } = build();
+    await adapter.prepareMedia({
+      ...media,
+      payload: {
+        ...payload,
+        cover: {
+          image: {
+            sourceUrl: 'https://media.lyrasuite.com/private/c.jpg',
+            mimeType: 'image/jpeg',
+            bytes: 10,
+          },
+          timestampMs: 3000,
+        },
+      },
+    });
+    const [[call]] = api.publishVideo.mock.calls as [[{ post: object }]];
+    expect(call.post).toMatchObject({
+      customThumbnailUrl: 'https://media.lyrasuite.com/private/c.jpg',
+    });
+    expect(call.post).not.toHaveProperty('thumbnailOffsetMs');
+  });
+
+  it('uses the chosen frame when there is no cover image', async () => {
+    const { api, adapter } = build();
+    await adapter.prepareMedia({
+      ...media,
+      payload: { ...payload, cover: { image: null, timestampMs: 3000 } },
+    });
+    const [[call]] = api.publishVideo.mock.calls as [[{ post: object }]];
+    expect(call.post).toMatchObject({ thumbnailOffsetMs: 3000 });
+  });
 });

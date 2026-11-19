@@ -65,6 +65,8 @@ export type TiktokPostInfo = {
   disableComment: boolean;
   disableDuet: boolean;
   disableStitch: boolean;
+  /** Frame of the video used as cover (ms); TikTok takes no cover image. */
+  coverTimestampMs?: number | null;
 };
 
 export type TiktokPublishStatus = {
@@ -316,6 +318,9 @@ export class TiktokApiClient {
           disable_comment: input.post.disableComment,
           disable_duet: input.post.disableDuet,
           disable_stitch: input.post.disableStitch,
+          ...(input.post.coverTimestampMs != null
+            ? { video_cover_timestamp_ms: input.post.coverTimestampMs }
+            : {}),
         },
         source_info: {
           source: 'FILE_UPLOAD',

@@ -399,6 +399,7 @@ describe('MediaAssetUploadService', () => {
       expect(listed.objectLiteralParameters).toEqual({
         temporaryPrefix: 'temporary:%',
         posterSource: 'media_poster',
+        coverSource: 'video_cover',
       });
       expect(content.where.source).toEqual(durableMediaAssetSource());
     });

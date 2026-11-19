@@ -63,12 +63,20 @@ const DEFAULT_LIST_LIMIT = 50;
 export const MEDIA_POSTER_SOURCE = 'media_poster';
 const MEDIA_POSTER_MAX_BYTES = 2 * 1024 * 1024;
 const MEDIA_POSTER_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+/**
+ * A video cover chosen for the networks (2026-11-18). Kept out of the library
+ * like a poster; JPEG/PNG up to 2 MB is what every network accepts.
+ */
+export const VIDEO_COVER_SOURCE = 'video_cover';
+const VIDEO_COVER_MAX_BYTES = 2 * 1024 * 1024;
+const VIDEO_COVER_TYPES = new Set(['image/jpeg', 'image/png']);
 /** Everything else, Brand Kit and references included, stays where it is. */
 const R2_SOURCES = new Set([
   'creative_studio',
   'creative_studio_thumbnail',
   'planner_upload',
   MEDIA_POSTER_SOURCE,
+  VIDEO_COVER_SOURCE,
 ]);
 
 @Injectable()
@@ -115,6 +123,13 @@ export class MediaAssetUploadService {
       file.buffer,
       file.mimetype,
     );
+    if (
+      input.source === VIDEO_COVER_SOURCE &&
+      (file.buffer.length > VIDEO_COVER_MAX_BYTES ||
+        !VIDEO_COVER_TYPES.has(contentType))
+    ) {
+      throw new BadRequestException('A capa deve ser JPG ou PNG de até 2 MB.');
+    }
 
     // 2. Intrinsic properties, from the bytes. M2 throws a 400 for anything it
     //    cannot read; that refusal is deliberate and is not softened here into
@@ -324,13 +339,14 @@ export class MediaAssetUploadService {
     const [items, total] = await this.mediaAssets.findAndCount({
       where: {
         ...mediaAssetScopeWhere(scope),
-        // Durable, minus video stills: those are previews, not media to pick.
+        // Durable, minus video stills and covers: not media to pick.
         source: Raw(
           (column) =>
-            `${column} NOT LIKE :temporaryPrefix AND ${column} <> :posterSource`,
+            `${column} NOT LIKE :temporaryPrefix AND ${column} <> :posterSource AND ${column} <> :coverSource`,
           {
             temporaryPrefix: `${TEMPORARY_MEDIA_ASSET_SOURCE_PREFIX}%`,
             posterSource: MEDIA_POSTER_SOURCE,
+            coverSource: VIDEO_COVER_SOURCE,
           },
         ),
       },

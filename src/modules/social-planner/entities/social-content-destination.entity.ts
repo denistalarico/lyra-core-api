@@ -20,6 +20,17 @@ export interface SocialContentDestinationOptions {
   madeForKids?: boolean;
   /** YouTube category id. */
   categoryId?: string;
+  /**
+   * Video cover (2026-11-18): an uploaded image (`video_cover` media) and/or
+   * the moment of the video to use. Never blocks a publication: a network
+   * that refuses it publishes with its own cover.
+   */
+  cover?: SocialContentDestinationCover;
+}
+
+export interface SocialContentDestinationCover {
+  mediaAssetId?: string;
+  timestampMs?: number;
 }
 
 @Entity('social_content_destinations')

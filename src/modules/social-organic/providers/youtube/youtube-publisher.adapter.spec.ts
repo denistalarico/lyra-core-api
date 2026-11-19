@@ -244,4 +244,42 @@ describe('YoutubePublisherAdapter', () => {
     });
     expect(result.outcome).toBe('failed');
   });
+  describe('video cover', () => {
+    const cover = {
+      image: {
+        sourceUrl: 'https://signed/cover.jpg',
+        mimeType: 'image/jpeg',
+        bytes: 3,
+      },
+      timestampMs: null,
+    };
+    const fetchMock = jest.spyOn(global, 'fetch');
+    afterEach(() => fetchMock.mockReset());
+    afterAll(() => fetchMock.mockRestore());
+
+    it('sets the uploaded cover as the video thumbnail', async () => {
+      fetchMock.mockResolvedValue(new Response(new Uint8Array([1, 2, 3])));
+      const setThumbnail = jest.fn().mockResolvedValue(undefined);
+      const { adapter } = build({ setThumbnail });
+      await adapter.prepareMedia({ ...media, payload: { ...payload, cover } });
+      expect(setThumbnail).toHaveBeenCalledWith({
+        accessToken: 'secret-token',
+        videoId: 'vid1',
+        data: new Uint8Array([1, 2, 3]),
+        mimeType: 'image/jpeg',
+      });
+    });
+
+    it('keeps the uploaded video when YouTube refuses the cover', async () => {
+      fetchMock.mockResolvedValue(new Response(new Uint8Array([1, 2, 3])));
+      const { adapter } = build({
+        setThumbnail: jest
+          .fn()
+          .mockRejectedValue(new YoutubeApiError(403, 'forbidden')),
+      });
+      await expect(
+        adapter.prepareMedia({ ...media, payload: { ...payload, cover } }),
+      ).resolves.toMatchObject({ providerMediaRef: 'yt-video:vid1' });
+    });
+  });
 });

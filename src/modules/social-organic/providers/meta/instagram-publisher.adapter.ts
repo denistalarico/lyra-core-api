@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type {
   MediaPreparationInput,
   PreparedMedia,
@@ -30,6 +30,7 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
   readonly provider: string = 'meta';
   readonly assetTypes = [INSTAGRAM_ASSET_TYPE] as const;
   readonly retrySafety = 'non_retryable_after_send' as const;
+  protected readonly logger = new Logger('InstagramPublisherAdapter');
 
   constructor(protected readonly graph: MetaOrganicGraphService) {}
 
@@ -110,7 +111,9 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
         );
       }
 
-      const container = await this.graph.createInstagramContainer({
+      const request: Parameters<
+        MetaOrganicGraphService['createInstagramContainer']
+      >[0] = {
         accountId: input.credential.externalAssetId,
         pageAccessToken: input.credential.accessToken,
         sourceUrl: input.sourceUrl,
@@ -122,7 +125,28 @@ export class InstagramPublisherAdapter implements SocialPublisherAdapter {
             : input.payload.caption,
         carouselItem: input.mediaCount > 1,
         ...this.instagramRequestOptions,
-      });
+      };
+      const cover =
+        request.mediaKind === 'video' &&
+        request.placement === 'reel' &&
+        input.mediaCount === 1
+          ? input.payload.cover
+          : undefined;
+      const container = cover
+        ? await this.graph
+            .createInstagramContainer({
+              ...request,
+              coverUrl: cover.image?.sourceUrl ?? null,
+              thumbOffsetMs: cover.timestampMs,
+            })
+            // A refused cover never costs the post: try once without it.
+            .catch((error: unknown) => {
+              this.logger.warn(
+                `instagram reel: cover refused, publishing without it (${metaPublicationFailure(error).code})`,
+              );
+              return this.graph.createInstagramContainer(request);
+            })
+        : await this.graph.createInstagramContainer(request);
 
       return {
         providerMediaRef: encodeMetaPreparedMediaRef({
