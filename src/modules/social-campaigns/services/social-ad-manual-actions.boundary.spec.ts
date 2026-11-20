@@ -10,6 +10,10 @@ const adapter = fs.readFileSync(
   path.join(__dirname, 'meta-ads-manual-action.adapter.ts'),
   'utf8',
 );
+const googleAdapter = fs.readFileSync(
+  path.join(__dirname, 'google-ads-manual-action.adapter.ts'),
+  'utf8',
+);
 const controller = fs.readFileSync(
   path.join(root, 'social-campaigns.controller.ts'),
   'utf8',
@@ -18,7 +22,7 @@ const controller = fs.readFileSync(
 describe('manual Meta action boundary', () => {
   it('has no LLM, recommendation, rule engine or scheduler execution path', () => {
     expect(service).toContain('recommendationsCanExecute: false');
-    const source = `${service}\n${adapter}`.replace(
+    const source = `${service}\n${adapter}\n${googleAdapter}`.replace(
       'recommendationsCanExecute: false',
       '',
     );
@@ -33,6 +37,19 @@ describe('manual Meta action boundary', () => {
       expect(controller).toContain(`meta/actions/${route}/:actionId/confirm`);
     }
     expect(controller).toContain('@DangerousAction()');
+  });
+
+  it('requires separate preflight and confirm routes for every Google write (GA-WRITE)', () => {
+    for (const route of [
+      'status',
+      'budget',
+      'negative_keyword',
+      'keyword',
+      'search_theme',
+    ]) {
+      expect(controller).toContain(`google/actions/${route}/preflight`);
+      expect(controller).toContain(`google/actions/${route}/:actionId/confirm`);
+    }
   });
 
   it('does not write the local SocialAdEntity mirror after provider execution', () => {

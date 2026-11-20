@@ -56,6 +56,10 @@ export class SocialAdActionPolicyEntity {
   @Column({ name: 'allow_boost', type: 'boolean', default: false })
   allowBoost!: boolean;
 
+  /** GA-WRITE (D-G5): Google negative keywords, keywords and search themes. */
+  @Column({ name: 'allow_keywords', type: 'boolean', default: false })
+  allowKeywords!: boolean;
+
   @Column({ name: 'max_budget_minor', type: 'bigint', nullable: true })
   maxBudgetMinor!: string | null;
 

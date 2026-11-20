@@ -26,6 +26,7 @@ import { SocialCampaignRecommendationProvider } from './services/social-campaign
 import { SocialCampaignRecommendationService } from './services/social-campaign-recommendation.service';
 import { SocialBoostTemplateService } from './services/social-boost-template.service';
 import { MetaAdsManualActionAdapter } from './services/meta-ads-manual-action.adapter';
+import { GoogleAdsManualActionAdapter } from './services/google-ads-manual-action.adapter';
 import { SocialAdActionsConfigService } from './services/social-ad-actions-config.service';
 import { SocialAdManualActionService } from './services/social-ad-manual-action.service';
 import { MetaAdsBoostAdapter } from './services/meta-ads-boost.adapter';
@@ -70,6 +71,7 @@ import { SocialCampaignsController } from './social-campaigns.controller';
     SocialCampaignRecommendationProvider,
     SocialCampaignRecommendationService,
     MetaAdsManualActionAdapter,
+    GoogleAdsManualActionAdapter,
     SocialAdActionsConfigService,
     SocialAdManualActionService,
     MetaAdsBoostAdapter,

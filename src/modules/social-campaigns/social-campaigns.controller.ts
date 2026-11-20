@@ -40,6 +40,7 @@ import {
   ScheduleSocialBoostDto,
   UpdateScheduledSocialBoostDto,
 } from './dto';
+import type { SocialAdManualActionType } from './entities';
 import { GoogleCampaignDetailsReadService } from './services/google-campaign-details-read.service';
 import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
 import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
@@ -62,6 +63,8 @@ const SCHEDULE_ACTION_PERMISSION =
   'social.ads.schedule.execute.admin_or_explicit';
 const DELETE_ACTION_PERMISSION = 'social.ads.delete.execute.owner_only';
 const BOOST_ACTION_PERMISSION = 'social.ads.boost.execute.admin_or_explicit';
+/** GA-WRITE: no new permission; keyword targeting is campaign management. */
+const KEYWORD_ACTION_PERMISSION = SOCIAL_ADS_MANAGE_PERMISSION;
 
 @Controller('social/campaigns')
 export class SocialCampaignsController {
@@ -405,6 +408,182 @@ export class SocialCampaignsController {
     );
   }
 
+  /**
+   * GA-WRITE (D-G5): governed Google Ads writes. Same service, bodies and
+   * responses as `meta/actions/*`; the connection must be `google_ads` and the
+   * brake is `SOCIAL_CAMPAIGN_GOOGLE_WRITES_ENABLED`. No schedule or delete.
+   * Internal only (no `ClientAreaExposed`): spend changes stay with the agency.
+   */
+  @Get('google/actions/availability')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  googleActionAvailability() {
+    return this.manualActions.availability('google_ads');
+  }
+
+  @Get('google/actions/policy')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  googleActionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: SocialAdActionPolicyQueryDto,
+  ) {
+    return this.manualActions.getPolicy(
+      this.requireScope(ctx),
+      query.connectionId,
+      'google_ads',
+    );
+  }
+
+  @Patch('google/actions/policy')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(ACTION_POLICY_PERMISSION)
+  updateGoogleActionPolicy(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: UpdateSocialAdActionPolicyDto,
+  ) {
+    return this.manualActions.updatePolicy(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      dto,
+      'google_ads',
+    );
+  }
+
+  @Get('google/actions/history')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  googleActionHistory(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: SocialAdActionHistoryQueryDto,
+  ) {
+    return this.manualActions.history(
+      this.requireScope(ctx),
+      query.connectionId,
+      query.limit,
+      'google_ads',
+    );
+  }
+
+  @Post('google/actions/status/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(STATUS_ACTION_PERMISSION)
+  preflightGoogleStatus(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.googlePreflight(ctx, 'set_status', dto);
+  }
+
+  @Post('google/actions/status/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(STATUS_ACTION_PERMISSION)
+  confirmGoogleStatus(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.googleConfirm(ctx, 'set_status', actionId, dto);
+  }
+
+  @Post('google/actions/budget/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BUDGET_ACTION_PERMISSION)
+  preflightGoogleBudget(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.googlePreflight(ctx, 'set_budget', dto);
+  }
+
+  @Post('google/actions/budget/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(BUDGET_ACTION_PERMISSION)
+  confirmGoogleBudget(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.googleConfirm(ctx, 'set_budget', actionId, dto);
+  }
+
+  @Post('google/actions/negative_keyword/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(KEYWORD_ACTION_PERMISSION)
+  preflightGoogleNegativeKeyword(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.googlePreflight(ctx, 'negative_keyword', dto);
+  }
+
+  @Post('google/actions/negative_keyword/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(KEYWORD_ACTION_PERMISSION)
+  confirmGoogleNegativeKeyword(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.googleConfirm(ctx, 'negative_keyword', actionId, dto);
+  }
+
+  @Post('google/actions/keyword/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(KEYWORD_ACTION_PERMISSION)
+  preflightGoogleKeyword(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.googlePreflight(ctx, 'keyword', dto);
+  }
+
+  @Post('google/actions/keyword/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(KEYWORD_ACTION_PERMISSION)
+  confirmGoogleKeyword(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.googleConfirm(ctx, 'keyword', actionId, dto);
+  }
+
+  @Post('google/actions/search_theme/preflight')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(KEYWORD_ACTION_PERMISSION)
+  preflightGoogleSearchTheme(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: SocialAdActionPreflightDto,
+  ) {
+    return this.googlePreflight(ctx, 'search_theme', dto);
+  }
+
+  @Post('google/actions/search_theme/:actionId/confirm')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(KEYWORD_ACTION_PERMISSION)
+  confirmGoogleSearchTheme(
+    @RequestContextData() ctx: RequestContext,
+    @Param('actionId', ParseUUIDPipe) actionId: string,
+    @Body() dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.googleConfirm(ctx, 'search_theme', actionId, dto);
+  }
+
   @ClientAreaExposed('social_campaigns')
   @Get('meta/recommendations/availability')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -660,6 +839,37 @@ export class SocialCampaignsController {
       templateId,
       ctx.userId ?? null,
       dto,
+    );
+  }
+
+  private googlePreflight(
+    ctx: RequestContext,
+    actionType: SocialAdManualActionType,
+    dto: SocialAdActionPreflightDto,
+  ) {
+    return this.manualActions.preflight(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      actionType,
+      dto,
+      'google_ads',
+    );
+  }
+
+  private googleConfirm(
+    ctx: RequestContext,
+    actionType: SocialAdManualActionType,
+    actionId: string,
+    dto: ConfirmSocialAdActionDto,
+  ) {
+    return this.manualActions.confirm(
+      this.requireScope(ctx),
+      ctx.userId ?? null,
+      actionType,
+      actionId,
+      dto.confirmationRequestId,
+      dto.confirmationText,
+      'google_ads',
     );
   }
 

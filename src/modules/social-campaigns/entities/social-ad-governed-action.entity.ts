@@ -13,7 +13,11 @@ export type SocialAdManualActionType =
   | 'set_status'
   | 'set_budget'
   | 'set_end_time'
-  | 'delete';
+  | 'delete'
+  // GA-WRITE (D-G5): Google only.
+  | 'negative_keyword'
+  | 'keyword'
+  | 'search_theme';
 
 export type SocialAdManualActionStatus =
   | 'pending_confirmation'
@@ -36,7 +40,7 @@ export type SocialAdManualActionStatus =
 ])
 @Check(
   'CK_social_ad_governed_action_type',
-  `"action_type" IN ('set_status', 'set_budget', 'set_end_time', 'delete')`,
+  `"action_type" IN ('set_status', 'set_budget', 'set_end_time', 'delete', 'negative_keyword', 'keyword', 'search_theme')`,
 )
 @Check(
   'CK_social_ad_governed_action_status',

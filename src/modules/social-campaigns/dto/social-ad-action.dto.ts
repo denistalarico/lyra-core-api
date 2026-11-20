@@ -11,6 +11,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 
 const ENTITY_LEVELS = ['campaign', 'adset', 'ad'] as const;
@@ -42,6 +43,11 @@ export class UpdateSocialAdActionPolicyDto {
   @IsBoolean()
   allowBoost!: boolean;
 
+  /** GA-WRITE: optional so the Meta editor keeps working; absent = unchanged. */
+  @IsOptional()
+  @IsBoolean()
+  allowKeywords?: boolean;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()
@@ -69,6 +75,24 @@ export class SocialAdActionHistoryQueryDto extends SocialAdActionPolicyQueryDto 
   @Min(1)
   @Max(50)
   limit = 20;
+}
+
+/**
+ * GA-WRITE (D-G5): keyword-like change on Google. `text` limits are the
+ * KeywordInfo ones (80 characters, 10 words: fields/v25/campaign_criterion);
+ * control characters are refused. Never interpolated into GAQL.
+ */
+export class GoogleAdKeywordPayloadDto {
+  @IsIn(['add', 'remove'])
+  op!: 'add' | 'remove';
+
+  @IsString()
+  @Matches(/^\P{Cc}{1,80}$/u)
+  text!: string;
+
+  @IsOptional()
+  @IsIn(['EXACT', 'PHRASE', 'BROAD'])
+  matchType?: 'EXACT' | 'PHRASE' | 'BROAD';
 }
 
 export class SocialAdActionPreflightDto {
@@ -102,6 +126,12 @@ export class SocialAdActionPreflightDto {
   @IsOptional()
   @IsISO8601({ strict: true })
   endsAt?: string;
+
+  /** Google `negative_keyword`, `keyword` and `search_theme` only. */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GoogleAdKeywordPayloadDto)
+  payload?: GoogleAdKeywordPayloadDto;
 }
 
 export class ConfirmSocialAdActionDto {
