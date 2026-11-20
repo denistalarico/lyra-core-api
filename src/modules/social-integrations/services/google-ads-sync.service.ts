@@ -5,6 +5,7 @@ import {
   normalizeGoogleAdsAccount,
   normalizeGoogleAdsAdGroups,
   normalizeGoogleAdsAds,
+  normalizeGoogleAdsAssetGroups,
   normalizeGoogleAdsCampaigns,
 } from '../sync/google-ads-entity.normalizer';
 import { normalizeGoogleAdsMetrics } from '../sync/google-ads-insights.normalizer';
@@ -23,6 +24,19 @@ import {
   type SocialAdEntityWriteScope,
 } from './social-ad-entity-writer.service';
 import { SocialAdMetricsWriterService } from './social-ad-metrics-writer.service';
+
+/** One level read by two queries; truncated if either half was (D-G1). */
+function mergePages(
+  first: NormalizedAdEntityPage,
+  second: NormalizedAdEntityPage,
+): NormalizedAdEntityPage {
+  return {
+    rows: [...first.rows, ...second.rows],
+    truncated: first.truncated || second.truncated,
+    skipped: first.skipped + second.skipped,
+    apiCalls: first.apiCalls + second.apiCalls,
+  };
+}
 
 /**
  * Google Ads sync into the shared mirror (D-G6).
@@ -77,11 +91,16 @@ export class GoogleAdsSyncService {
         'campaign',
         normalizeGoogleAdsCampaigns(raw.campaigns, context),
       ),
+      // Ad groups and asset groups in one page: `archiveMissing` of the level
+      // must see both in the same pass, or each would archive the other.
       await this.persistLevel(
         scope,
         seenAt,
         'adset',
-        normalizeGoogleAdsAdGroups(raw.adGroups, context),
+        mergePages(
+          normalizeGoogleAdsAdGroups(raw.adGroups, context),
+          normalizeGoogleAdsAssetGroups(raw.assetGroups, context),
+        ),
       ),
       await this.persistLevel(
         scope,

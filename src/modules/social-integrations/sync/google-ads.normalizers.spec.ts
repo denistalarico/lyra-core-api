@@ -2,6 +2,7 @@ import type { GoogleAdsRawPage } from '../services/google-ads-reader.service';
 import {
   microsToMinor,
   normalizeGoogleAdsAds,
+  normalizeGoogleAdsAssetGroups,
   normalizeGoogleAdsCampaigns,
 } from './google-ads-entity.normalizer';
 import { normalizeGoogleAdsMetrics } from './google-ads-insights.normalizer';
@@ -145,6 +146,41 @@ describe('Google Ads entity normalizer', () => {
 
     expect([ad.parentExternalId, ad.campaignExternalId]).toEqual(['8', '7']);
   });
+
+  it('D-G1: stores a PMax asset group at the adset level under its campaign', () => {
+    const [group] = normalizeGoogleAdsAssetGroups(
+      page([
+        {
+          assetGroup: { id: '55', name: 'Grupo A', status: 'ENABLED' },
+          campaign: { id: '24460619718' },
+        },
+      ]),
+      entityContext,
+    ).rows;
+
+    expect({
+      entityLevel: group.entityLevel,
+      parentExternalId: group.parentExternalId,
+      campaignExternalId: group.campaignExternalId,
+      status: group.status,
+      metadata: group.metadata,
+    }).toEqual({
+      entityLevel: 'adset',
+      parentExternalId: '24460619718',
+      campaignExternalId: '24460619718',
+      status: 'ACTIVE',
+      metadata: { googleStatus: 'ENABLED', googleKind: 'asset_group' },
+    });
+  });
+
+  it('D-G1: skips an asset group without a campaign', () => {
+    expect(
+      normalizeGoogleAdsAssetGroups(
+        page([{ assetGroup: { id: '55' } }]),
+        entityContext,
+      ).skipped,
+    ).toBe(1);
+  });
 });
 
 describe('Google Ads insights normalizer', () => {
@@ -226,6 +262,18 @@ describe('Google Ads insights normalizer', () => {
 
     expect([fact.entityExternalId, fact.campaignExternalId]).toEqual([
       '22',
+      '11',
+    ]);
+  });
+
+  it('D-G1: keys an asset-group row at the adset level by its asset group', () => {
+    const [fact] = normalizeGoogleAdsMetrics(
+      page([{ ...row, assetGroup: { id: '33' } }]),
+      { ...metricContext, entityLevel: 'adset' },
+    ).rows;
+
+    expect([fact.entityExternalId, fact.campaignExternalId]).toEqual([
+      '33',
       '11',
     ]);
   });

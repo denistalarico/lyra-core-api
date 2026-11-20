@@ -36,6 +36,7 @@ function createHarness(
     settled?: boolean;
     enqueueError?: Error;
     intradayIntervalHours?: number;
+    googleIntradayIntervalHours?: number;
   } = {},
 ) {
   const enqueued: Record<string, unknown>[] = [];
@@ -58,6 +59,9 @@ function createHarness(
      */
     get intradayIntervalHours() {
       return options.intradayIntervalHours ?? 0;
+    },
+    get googleAdsIntradayIntervalHours() {
+      return options.googleIntradayIntervalHours ?? 0;
     },
   } as SocialAdSyncConfigService;
 
@@ -402,6 +406,105 @@ describe('SocialAdSyncScheduler — intraday', () => {
     await harness.scheduler.tick();
 
     expect(harness.enqueued).toHaveLength(0);
+  });
+});
+
+describe('SocialAdSyncScheduler — Google intraday (D-G2)', () => {
+  const GOOGLE: SocialAdSchedulableConnection = {
+    ...SAO_PAULO,
+    connectionId: 'connection-google',
+    provider: 'google_ads',
+  };
+
+  /** São Paulo is UTC-3: local hour `h` is `h + 3` UTC on the 26th. */
+  const localHour = (hour: number) =>
+    new Date(`2026-08-26T${String(hour + 3).padStart(2, '0')}:00:00.000Z`);
+
+  function googleHarness(options: Parameters<typeof createHarness>[0] = {}) {
+    return createHarness({
+      connections: [GOOGLE],
+      // Meta's interval on purpose: Google must ignore it.
+      intradayIntervalHours: 3,
+      googleIntradayIntervalHours: 6,
+      ...options,
+    });
+  }
+
+  const intradayOf = (harness: ReturnType<typeof createHarness>) =>
+    harness.enqueued.filter((run) => run.runKind === 'intraday');
+
+  it.each([
+    [6, 'h06'],
+    [12, 'h12'],
+    [18, 'h18'],
+  ])('queues a Google pass at %ih local', async (hour, bucket) => {
+    const harness = googleHarness();
+
+    await harness.scheduler.enqueueDue(localHour(hour));
+
+    expect(intradayOf(harness)).toEqual([
+      expect.objectContaining({
+        connectionId: 'connection-google',
+        provider: 'google_ads',
+        windowStart: '2026-08-26',
+        windowEnd: '2026-08-26',
+        bucket,
+      }),
+    ]);
+  });
+
+  it('asks the 06h question again at 07h, so a settled 06h pass is not repeated', async () => {
+    const six = googleHarness();
+    await six.scheduler.enqueueDue(localHour(6));
+    const seven = googleHarness({ settled: true });
+    await seven.scheduler.enqueueDue(localHour(7));
+
+    const [, sixKey] = six.runService.hasSettledRun.mock.calls.at(
+      -1,
+    ) as unknown as [string, string];
+    const [, sevenKey] = seven.runService.hasSettledRun.mock.calls.at(
+      -1,
+    ) as unknown as [string, string];
+
+    expect([sevenKey, intradayOf(seven).length]).toEqual([sixKey, 0]);
+  });
+
+  it('uses its own interval, not the Meta one', async () => {
+    const harness = googleHarness();
+
+    // 09h: Meta's 3 h interval would say h09; Google's 6 h says h06.
+    await harness.scheduler.enqueueDue(localHour(9));
+
+    expect(intradayOf(harness)[0]).toMatchObject({ bucket: 'h06' });
+  });
+
+  it('does not read Google before six', async () => {
+    const harness = googleHarness();
+
+    await harness.scheduler.enqueueDue(localHour(5));
+
+    expect(intradayOf(harness)).toHaveLength(0);
+  });
+
+  it('turns Google intraday off with 0 and keeps the daily run', async () => {
+    const harness = googleHarness({ googleIntradayIntervalHours: 0 });
+
+    await harness.scheduler.enqueueDue(localHour(12));
+
+    expect(harness.enqueued.map((run) => run.runKind)).toEqual(['daily']);
+  });
+
+  it('keeps LinkedIn and TikTok without intraday', async () => {
+    const harness = googleHarness({
+      connections: [
+        { ...GOOGLE, connectionId: 'li', provider: 'linkedin_ads' },
+        { ...GOOGLE, connectionId: 'tt', provider: 'tiktok_ads' },
+      ],
+    });
+
+    await harness.scheduler.enqueueDue(localHour(12));
+
+    expect(intradayOf(harness)).toHaveLength(0);
   });
 });
 

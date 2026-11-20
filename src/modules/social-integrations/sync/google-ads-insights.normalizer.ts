@@ -194,10 +194,13 @@ function readIdentity(
         ? { entityExternalId: campaignId, campaignExternalId: campaignId }
         : null;
     case 'adset': {
-      const adGroupId = objectId(record(raw.adGroup).id);
+      // An ad group row, or a PMax asset group row from the second query of
+      // the same level (D-G1).
+      const groupId =
+        objectId(record(raw.adGroup).id) ?? objectId(record(raw.assetGroup).id);
 
-      return adGroupId && campaignId
-        ? { entityExternalId: adGroupId, campaignExternalId: campaignId }
+      return groupId && campaignId
+        ? { entityExternalId: groupId, campaignExternalId: campaignId }
         : null;
     }
     case 'ad': {

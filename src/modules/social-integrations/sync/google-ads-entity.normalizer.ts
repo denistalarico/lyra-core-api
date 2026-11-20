@@ -229,6 +229,46 @@ export function normalizeGoogleAdsAdGroups(
   return { rows, truncated: page.truncated, skipped, apiCalls: page.apiCalls };
 }
 
+/**
+ * PMax asset groups → the `adset` level, beside ad groups (D-G1), so the tree
+ * shows them with no change to the read side. PMax has no `ad` level.
+ */
+export function normalizeGoogleAdsAssetGroups(
+  page: GoogleAdsRawPage,
+  context: GoogleAdsEntityContext,
+): NormalizedAdEntityPage {
+  const rows: NormalizedAdEntity[] = [];
+  let skipped = 0;
+
+  for (const raw of page.rows) {
+    const group = record(raw.assetGroup);
+    const externalId = objectId(group.id);
+    const campaignExternalId = objectId(record(raw.campaign).id);
+
+    if (!externalId || !campaignExternalId) {
+      skipped += 1;
+      continue;
+    }
+
+    const status = text(group.status);
+
+    rows.push({
+      ...BASE,
+      entityLevel: 'adset',
+      externalId,
+      parentExternalId: campaignExternalId,
+      campaignExternalId,
+      name: text(group.name),
+      status: mapStatus(status),
+      effectiveStatus: mapStatus(status),
+      currency: context.currency,
+      metadata: { googleStatus: status, googleKind: 'asset_group' },
+    });
+  }
+
+  return { rows, truncated: page.truncated, skipped, apiCalls: page.apiCalls };
+}
+
 export function normalizeGoogleAdsAds(
   page: GoogleAdsRawPage,
   context: GoogleAdsEntityContext,

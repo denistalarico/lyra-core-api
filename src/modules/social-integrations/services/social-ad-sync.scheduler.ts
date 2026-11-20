@@ -259,14 +259,16 @@ export class SocialAdSyncScheduler {
     connection: SocialAdSchedulableConnection,
     now: Date,
   ): Promise<boolean> {
-    // Intraday is off for Google (D-G11): the daily run is the only read, so
-    // the project's operation budget is not spent on provisional days.
-    if (connection.provider === 'google_ads') return false;
-    // Same for LinkedIn: the daily run is the only read.
+    // LinkedIn and TikTok: the daily run is the only read.
     if (connection.provider === 'linkedin_ads') return false;
     if (connection.provider === 'tiktok_ads') return false;
 
-    const intervalHours = this.config.intradayIntervalHours;
+    // Google has its own, sparser interval (D-G2): every pass spends project
+    // operations, so 6 h gives 06h/12h/18h rather than Meta's 3 h buckets.
+    const intervalHours =
+      connection.provider === 'google_ads'
+        ? this.config.googleAdsIntradayIntervalHours
+        : this.config.intradayIntervalHours;
 
     if (intervalHours <= 0) return false;
 

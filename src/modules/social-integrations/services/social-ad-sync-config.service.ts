@@ -22,6 +22,15 @@ export const SOCIAL_TIKTOK_ADS_SYNC_ENABLED_ENV =
   'SOCIAL_TIKTOK_ADS_SYNC_ENABLED';
 export const SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET_ENV =
   'SOCIAL_GOOGLE_ADS_DAILY_OPERATION_BUDGET';
+/** GA-INT (D-G2): Google's own intraday interval; `0` turns it off. */
+export const SOCIAL_GOOGLE_ADS_INTRADAY_INTERVAL_HOURS_ENV =
+  'SOCIAL_GOOGLE_ADS_INTRADAY_INTERVAL_HOURS';
+
+/**
+ * Six hours: passes at 06h, 12h and 18h local plus the 04h daily run, four
+ * reads a day per account against the project's operation budget (D-G2).
+ */
+const DEFAULT_GOOGLE_ADS_INTRADAY_INTERVAL_HOURS = 6;
 
 /**
  * Operations the process may spend on the Google Ads API per Pacific day.
@@ -229,6 +238,16 @@ export class SocialAdSyncConfigService {
     return this.readInteger({
       name: SOCIAL_ADS_SYNC_INTRADAY_INTERVAL_HOURS_ENV,
       fallback: DEFAULT_INTRADAY_INTERVAL_HOURS,
+      min: 0,
+      max: 24,
+    });
+  }
+
+  /** Hours between Google Ads intraday passes. `0` turns them off (D-G2). */
+  get googleAdsIntradayIntervalHours(): number {
+    return this.readInteger({
+      name: SOCIAL_GOOGLE_ADS_INTRADAY_INTERVAL_HOURS_ENV,
+      fallback: DEFAULT_GOOGLE_ADS_INTRADAY_INTERVAL_HOURS,
       min: 0,
       max: 24,
     });

@@ -29,9 +29,12 @@ function build(budget = 100, loginCustomerId: string | null = null) {
 }
 
 function respond(status: number, body: unknown, headers: HeadersInit = {}) {
+  // A fresh Response per call: the `adset` level reads twice (D-G1).
   return jest
     .spyOn(global, 'fetch')
-    .mockResolvedValue(new Response(JSON.stringify(body), { status, headers }));
+    .mockImplementation(
+      async () => new Response(JSON.stringify(body), { status, headers }),
+    );
 }
 
 describe('GoogleAdsReaderService', () => {
@@ -114,6 +117,64 @@ describe('GoogleAdsReaderService', () => {
       JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string)
         .query,
     ).toContain("BETWEEN '2026-11-01' AND '2026-11-07'");
+  });
+
+  it('D-G1: reads asset groups with the hierarchy', async () => {
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockImplementation(
+        async () => new Response(JSON.stringify([{ results: [] }])),
+      );
+
+    const raw = await build().readHierarchy(CREDENTIAL);
+
+    const queries = fetchSpy.mock.calls.map(
+      ([, init]) => JSON.parse(String((init as RequestInit).body)).query,
+    );
+    expect([queries, raw.assetGroups.apiCalls]).toEqual([
+      expect.arrayContaining([
+        'SELECT asset_group.id, asset_group.name, asset_group.status, campaign.id FROM asset_group',
+      ]),
+      1,
+    ]);
+  });
+
+  it('D-G1: reads the adset level as ad groups plus asset groups in one page', async () => {
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ results: [{ adGroup: { id: '1' } }] }])),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([{ results: [{ assetGroup: { id: '2' } }] }]),
+        ),
+      );
+
+    const page = await build().readDailyMetrics(CREDENTIAL, 'adset', WINDOW);
+
+    const froms = fetchSpy.mock.calls.map(
+      ([, init]) =>
+        String(JSON.parse(String((init as RequestInit).body)).query).match(
+          /FROM (\w+)/,
+        )?.[1],
+    );
+    expect([froms, page.rows.length, page.apiCalls]).toEqual([
+      ['ad_group', 'asset_group'],
+      2,
+      2,
+    ]);
+  });
+
+  it('D-G1: never asks asset_group for a metric v25 does not offer there', async () => {
+    const fetchSpy = respond(200, [{ results: [] }]);
+
+    await build().readDailyMetrics(CREDENTIAL, 'adset', WINDOW);
+
+    const assetGroupQuery = String(
+      JSON.parse(String((fetchSpy.mock.calls[1][1] as RequestInit).body)).query,
+    );
+    expect(assetGroupQuery).not.toContain('video_trueview_views');
   });
 
   it('flattens the batches of searchStream into rows', async () => {

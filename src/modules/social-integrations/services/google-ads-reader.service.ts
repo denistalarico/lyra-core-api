@@ -33,6 +33,8 @@ export type GoogleAdsRawHierarchy = {
   account: GoogleAdsRawPage;
   campaigns: GoogleAdsRawPage;
   adGroups: GoogleAdsRawPage;
+  /** PMax asset groups: stored at the `adset` level beside ad groups (D-G1). */
+  assetGroups: GoogleAdsRawPage;
   ads: GoogleAdsRawPage;
 };
 
@@ -44,6 +46,13 @@ const CAMPAIGN_QUERY =
 
 const AD_GROUP_QUERY =
   'SELECT ad_group.id, ad_group.name, ad_group.status, campaign.id FROM ad_group';
+
+/**
+ * D-G1. Fields and the `campaign` attributed resource checked in
+ * https://developers.google.com/google-ads/api/fields/v25/asset_group
+ */
+const ASSET_GROUP_QUERY =
+  'SELECT asset_group.id, asset_group.name, asset_group.status, campaign.id FROM asset_group';
 
 const AD_QUERY =
   'SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.status, ad_group.id, campaign.id FROM ad_group_ad';
@@ -71,6 +80,14 @@ const METRIC_QUERY_BY_LEVEL: Record<SocialAdInsightsLevel, string> = {
 };
 
 /**
+ * The second half of the `adset` level (D-G1). `metrics.video_trueview_views`
+ * is not selectable FROM asset_group in v25 (same doc as ASSET_GROUP_QUERY),
+ * and one invalid field would fail the whole query.
+ */
+const ASSET_GROUP_METRIC_QUERY =
+  'SELECT asset_group.id, campaign.id, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, metrics.interactions, metrics.all_conversions FROM asset_group';
+
+/**
  * Read-only GAQL reader for the Google Ads mirror (D-G7).
  *
  * Authenticates with the OAuth access token of the resolved credential and
@@ -92,7 +109,10 @@ export class GoogleAdsReaderService {
     private readonly googleCredentials: GoogleAdsCredentialResolver,
   ) {}
 
-  /** The account node and the three levels below it: four queries. */
+  /**
+   * The account node and the levels below it: five queries (the `adset` level
+   * is ad groups plus PMax asset groups).
+   */
   async readHierarchy(
     credential: ResolvedAdCredential,
   ): Promise<GoogleAdsRawHierarchy> {
@@ -102,11 +122,19 @@ export class GoogleAdsReaderService {
       account: await this.query(credential, loginCustomerId, ACCOUNT_QUERY),
       campaigns: await this.query(credential, loginCustomerId, CAMPAIGN_QUERY),
       adGroups: await this.query(credential, loginCustomerId, AD_GROUP_QUERY),
+      assetGroups: await this.query(
+        credential,
+        loginCustomerId,
+        ASSET_GROUP_QUERY,
+      ),
       ads: await this.query(credential, loginCustomerId, AD_QUERY),
     };
   }
 
-  /** One query for one level over the whole window (wide, not per day). */
+  /**
+   * One wide query for one level over the whole window (not per day). The
+   * `adset` level is two: ad groups and asset groups, in one page (D-G1).
+   */
   async readDailyMetrics(
     credential: ResolvedAdCredential,
     level: SocialAdInsightsLevel,
@@ -122,11 +150,26 @@ export class GoogleAdsReaderService {
       throw new GoogleAdsError('permanent', 'google_ads_bad_request');
     }
 
-    return this.query(
+    const where = ` WHERE segments.date BETWEEN '${window.since}' AND '${window.until}'`;
+    const page = await this.query(
       credential,
       loginCustomerId,
-      `${METRIC_QUERY_BY_LEVEL[level]} WHERE segments.date BETWEEN '${window.since}' AND '${window.until}'`,
+      METRIC_QUERY_BY_LEVEL[level] + where,
     );
+
+    if (level !== 'adset') return page;
+
+    const assetGroups = await this.query(
+      credential,
+      loginCustomerId,
+      ASSET_GROUP_METRIC_QUERY + where,
+    );
+
+    return {
+      rows: [...page.rows, ...assetGroups.rows],
+      truncated: page.truncated || assetGroups.truncated,
+      apiCalls: page.apiCalls + assetGroups.apiCalls,
+    };
   }
 
   /**
