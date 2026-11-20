@@ -44,6 +44,18 @@ export type SocialAdBreakdownKind =
   | 'hourly';
 
 /**
+ * GA-DET (D-G3): the Google Ads campaign-level dimensions. Kept out of
+ * `SocialAdBreakdownKind`, which is the Meta ingest's closed list (each value
+ * there has a Graph parameter); these are read by the Google campaign sync.
+ */
+export type GoogleAdsDetailBreakdownKind = 'ad_network' | 'conversion_action';
+
+/** Every value `breakdown_kind` may hold, mirrored by the CHECK below. */
+export type SocialAdStoredBreakdownKind =
+  | SocialAdBreakdownKind
+  | GoogleAdsDetailBreakdownKind;
+
+/**
  * Paid delivery for one object on one day, split by one breakdown dimension.
  *
  * ## Why this is not a column on `social_ad_metrics_daily`
@@ -64,7 +76,9 @@ export type SocialAdBreakdownKind =
  * second promotion site is a second definition of what a lead is — the exact
  * drift `mappingVersion` exists to prevent. `actions` is stored whole and the
  * read derives from it, so a mapping revision reaches breakdown rows and unsplit
- * rows at the same moment.
+ * rows at the same moment. The exception is GA-DET (D-G3): Google reports
+ * conversions as plain numbers with no action mapping, so its two campaign
+ * dimensions fill `conversions` / `conversion_value`, NULL on every Meta row.
  *
  * No `campaign_external_id`. The parent index it supports on the facts table
  * answers "this campaign's ad sets", and nothing asks that of a breakdown: a
@@ -114,7 +128,7 @@ export type SocialAdBreakdownKind =
 )
 @Check(
   'CK_social_ad_breakdown_daily_kind',
-  `"breakdown_kind" IN ('age_gender', 'device_platform', 'publisher_platform', 'hourly')`,
+  `"breakdown_kind" IN ('age_gender', 'device_platform', 'publisher_platform', 'hourly', 'ad_network', 'conversion_action')`,
 )
 @Check(
   'CK_social_ad_breakdown_daily_non_negative',
@@ -161,7 +175,7 @@ export class SocialAdBreakdownDailyEntity {
   currency!: string | null;
 
   @Column({ name: 'breakdown_kind', type: 'varchar', length: 32 })
-  breakdownKind!: SocialAdBreakdownKind;
+  breakdownKind!: SocialAdStoredBreakdownKind;
 
   /**
    * The provider's own value for this dimension, normalized only in shape.
@@ -220,6 +234,28 @@ export class SocialAdBreakdownDailyEntity {
    */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   actions!: Record<string, unknown>;
+
+  /**
+   * GA-DET (D-G3): Google's conversions for the bucket. NULL on every Meta
+   * dimension, whose conversions stay inside `actions` (one definition shared
+   * with the facts table); NULL means "not measured here", never zero.
+   */
+  @Column({
+    type: 'numeric',
+    precision: 18,
+    scale: 6,
+    nullable: true,
+  })
+  conversions!: string | null;
+
+  @Column({
+    name: 'conversion_value',
+    type: 'numeric',
+    precision: 18,
+    scale: 6,
+    nullable: true,
+  })
+  conversionValue!: string | null;
 
   /** The day was still open when this row was collected. */
   @Column({ name: 'is_partial', type: 'boolean', default: false })

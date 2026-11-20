@@ -317,6 +317,7 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "social-campaigns/social-campaigns.controller.ts:confirmStatus",
        "social-campaigns/social-campaigns.controller.ts:evaluateMonitor",
        "social-campaigns/social-campaigns.controller.ts:generateRecommendations",
+       "social-campaigns/social-campaigns.controller.ts:googleCampaignDetails",
        "social-campaigns/social-campaigns.controller.ts:googleHierarchy",
        "social-campaigns/social-campaigns.controller.ts:linkedinHierarchy",
        "social-campaigns/social-campaigns.controller.ts:list",

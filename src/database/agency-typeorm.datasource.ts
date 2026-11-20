@@ -309,6 +309,7 @@ import { AddFormsCapture1804600000000 } from './migrations/1804600000000-add-for
 import { AddFormsInboundEmail1804700000000 } from './migrations/1804700000000-add-forms-inbound-email';
 import { CreateFiscalIntake1804800000000 } from './migrations/1804800000000-create-fiscal-intake';
 import { AddFormsGoogleAdsLeads1804900000000 } from './migrations/1804900000000-add-forms-google-ads-leads';
+import { AddGoogleAdsCampaignDetails1805000000000 } from './migrations/1805000000000-add-google-ads-campaign-details';
 import { AddFormsMetaLeads1805300000000 } from './migrations/1805300000000-add-forms-meta-leads';
 import { AddSocialContentItemThumbnail1805500000000 } from './migrations/1805500000000-add-social-content-item-thumbnail';
 import { CreateSocialTrendSnapshots1803600000000 } from './migrations/1803600000000-create-social-trend-snapshots';
@@ -650,6 +651,7 @@ export const AgencyDataSource = new DataSource({
     AddFormsInboundEmail1804700000000,
     CreateFiscalIntake1804800000000,
     AddFormsGoogleAdsLeads1804900000000,
+    AddGoogleAdsCampaignDetails1805000000000,
     AddFormsMetaLeads1805300000000,
     AddSocialContentItemThumbnail1805500000000,
   ],

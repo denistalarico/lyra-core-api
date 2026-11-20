@@ -11,6 +11,7 @@ import {
   SocialAdEntity,
   SocialAdMetricDailyEntity,
   SocialAdReachPeriodEntity,
+  SocialAdSearchTermDailyEntity,
   SocialAdSyncRunEntity,
 } from './entities';
 import { SocialPaidMediaIntelligenceAdapter } from './intelligence/social-paid-media-intelligence.adapter';
@@ -29,6 +30,7 @@ import { SocialAdBreakdownReadService } from './services/social-ad-breakdown.rea
 import { SocialAdCreativeThumbnailService } from './services/social-ad-creative-thumbnail.service';
 import { SocialAdBreakdownSyncService } from './services/social-ad-breakdown-sync.service';
 import { SocialAdBreakdownWriterService } from './services/social-ad-breakdown-writer.service';
+import { SocialAdSearchTermWriterService } from './services/social-ad-search-term-writer.service';
 import { SocialAdConnectionService } from './services/social-ad-connection.service';
 import { SocialAdDestinationBreakdownReadService } from './services/social-ad-destination-breakdown.read.service';
 import { SocialAdHierarchyLookupReadService } from './services/social-ad-hierarchy-lookup.read.service';
@@ -89,6 +91,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
         SocialAdEntity,
         SocialAdMetricDailyEntity,
         SocialAdReachPeriodEntity,
+        SocialAdSearchTermDailyEntity,
         SocialAdSyncRunEntity,
         // Owned by `social-campaigns`, registered here for its repository only.
         // The analytics overview counts boosts beside campaigns and ads, and a
@@ -146,6 +149,8 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     SocialAdBackfillResumeService,
     GoogleAdsReaderService,
     GoogleAdsSyncService,
+    // GA-DET: the campaign pass writes search terms (D-G4).
+    SocialAdSearchTermWriterService,
     LinkedInAdsApiClient,
     LinkedInAdsOAuthService,
     LinkedInAdsReaderService,

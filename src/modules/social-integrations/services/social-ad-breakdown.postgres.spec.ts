@@ -3,7 +3,10 @@ import type { QueryRunner } from 'typeorm';
 import { AgencyDataSource } from '../../../database/agency-typeorm.datasource';
 import { describePostgresIntegration } from '../../../testing/postgres-integration';
 import { SocialAdAccountConnectionEntity } from '../entities/social-ad-account-connection.entity';
-import { SocialAdBreakdownDailyEntity } from '../entities/social-ad-breakdown-daily.entity';
+import {
+  SocialAdBreakdownDailyEntity,
+  type SocialAdBreakdownKind,
+} from '../entities/social-ad-breakdown-daily.entity';
 import type { NormalizedAdBreakdownDaily } from '../sync/meta-ads-breakdown.contract';
 import { SocialAdBreakdownReadService } from './social-ad-breakdown.read.service';
 import { SocialAdBreakdownWriterService } from './social-ad-breakdown-writer.service';
@@ -81,7 +84,7 @@ run('Social ad breakdowns against PostgreSQL', () => {
   });
 
   const read = (
-    kind: NormalizedAdBreakdownDaily['breakdownKind'] = 'age_gender',
+    kind: SocialAdBreakdownKind = 'age_gender',
     since = '2026-09-01',
     until = '2026-09-30',
   ) =>

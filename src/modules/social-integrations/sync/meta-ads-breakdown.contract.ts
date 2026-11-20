@@ -1,5 +1,8 @@
 import type { SocialAdProvider } from '../entities/social-ad-account-connection.entity';
-import type { SocialAdBreakdownKind } from '../entities/social-ad-breakdown-daily.entity';
+import type {
+  SocialAdBreakdownKind,
+  SocialAdStoredBreakdownKind,
+} from '../entities/social-ad-breakdown-daily.entity';
 import type { SocialAdInsightsLevel } from './meta-ads-insights.contract';
 
 /**
@@ -70,7 +73,7 @@ export type NormalizedAdBreakdownDaily = {
   metricDate: string;
   accountTimezone: string;
   currency: string | null;
-  breakdownKind: SocialAdBreakdownKind;
+  breakdownKind: SocialAdStoredBreakdownKind;
   /** Meta's own value for the dimension, lowercased and bounded. */
   breakdownKey: string;
   /** Decimal strings for `numeric`, digit strings for `bigint`. Never floats. */
@@ -82,6 +85,12 @@ export type NormalizedAdBreakdownDaily = {
   reach: string | null;
   /** Everything Meta reported, so the mapping can be re-derived on read. */
   actions: Record<string, unknown>;
+  /**
+   * GA-DET (D-G3): set only by the Google dimensions. Absent (written NULL) on
+   * every Meta row, whose conversions are derived from `actions` on read.
+   */
+  conversions?: string | null;
+  conversionValue?: string | null;
   isPartial: boolean;
   syncedAt: Date;
 };

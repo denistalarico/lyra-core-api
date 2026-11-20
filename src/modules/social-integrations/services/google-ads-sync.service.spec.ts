@@ -7,6 +7,8 @@ import type {
 import { GoogleAdsSyncService } from './google-ads-sync.service';
 import type { SocialAdEntityWriterService } from './social-ad-entity-writer.service';
 import type { SocialAdMetricsWriterService } from './social-ad-metrics-writer.service';
+import type { SocialAdBreakdownWriterService } from './social-ad-breakdown-writer.service';
+import type { SocialAdSearchTermWriterService } from './social-ad-search-term-writer.service';
 
 const CREDENTIAL = {
   connectionId: 'c',
@@ -45,6 +47,8 @@ function build(assetGroupsTruncated = false) {
     reader,
     entityWriter as unknown as SocialAdEntityWriterService,
     {} as SocialAdMetricsWriterService,
+    {} as SocialAdBreakdownWriterService,
+    {} as SocialAdSearchTermWriterService,
   );
 
   return { service, entityWriter };

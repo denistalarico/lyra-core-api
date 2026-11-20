@@ -17,7 +17,8 @@ describe('CA10 Social routes on the Surface Bridge', () => {
   const analytics = exposed.filter((route) => route.module === 'analytics');
 
   it('keeps the decorator opt-ins and the adapter table identical, module by module', () => {
-    expect(ca10).toHaveLength(130);
+    // +1 (2026-11-20, GA-DET): GET social/campaigns/google/campaigns/:campaignId/details.
+    expect(ca10).toHaveLength(131);
     expect(analytics).toHaveLength(35);
     expect(
       exposed.map((route) => `${route.key} ${route.module}`).sort(),

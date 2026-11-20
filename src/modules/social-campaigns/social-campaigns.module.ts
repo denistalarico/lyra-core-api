@@ -17,6 +17,7 @@ import {
   SocialCampaignMonitorPolicyEntity,
   SocialCampaignRecommendationEntity,
 } from './entities';
+import { GoogleCampaignDetailsReadService } from './services/google-campaign-details-read.service';
 import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
 import { SocialCampaignMonitorScheduler } from './services/social-campaign-monitor.scheduler';
 import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
@@ -59,6 +60,8 @@ import { SocialCampaignsController } from './social-campaigns.controller';
   providers: [
     SocialBoostTemplateService,
     MetaCampaignHierarchyReadService,
+    // GA-DET: the Google campaign "Detalhamento" panel, mirror only (D-G7).
+    GoogleCampaignDetailsReadService,
     SocialCampaignMonitorService,
     SocialCampaignMonitorScheduler,
     SocialScheduledBoostService,

@@ -87,6 +87,56 @@ const METRIC_QUERY_BY_LEVEL: Record<SocialAdInsightsLevel, string> = {
 const ASSET_GROUP_METRIC_QUERY =
   'SELECT asset_group.id, campaign.id, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, metrics.interactions, metrics.all_conversions FROM asset_group';
 
+/** GA-DET (D-G3, D-G4): one campaign-level detail read. */
+export type GoogleAdsCampaignDetailQuery =
+  | 'ad_network'
+  | 'conversion_action'
+  | 'search_term'
+  | 'keyword';
+
+/**
+ * GA-DET. Fields checked in fields/v25/campaign, …/segments,
+ * …/search_term_view and …/keyword_view (2026-11-20).
+ *
+ * - `ad_network`: `segments.ad_network_type` FROM campaign (per-channel for
+ *   PMax since v23). `advertising_channel_type` rides along so the sync knows
+ *   which campaigns are Search or PMax without another query.
+ * - `conversion_action`: its own query, because the conversion-action segment
+ *   only combines with conversion metrics (no cost, impressions or clicks).
+ * - `search_term` / `keyword`: Search campaigns only (`search_term_view` has no
+ *   PMax data).
+ */
+const CAMPAIGN_DETAIL_QUERY: Record<GoogleAdsCampaignDetailQuery, string> = {
+  ad_network:
+    'SELECT campaign.id, campaign.advertising_channel_type, segments.date, segments.ad_network_type, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign',
+  conversion_action:
+    'SELECT campaign.id, segments.date, segments.conversion_action, segments.conversion_action_name, segments.conversion_action_category, metrics.conversions, metrics.conversions_value FROM campaign',
+  search_term:
+    'SELECT campaign.id, segments.date, search_term_view.search_term, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM search_term_view',
+  keyword:
+    'SELECT campaign.id, segments.date, ad_group_criterion.keyword.text, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.conversions_value FROM keyword_view',
+};
+
+/**
+ * GA-DET (D-G4): PMax search categories, one campaign per query (the resource
+ * is read per campaign id). Checked in fields/v25/campaign_search_term_insight:
+ * `segments.date` is selectable; `metrics.cost_micros` is **not**, so these
+ * rows carry no spend.
+ */
+const PMAX_SEARCH_CATEGORY_QUERY =
+  'SELECT campaign_search_term_insight.category_label, segments.date, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value FROM campaign_search_term_insight';
+
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const CAMPAIGN_ID_PATTERN = /^\d{1,20}$/;
+
+/** The window is validated upstream; asserted again because it is interpolated. */
+function dateWhere(window: InsightsWindow): string {
+  if (!DAY_PATTERN.test(window.since) || !DAY_PATTERN.test(window.until)) {
+    throw new GoogleAdsError('permanent', 'google_ads_bad_request');
+  }
+  return ` WHERE segments.date BETWEEN '${window.since}' AND '${window.until}'`;
+}
+
 /**
  * Read-only GAQL reader for the Google Ads mirror (D-G7).
  *
@@ -170,6 +220,38 @@ export class GoogleAdsReaderService {
       truncated: page.truncated || assetGroups.truncated,
       apiCalls: page.apiCalls + assetGroups.apiCalls,
     };
+  }
+
+  /** GA-DET: one campaign-level detail over the window, one operation. */
+  async readCampaignDetail(
+    credential: ResolvedAdCredential,
+    detail: GoogleAdsCampaignDetailQuery,
+    window: InsightsWindow,
+  ): Promise<GoogleAdsRawPage> {
+    const loginCustomerId = await this.loginCustomerId(credential);
+    return this.query(
+      credential,
+      loginCustomerId,
+      CAMPAIGN_DETAIL_QUERY[detail] + dateWhere(window),
+    );
+  }
+
+  /** GA-DET: PMax search categories of one campaign, one operation. */
+  async readPmaxSearchCategories(
+    credential: ResolvedAdCredential,
+    campaignId: string,
+    window: InsightsWindow,
+  ): Promise<GoogleAdsRawPage> {
+    const loginCustomerId = await this.loginCustomerId(credential);
+    // Interpolated into the query: asserted even though it came from Google.
+    if (!CAMPAIGN_ID_PATTERN.test(campaignId)) {
+      throw new GoogleAdsError('permanent', 'google_ads_bad_request');
+    }
+    return this.query(
+      credential,
+      loginCustomerId,
+      `${PMAX_SEARCH_CATEGORY_QUERY}${dateWhere(window)} AND campaign_search_term_insight.campaign_id = '${campaignId}'`,
+    );
   }
 
   /**

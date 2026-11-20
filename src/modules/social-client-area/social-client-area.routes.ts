@@ -479,6 +479,10 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
   ['GET /social/campaigns/google/hierarchy']: campaigns({
     query: connection,
   }),
+  // GA-DET — the Google campaign "Detalhamento" panel (same connection proof).
+  ['GET /social/campaigns/google/campaigns/:campaignId/details']: campaigns({
+    query: connection,
+  }),
   // LI-ADS-BE — same read for a LinkedIn Ads connection.
   ['GET /social/campaigns/linkedin/hierarchy']: campaigns({
     query: connection,

@@ -394,6 +394,7 @@ import {
   SocialAdEntity,
   SocialAdMetricDailyEntity,
   SocialAdReachPeriodEntity,
+  SocialAdSearchTermDailyEntity,
   SocialAdSyncRunEntity,
 } from '../modules/social-integrations/entities';
 import {
@@ -544,6 +545,7 @@ export const agencyEntities = [
   SocialAdEntity,
   SocialAdMetricDailyEntity,
   SocialAdReachPeriodEntity,
+  SocialAdSearchTermDailyEntity,
   SocialAdSyncRunEntity,
   SocialAdActionPolicyEntity,
   SocialAdGovernedActionEntity,

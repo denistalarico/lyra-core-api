@@ -33,11 +33,11 @@ export type GoogleAdsInsightsContext = {
   syncedAt: Date;
 };
 
-function record(value: unknown): Row {
+export function record(value: unknown): Row {
   return typeof value === 'object' && value !== null ? (value as Row) : {};
 }
 
-function objectId(value: unknown): string | null {
+export function objectId(value: unknown): string | null {
   const candidate = typeof value === 'number' ? String(value) : value;
 
   return typeof candidate === 'string' && OBJECT_ID_PATTERN.test(candidate)
@@ -49,7 +49,7 @@ function objectId(value: unknown): string | null {
  * `cost_micros` is already `numeric(18,6)` scaled: one micro is 10^-6 of the
  * currency unit, so the integer is formatted, never divided as a float (A-07).
  */
-function readMicros(value: unknown): string | null {
+export function readMicros(value: unknown): string | null {
   const candidate =
     typeof value === 'number' && Number.isSafeInteger(value)
       ? String(value)
@@ -63,7 +63,7 @@ function readMicros(value: unknown): string | null {
 }
 
 /** Google's `conversions` are doubles; rounded to the column's six places. */
-function readDouble(value: unknown): string | null {
+export function readDouble(value: unknown): string | null {
   if (value === undefined || value === null) return '0.000000';
 
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -74,7 +74,7 @@ function readDouble(value: unknown): string | null {
 }
 
 /** A count that Google omitted is zero; one that is present and bad is a skip. */
-function readCount(value: unknown): string | null {
+export function readCount(value: unknown): string | null {
   if (value === undefined || value === null) return '0';
 
   return parseCountText(value);

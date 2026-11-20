@@ -24,6 +24,7 @@ import {
   CreateSocialBoostTemplateDto,
   GenerateSocialCampaignRecommendationDto,
   ConfirmSocialAdActionDto,
+  GoogleCampaignDetailsQueryDto,
   MetaCampaignHierarchyQueryDto,
   SocialCampaignMonitorQueryDto,
   SocialCampaignRecommendationListQueryDto,
@@ -39,6 +40,7 @@ import {
   ScheduleSocialBoostDto,
   UpdateScheduledSocialBoostDto,
 } from './dto';
+import { GoogleCampaignDetailsReadService } from './services/google-campaign-details-read.service';
 import { MetaCampaignHierarchyReadService } from './services/meta-campaign-hierarchy-read.service';
 import { SocialCampaignMonitorService } from './services/social-campaign-monitor.service';
 import { SocialCampaignRecommendationService } from './services/social-campaign-recommendation.service';
@@ -72,6 +74,7 @@ export class SocialCampaignsController {
     private readonly boostRequests: SocialBoostRequestService,
     private readonly boostTargeting: MetaAdsBoostTargetingService,
     private readonly scheduledBoosts: SocialScheduledBoostService,
+    private readonly googleDetails: GoogleCampaignDetailsReadService,
   ) {}
 
   @Post('meta/boost/preflight')
@@ -540,6 +543,30 @@ export class SocialCampaignsController {
       page: query.page,
       limit: query.limit,
       provider: 'google_ads',
+    });
+  }
+
+  /**
+   * GA-DET: the "Detalhamento" panel of one Google campaign (channel,
+   * conversion action, search terms). Mirror only, read-only (D-G7).
+   */
+  @ClientAreaExposed('social_campaigns')
+  @Get('google/campaigns/:campaignId/details')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(SOCIAL_ADS_VIEW_PERMISSION)
+  googleCampaignDetails(
+    @RequestContextData() ctx: RequestContext,
+    @Param('campaignId') campaignId: string,
+    @Query() query: GoogleCampaignDetailsQueryDto,
+  ) {
+    return this.googleDetails.read({
+      ...this.requireScope(ctx),
+      connectionId: query.connectionId,
+      campaignId,
+      since: query.since,
+      until: query.until,
+      termKind: query.termKind,
     });
   }
 
