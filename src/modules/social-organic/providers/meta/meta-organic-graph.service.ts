@@ -62,6 +62,18 @@ export type MetaOrganicDirectInstagramAccount = {
 
 export type MetaInstagramApiHost = 'facebook' | 'instagram';
 
+/** ML1 (D-L7): what the handler reads of one lead. */
+const META_LEAD_FIELDS =
+  'id,created_time,field_data,ad_id,adset_id,campaign_id,form_id,platform,is_organic';
+
+export type MetaOrganicLeadForm = {
+  id: string;
+  name: string | null;
+  status: string | null;
+  locale: string | null;
+  createdTime: string | null;
+};
+
 export type MetaOrganicPublishedObject = {
   id: string;
 };
@@ -644,6 +656,148 @@ export class MetaOrganicGraphService {
       throw this.invalidResponse();
     }
     return { data: response.data, apiCalls: 1 };
+  }
+
+  // ── ML1: Lead Ads (D-L7), always with the Page token ───────────────────
+
+  /**
+   * One lead by its `leadgen_id` (`leads_retrieval`). The field list is D-L7's;
+   * the Lead reference page was not reachable on 2026-11-20, so the first real
+   * read confirms it (a field Meta does not know fails the whole request).
+   */
+  async getLead(input: {
+    leadId: string;
+    accessToken: string;
+  }): Promise<Record<string, unknown>> {
+    const url = this.graphUrl(encodeURIComponent(input.leadId));
+    url.searchParams.set('fields', META_LEAD_FIELDS);
+    const data = await this.requestJson(
+      url,
+      this.authorized(input.accessToken),
+    );
+    if (!isRecord(data) || !readRequiredString(data.id)) {
+      throw this.invalidResponse();
+    }
+    return data;
+  }
+
+  /**
+   * `GET /{form-id}/leads`, newest first, at most `maxPages` pages. Meta keeps
+   * leads for a limited time, so this is a catch-up read, not an archive.
+   */
+  async listFormLeads(input: {
+    formId: string;
+    accessToken: string;
+    maxPages: number;
+  }): Promise<{ leads: Record<string, unknown>[]; truncated: boolean }> {
+    const leads: Record<string, unknown>[] = [];
+    const seenCursors = new Set<string>();
+    let after: string | null = null;
+
+    for (let page = 0; page < input.maxPages; page += 1) {
+      const url = this.graphUrl(`${encodeURIComponent(input.formId)}/leads`);
+      url.searchParams.set('fields', META_LEAD_FIELDS);
+      url.searchParams.set('limit', String(META_ORGANIC_PAGE_SIZE));
+      if (after) url.searchParams.set('after', after);
+
+      const data = await this.requestJson(
+        url,
+        this.authorized(input.accessToken),
+      );
+      if (!isRecord(data) || !Array.isArray(data.data)) {
+        throw this.invalidResponse();
+      }
+      for (const lead of data.data) if (isRecord(lead)) leads.push(lead);
+
+      after = this.readNextCursor(data.paging, url.pathname, seenCursors);
+      if (!after) return { leads, truncated: false };
+    }
+    return { leads, truncated: true };
+  }
+
+  /** Lead forms of a Page, for the form picker. */
+  async listLeadForms(input: {
+    pageId: string;
+    accessToken: string;
+  }): Promise<MetaOrganicLeadForm[]> {
+    const forms: MetaOrganicLeadForm[] = [];
+    const seenCursors = new Set<string>();
+    let after: string | null = null;
+
+    for (let page = 0; page < META_ORGANIC_MAX_PAGES; page += 1) {
+      const url = this.graphUrl(
+        `${encodeURIComponent(input.pageId)}/leadgen_forms`,
+      );
+      url.searchParams.set('fields', 'id,name,status,locale,created_time');
+      url.searchParams.set('limit', String(META_ORGANIC_PAGE_SIZE));
+      if (after) url.searchParams.set('after', after);
+
+      const data = await this.requestJson(
+        url,
+        this.authorized(input.accessToken),
+      );
+      if (!isRecord(data) || !Array.isArray(data.data)) {
+        throw this.invalidResponse();
+      }
+      for (const raw of data.data) {
+        if (!isRecord(raw)) continue;
+        const id = readRequiredString(raw.id);
+        if (!id) continue;
+        forms.push({
+          id,
+          name: typeof raw.name === 'string' ? raw.name.trim() || null : null,
+          status: readStatus(raw.status),
+          locale: typeof raw.locale === 'string' ? raw.locale : null,
+          createdTime:
+            typeof raw.created_time === 'string' ? raw.created_time : null,
+        });
+      }
+
+      after = this.readNextCursor(data.paging, url.pathname, seenCursors);
+      if (!after) return forms;
+    }
+    return forms;
+  }
+
+  /** Fields this app is subscribed to on the Page (`[]` when not installed). */
+  async getPageSubscribedFields(input: {
+    pageId: string;
+    accessToken: string;
+  }): Promise<string[]> {
+    const appId = requireSocialMetaAppId();
+    const data = await this.requestJson(
+      this.graphUrl(`${encodeURIComponent(input.pageId)}/subscribed_apps`),
+      this.authorized(input.accessToken),
+    );
+    if (!isRecord(data) || !Array.isArray(data.data)) {
+      throw this.invalidResponse();
+    }
+    const app = data.data.find(
+      (candidate) => isRecord(candidate) && String(candidate.id) === appId,
+    ) as Record<string, unknown> | undefined;
+    return Array.isArray(app?.subscribed_fields)
+      ? app.subscribed_fields.filter(
+          (field): field is string => typeof field === 'string',
+        )
+      : [];
+  }
+
+  /**
+   * Installs the app on the Page for `fields` (`pages_manage_metadata`). The
+   * caller sends the union with what is already there: Meta does not document
+   * whether this call adds or replaces.
+   */
+  async subscribePageFields(input: {
+    pageId: string;
+    accessToken: string;
+    fields: readonly string[];
+  }): Promise<void> {
+    const data = await this.requestForm(
+      this.graphUrl(`${encodeURIComponent(input.pageId)}/subscribed_apps`),
+      input.accessToken,
+      { subscribed_fields: input.fields.join(',') },
+    );
+    if (!isRecord(data) || data.success !== true) throw this.invalidResponse();
   }
 
   async revokePermissions(accessToken: string): Promise<void> {

@@ -236,3 +236,35 @@ export class UpdateFormGoogleAdsLeadsDto {
   @IsBoolean()
   sendTestLeadsToCrm?: boolean;
 }
+
+/** ML1 (§5.4): `PATCH forms/:id/meta-leads`. `formIds: null` = every form of the Pages. */
+export class UpdateFormMetaLeadsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @Matches(/^\d{1,30}$/, { each: true })
+  pageIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsString({ each: true })
+  @Matches(/^\d{1,30}$/, { each: true })
+  formIds?: string[] | null;
+
+  @IsOptional()
+  @IsBoolean()
+  sendTestLeadsToCrm?: boolean;
+}
+
+/** ML1: optional form whose exact scope filters the Page picker. */
+export class MetaLeadsPagesQueryDto {
+  @IsOptional()
+  @IsUUID()
+  formId?: string;
+}

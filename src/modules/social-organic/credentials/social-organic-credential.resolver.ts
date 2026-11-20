@@ -119,9 +119,34 @@ export class SocialOrganicCredentialResolver {
     );
   }
 
+  /**
+   * ML1 (D-L7): the Page token for Lead Ads. Neither publishing enablement nor
+   * the analytics scope matters here, and Company Context comes from the row.
+   */
+  async resolvePersistedForLeads(
+    input: ResolvePersistedOrganicCredentialInput,
+  ): Promise<ResolvedOrganicCredential> {
+    const asset = await this.assetsRepository.findOne({
+      where: {
+        id: input.assetId,
+        tenantId: input.tenantId,
+        workspaceId: input.workspaceId,
+        agencyClientId: input.agencyClientId ?? IsNull(),
+      },
+      // `id` is selected for the same TypeORM null-hydration reason as above.
+      select: ['id', 'companyContextId'],
+    });
+    if (!asset) throw new SocialOrganicCredentialError('asset_not_found');
+    const resolved = await this.resolveInternal(
+      { ...input, companyContextId: asset.companyContextId },
+      'leads',
+    );
+    return resolved.credential;
+  }
+
   private async resolveInternal(
     input: ResolveOrganicCredentialInput,
-    purpose: 'publishing' | 'analytics',
+    purpose: 'publishing' | 'analytics' | 'leads',
   ): Promise<ResolvedOrganicAnalyticsCredential> {
     const asset = await this.findInScope(input);
 

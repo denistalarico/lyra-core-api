@@ -140,6 +140,8 @@ import {
   SocialOrganicWebhookService,
   SocialOrganicWebhookWorker,
 } from './webhooks';
+import { SocialOrganicLeadgenRelay } from './webhooks/social-organic-leadgen.relay';
+import { SocialOrganicLeadAdsService } from './lead-ads/social-organic-lead-ads.service';
 import { SocialGoogleModule } from '../social-google/social-google.module';
 import {
   createMetaOrganicOAuthProviders,
@@ -319,6 +321,9 @@ describe('SocialOrganicModule', () => {
       SocialOrganicWebhookService,
       SocialOrganicInteractionService,
       SocialOrganicWebhookWorker,
+      // ML1: the `leadgen` relay and the Lead Ads door Forms uses.
+      SocialOrganicLeadgenRelay,
+      SocialOrganicLeadAdsService,
       SettingsCryptoService,
       MediaPreparationService,
       MediaMetadataService,
@@ -360,6 +365,10 @@ describe('SocialOrganicModule', () => {
       SocialPublisherRegistry,
       SocialOrganicSyncRunService,
       SocialOrganicAnalyticsReadService,
+      // ML1: Forms registers its sink into the relay and reads leads through
+      // the Lead Ads door; nothing here imports Forms.
+      SocialOrganicLeadgenRelay,
+      SocialOrganicLeadAdsService,
     ]);
   });
 });

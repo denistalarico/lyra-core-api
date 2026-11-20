@@ -42,8 +42,8 @@ describe('Meta Organic boundaries', () => {
       'whatsapp_business_management',
       'whatsapp_business_messaging',
       // Capability extras that A1.1 still does not request "just in case".
+      // (`pages_manage_metadata` left this list on purpose in ML1: Lead Ads.)
       'pages_manage_engagement',
-      'pages_manage_metadata',
       'pages_read_user_content',
       'instagram_manage_comments',
       'instagram_manage_contents',
@@ -54,7 +54,7 @@ describe('Meta Organic boundaries', () => {
     }
   });
 
-  it('declares exactly discovery, publishing and the two A1.1 analytics scopes — a single source of truth', () => {
+  it('declares exactly discovery, publishing, the two A1.1 analytics scopes and the two ML1 Lead Ads scopes — a single source of truth', () => {
     expect([...SOCIAL_META_ORGANIC_SCOPES].sort()).toEqual(
       [
         'business_management',
@@ -65,6 +65,8 @@ describe('Meta Organic boundaries', () => {
         'instagram_content_publish',
         'read_insights',
         'instagram_manage_insights',
+        'leads_retrieval',
+        'pages_manage_metadata',
       ].sort(),
     );
   });

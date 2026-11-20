@@ -67,6 +67,11 @@ export const META_INSTAGRAM_PROVIDER = 'instagram';
  * A token persisted before this change does NOT acquire the analytics scopes
  * automatically. It must be re-authorized through the existing `config_id`
  * flow before A2 may use it.
+ *
+ * ML1 (Meta Lead Ads → Forms, D-L7) adds `leads_retrieval` (read a lead with
+ * the Page token) and `pages_manage_metadata` (install the app on the Page
+ * with `subscribed_fields=leadgen`). Same rule: a Page connected before ML1
+ * must be reconnected so its stamped scopes say so.
  */
 export const SOCIAL_META_ORGANIC_SCOPES = [
   'business_management',
@@ -77,6 +82,14 @@ export const SOCIAL_META_ORGANIC_SCOPES = [
   'instagram_content_publish',
   'read_insights',
   'instagram_manage_insights',
+  'leads_retrieval',
+  'pages_manage_metadata',
+] as const;
+
+/** ML1: the two scopes a Page connection must carry before Lead Ads are read. */
+export const SOCIAL_META_LEAD_ADS_SCOPES = [
+  'leads_retrieval',
+  'pages_manage_metadata',
 ] as const;
 
 export type MetaOrganicLoginConfig = FacebookLoginConfig;

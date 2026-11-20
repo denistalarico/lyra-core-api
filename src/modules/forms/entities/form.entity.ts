@@ -13,6 +13,7 @@ import type {
   FormFieldsConfig,
   FormGoogleAdsLeads,
   FormInboundEmail,
+  FormMetaLeads,
   FormPresentation,
   FormSecurity,
   FormStatus,
@@ -100,6 +101,14 @@ export class FormEntity {
     default: () => "'{}'::jsonb",
   })
   googleAdsLeads!: FormGoogleAdsLeads;
+
+  /** ML1: Meta Lead Ads channel (linked Pages/forms, subscription, counters). */
+  @Column({
+    name: 'meta_leads',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  metaLeads!: FormMetaLeads;
 
   /** sha256 of the webhook key; never selected by default, so no read of a form can leak it. */
   @Column({

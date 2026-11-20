@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { hostname } from 'node:os';
 import type { SocialOrganicWebhookEventEntity } from './entities/social-organic-webhook-event.entity';
@@ -11,6 +11,11 @@ import {
   splitMetaWebhookDelivery,
 } from './meta/meta-organic-webhook.parser';
 import { SocialOrganicInteractionService } from './social-organic-interaction.service';
+import {
+  SocialOrganicLeadgenRelay,
+  isRelayedLeadgen,
+  parseMetaLeadgenChange,
+} from './social-organic-leadgen.relay';
 import { SocialOrganicWebhookService } from './social-organic-webhook.service';
 
 const TICK_MS = 5_000;
@@ -44,6 +49,9 @@ type ChangeOutcome =
  *
  * §15 holds throughout: nothing here calls Graph, replies, moderates, notifies,
  * creates a lead or touches LeadFlow. It reads a payload and writes a row.
+ * The one exception is ML1's `page:leadgen`, which is not handled here at all:
+ * its ids are relayed to the sink the Forms module registers, and the Graph
+ * read and the CRM write happen there.
  */
 @Injectable()
 export class SocialOrganicWebhookWorker {
@@ -54,6 +62,9 @@ export class SocialOrganicWebhookWorker {
   constructor(
     private readonly webhooks: SocialOrganicWebhookService,
     private readonly interactions: SocialOrganicInteractionService,
+    /** ML1: `page:leadgen` goes here instead of to an interaction handler. */
+    @Optional()
+    private readonly leadgen?: SocialOrganicLeadgenRelay,
   ) {}
 
   @Interval(TICK_MS)
@@ -165,8 +176,12 @@ export class SocialOrganicWebhookWorker {
     event: SocialOrganicWebhookEventEntity,
     change: MetaWebhookChange,
   ): Promise<ChangeOutcome> {
-    const handlerKey = resolveHandlerKey(event.objectType, change.field);
-    if (!handlerKey) {
+    const relayed =
+      Boolean(this.leadgen) && isRelayedLeadgen(event.objectType, change.field);
+    const handlerKey = relayed
+      ? null
+      : resolveHandlerKey(event.objectType, change.field);
+    if (!relayed && !handlerKey) {
       // Includes every messaging field and every unsubscribed object: known to
       // exist, deliberately not ours.
       return { kind: 'unhandled', safeErrorCode: 'no_handler_registered' };
@@ -197,6 +212,16 @@ export class SocialOrganicWebhookWorker {
             ? 'ambiguous_asset'
             : 'unknown_asset',
       };
+    }
+
+    if (relayed || !handlerKey) {
+      return this.relayLeadgen(event, change, {
+        tenantId: scope.tenantId,
+        workspaceId: scope.workspaceId,
+        agencyClientId: scope.agencyClientId,
+        companyContextId: scope.companyContextId,
+        assetId: scope.assetId,
+      });
     }
 
     const result = META_ORGANIC_WEBHOOK_HANDLERS[handlerKey](change);
@@ -231,6 +256,38 @@ export class SocialOrganicWebhookWorker {
     }
 
     return { kind: 'processed' };
+  }
+
+  /**
+   * ML1: hands a `leadgen` change to the registered sink. A sink that throws is
+   * a retryable failure, like a failed interaction write; the sink's own
+   * idempotency (one submission per `leadgen_id`) makes the replay safe.
+   */
+  private async relayLeadgen(
+    event: SocialOrganicWebhookEventEntity,
+    change: MetaWebhookChange,
+    scope: Parameters<SocialOrganicLeadgenRelay['relay']>[0]['scope'],
+  ): Promise<ChangeOutcome> {
+    const notification = parseMetaLeadgenChange(change);
+    if (!notification || !this.leadgen) {
+      return { kind: 'unhandled', safeErrorCode: 'missing_external_id' };
+    }
+    try {
+      return await this.leadgen.relay({
+        scope,
+        notification,
+        sourceWebhookEventId: event.id,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Organic leadgen relay failed: ${JSON.stringify({
+          eventId: event.id,
+          assetId: scope.assetId,
+          reason: error instanceof Error ? error.name : 'unknown',
+        })}`,
+      );
+      return { kind: 'failed', safeErrorCode: 'leadgen_relay_failed' };
+    }
   }
 
   /**

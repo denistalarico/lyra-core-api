@@ -46,6 +46,15 @@ export const META_ORGANIC_WEBHOOK_HANDLED_FIELDS = {
 } as const;
 
 /**
+ * ML1: fields the worker **relays** to another module instead of normalizing
+ * into an interaction (`social-organic-leadgen.relay.ts`). Kept apart from the
+ * handled fields so the handler registry stays exactly the interaction list.
+ */
+export const META_ORGANIC_WEBHOOK_RELAYED_FIELDS = {
+  page: ['leadgen'],
+} as const;
+
+/**
  * Documented `item` values of a `page/feed` change value.
  *
  * Verbatim from the Page reference's `item` enum. Kept complete rather than
@@ -208,6 +217,15 @@ export const META_ORGANIC_WEBHOOK_DOCUMENTED_FACTS = [
       '(identify media ids vs comment ids) but does NOT document a discriminator field. ' +
       'Presence of comment_id is treated as an observation, not as documented semantics.',
     source: 'docs/instagram-platform/.../mentions',
+  },
+  {
+    id: 'page-leadgen-value',
+    statement:
+      'page/leadgen value is { leadgen_id, page_id, form_id, ad_id, adgroup_id, created_time }: ' +
+      'ids only, the lead is read with GET /{leadgen_id} and the Page token (leads_retrieval); ' +
+      'the Page must install the app with subscribed_fields=leadgen (pages_manage_metadata). ' +
+      'Consulted 2026-11-20 (ML1).',
+    source: 'docs/graph-api/webhooks/reference/page',
   },
   {
     id: 'no-delivery-id',

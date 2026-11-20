@@ -21,10 +21,12 @@ import {
   ImportFormGoogleAdsLeadsDto,
   ListFormSubmissionsQueryDto,
   ListFormsQueryDto,
+  MetaLeadsPagesQueryDto,
   PatchFormDto,
   SetFormsAddonDto,
   UpdateFormGoogleAdsLeadsDto,
   UpdateFormInboundEmailDto,
+  UpdateFormMetaLeadsDto,
 } from './dto/forms.dto';
 import {
   FormGoogleAdsLeadsService,
@@ -32,6 +34,7 @@ import {
 } from './services/form-google-ads-leads.service';
 import { FormGoogleAdsLeadsImportService } from './services/form-google-ads-leads-import.service';
 import { FormInboundEmailService } from './services/form-inbound-email.service';
+import { FormMetaLeadsService } from './services/form-meta-leads.service';
 import { FormsAddonService } from './services/forms-addon.service';
 import { FormsService } from './services/forms.service';
 
@@ -51,6 +54,7 @@ export class FormsController {
     private readonly inboundEmail: FormInboundEmailService,
     private readonly googleAdsLeads: FormGoogleAdsLeadsService,
     private readonly googleAdsLeadsImport: FormGoogleAdsLeadsImportService,
+    private readonly metaLeads: FormMetaLeadsService,
   ) {}
 
   @Get('addon')
@@ -107,6 +111,40 @@ export class FormsController {
   @RequirePermission('agency.settings.email.manage.admin')
   testImapConnection(@RequestContextData() ctx: RequestContext) {
     return this.inboundEmail.testConnection(ctx);
+  }
+
+  /** ML1: connected Facebook Pages (with `?formId`, only the form's exact scope). */
+  @Get('meta-leads/pages')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async listMetaLeadsPages(
+    @RequestContextData() ctx: RequestContext,
+    @Query() query: MetaLeadsPagesQueryDto,
+  ) {
+    const form = query.formId ? await this.forms.get(ctx, query.formId) : null;
+    if (!form)
+      await this.addon.assertEnabled(ctx.tenantId, requireWorkspace(ctx));
+    return this.metaLeads.listPages(ctx.tenantId, requireWorkspace(ctx), form);
+  }
+
+  /** ML1: lead forms of one Page, for the form filter. */
+  @Get('meta-leads/pages/:pageId/forms')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async listMetaLeadsPageForms(
+    @RequestContextData() ctx: RequestContext,
+    @Param('pageId') pageId: string,
+    @Query() query: MetaLeadsPagesQueryDto,
+  ) {
+    if (!/^\d{1,30}$/.test(pageId))
+      throw new BadRequestException('Invalid page id.');
+    const form = query.formId ? await this.forms.get(ctx, query.formId) : null;
+    if (!form)
+      await this.addon.assertEnabled(ctx.tenantId, requireWorkspace(ctx));
+    return this.metaLeads.listPageForms(
+      ctx.tenantId,
+      requireWorkspace(ctx),
+      pageId,
+      form,
+    );
   }
 
   @Get('submissions/:submissionId')
@@ -257,6 +295,27 @@ export class FormsController {
       await this.forms.get(ctx, id),
       dto.connectionId,
     );
+  }
+
+  /** ML1: links Pages/Meta forms and installs the app on the Pages for `leadgen`. */
+  @Patch(':id/meta-leads')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async updateMetaLeads(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateFormMetaLeadsDto,
+  ) {
+    return this.metaLeads.updateSettings(await this.forms.get(ctx, id), dto);
+  }
+
+  /** ML1: earlier leads of the linked Pages through `GET /{form-id}/leads`. */
+  @Post(':id/meta-leads/import')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async importMetaLeads(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.metaLeads.importLeads(await this.forms.get(ctx, id));
   }
 
   @Post(':id/inbound-email/test')

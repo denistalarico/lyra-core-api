@@ -133,6 +133,8 @@ import {
   SocialOrganicWebhookService,
   SocialOrganicWebhookWorker,
 } from './webhooks';
+import { SocialOrganicLeadgenRelay } from './webhooks/social-organic-leadgen.relay';
+import { SocialOrganicLeadAdsService } from './lead-ads/social-organic-lead-ads.service';
 
 export function createMetaOrganicOAuthProviders(
   meta: MetaOrganicOAuthProvider,
@@ -347,6 +349,10 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     SocialOrganicWebhookService,
     SocialOrganicInteractionService,
     SocialOrganicWebhookWorker,
+    // ML1: `page:leadgen` is relayed to the sink Forms registers on init, and
+    // the Lead Ads door (Pages, Page token, Graph) is exported for it.
+    SocialOrganicLeadgenRelay,
+    SocialOrganicLeadAdsService,
     SettingsCryptoService,
     MediaPreparationService,
     MediaMetadataService,
@@ -382,6 +388,8 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     SocialPublisherRegistry,
     SocialOrganicSyncRunService,
     SocialOrganicAnalyticsReadService,
+    SocialOrganicLeadgenRelay,
+    SocialOrganicLeadAdsService,
   ],
 })
 export class SocialOrganicModule {}

@@ -312,6 +312,61 @@ export type FormGoogleAdsLeadsView = FormGoogleAdsLeads & {
   webhookUrl: string;
 };
 
+/**
+ * ML1 (D-L7): Meta Lead Ads channel. Leads of the linked Pages enter this form;
+ * `formIds` narrows them to some Meta forms (`null` = every form of the Pages).
+ */
+export type FormMetaLeads = {
+  enabled: boolean;
+  pageIds: string[];
+  formIds: string[] | null;
+  /** D-L4: a Lead Ads Testing Tool lead also opens a CRM opportunity. */
+  sendTestLeadsToCrm: boolean;
+  /** Outcome of the last `leadgen` subscription attempt, per Page id. */
+  subscription: Record<string, 'subscribed' | 'missing_permission' | 'failed'>;
+  lastReceivedAt: string | null;
+  lastTestAt: string | null;
+  receivedCount: number;
+  /** Leads of a linked Page whose Meta form is outside `formIds` (D-L7). */
+  unroutedCount: number;
+  /** Safe code of the last failure (never lead data). */
+  lastError: string | null;
+  lastImport: FormMetaLeadsImportSummary | null;
+  lastImportError: string | null;
+};
+
+/** ML1 contract: `POST forms/:id/meta-leads/import`. */
+export type FormMetaLeadsImportResult = {
+  read: number;
+  created: number;
+  duplicates: number;
+  skipped: number;
+  /** Stored, but the CRM step failed (the panel reprocesses them). */
+  failed: number;
+  /** A Meta form had more leads than one import reads. */
+  truncated: boolean;
+  oldestSubmittedAt: string | null;
+};
+
+export type FormMetaLeadsImportSummary = FormMetaLeadsImportResult & {
+  at: string;
+};
+
+export const DEFAULT_FORM_META_LEADS: FormMetaLeads = {
+  enabled: false,
+  pageIds: [],
+  formIds: null,
+  sendTestLeadsToCrm: true,
+  subscription: {},
+  lastReceivedAt: null,
+  lastTestAt: null,
+  receivedCount: 0,
+  unroutedCount: 0,
+  lastError: null,
+  lastImport: null,
+  lastImportError: null,
+};
+
 export const FORM_SUBMISSION_SOURCES = [
   'page',
   'embed',

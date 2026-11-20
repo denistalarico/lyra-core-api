@@ -398,10 +398,95 @@ describe('SocialOrganicWebhookWorker', () => {
   });
 
   it('performs no provider call of its own', () => {
-    // W1.2's worker has exactly two collaborators: the receipt store and the
-    // interaction store. A Graph client, publisher or notification service
-    // appearing here would mean an outbound side effect landed in an inbound
-    // handler (§15).
-    expect(SocialOrganicWebhookWorker.length).toBe(2);
+    // W1.2's worker had exactly two collaborators: the receipt store and the
+    // interaction store. ML1 adds a third, the leadgen relay, which only hands
+    // ids to a registered sink. A Graph client, publisher or notification
+    // service appearing here would mean an outbound side effect landed in an
+    // inbound handler (§15).
+    expect(SocialOrganicWebhookWorker.length).toBe(3);
+  });
+
+  describe('page:leadgen (ML1)', () => {
+    const leadgenPayload = {
+      object: 'page',
+      entry: [
+        {
+          id: '100',
+          time: 1_726_000_000,
+          changes: [
+            {
+              field: 'leadgen',
+              value: { leadgen_id: '9001', page_id: '100', form_id: '55' },
+            },
+          ],
+        },
+      ],
+    };
+    let relay: { relay: jest.Mock };
+
+    beforeEach(() => {
+      relay = { relay: jest.fn().mockResolvedValue({ kind: 'processed' }) };
+      worker = new SocialOrganicWebhookWorker(
+        webhooks as never,
+        interactions as never,
+        relay as never,
+      );
+      jest.spyOn(worker['logger'], 'log').mockImplementation(() => undefined);
+      jest.spyOn(worker['logger'], 'error').mockImplementation(() => undefined);
+      webhooks.claim.mockResolvedValue([eventRow('event-l', leadgenPayload)]);
+    });
+
+    it('relays the ids with the resolved scope instead of writing an interaction', async () => {
+      await worker.processDue();
+
+      expect([
+        interactions.record.mock.calls.length,
+        (relay.relay.mock.calls[0] as [Record<string, unknown>])[0],
+      ]).toEqual([
+        0,
+        expect.objectContaining({
+          scope: expect.objectContaining({ assetId: 'asset-1' }),
+          notification: expect.objectContaining({
+            leadgenId: '9001',
+            formId: '55',
+          }),
+          sourceWebhookEventId: 'event-l',
+        }),
+      ]);
+    });
+
+    it("settles the receipt with the sink's outcome", async () => {
+      relay.relay.mockResolvedValue({
+        kind: 'unhandled',
+        safeErrorCode: 'lead_unrouted',
+      });
+      await worker.processDue();
+
+      expect([settledCall().status, settledCall().safeErrorCode]).toEqual([
+        'unhandled',
+        'lead_unrouted',
+      ]);
+    });
+
+    it('fails the receipt (retry) when the sink throws', async () => {
+      relay.relay.mockRejectedValue(new Error('boom'));
+      await worker.processDue();
+
+      expect([settledCall().status, settledCall().safeErrorCode]).toEqual([
+        'failed',
+        'leadgen_relay_failed',
+      ]);
+    });
+
+    it('keeps leadgen unhandled when no relay is wired', async () => {
+      worker = new SocialOrganicWebhookWorker(
+        webhooks as never,
+        interactions as never,
+      );
+      jest.spyOn(worker['logger'], 'log').mockImplementation(() => undefined);
+      await worker.processDue();
+
+      expect(settledCall().safeErrorCode).toBe('no_handler_registered');
+    });
   });
 });

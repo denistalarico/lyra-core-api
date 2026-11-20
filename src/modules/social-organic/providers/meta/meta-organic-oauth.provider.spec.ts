@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await -- provider doubles intentionally return resolved async values. */
 import type { MetaOrganicAssetDiscoveryService } from './meta-organic-asset-discovery.service';
 import type { MetaOrganicGraphService } from './meta-organic-graph.service';
 import { MetaOrganicOAuthProvider } from './meta-organic-oauth.provider';
@@ -87,11 +86,13 @@ describe('MetaOrganicOAuthProvider', () => {
       'instagram_content_publish',
       'read_insights',
       'instagram_manage_insights',
+      'leads_retrieval',
+      'pages_manage_metadata',
     ]);
   });
 
-  it('the persisted scope contract (config_id-applied, not a URL param) contains exactly the 8 expected scopes', () => {
-    expect(SOCIAL_META_ORGANIC_SCOPES).toHaveLength(8);
+  it('the persisted scope contract (config_id-applied, not a URL param) contains exactly the 10 expected scopes', () => {
+    expect(SOCIAL_META_ORGANIC_SCOPES).toHaveLength(10);
     expect([...SOCIAL_META_ORGANIC_SCOPES].sort()).toEqual(
       [
         'business_management',
@@ -102,8 +103,15 @@ describe('MetaOrganicOAuthProvider', () => {
         'instagram_content_publish',
         'read_insights',
         'instagram_manage_insights',
+        'leads_retrieval',
+        'pages_manage_metadata',
       ].sort(),
     );
+  });
+
+  it('includes both ML1 Lead Ads scopes', () => {
+    expect(SOCIAL_META_ORGANIC_SCOPES).toContain('leads_retrieval');
+    expect(SOCIAL_META_ORGANIC_SCOPES).toContain('pages_manage_metadata');
   });
 
   it('includes both MA1.1 publishing scopes', () => {
@@ -141,7 +149,6 @@ describe('MetaOrganicOAuthProvider', () => {
   it('never requests comments/admin extras', () => {
     for (const forbidden of [
       'pages_manage_engagement',
-      'pages_manage_metadata',
       'pages_read_user_content',
       'instagram_manage_comments',
       'instagram_manage_contents',

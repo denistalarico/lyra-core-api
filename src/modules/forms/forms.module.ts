@@ -21,6 +21,7 @@ import { CrmOpportunityEntity } from '../crm/entities/crm-opportunity.entity';
 import { PermissionsModule } from '../permissions';
 import { SocialAdEntity } from '../social-integrations/entities/social-ad-entity.entity';
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
+import { SocialOrganicModule } from '../social-organic/social-organic.module';
 import { FormEmailSyncStateEntity } from './entities/form-email-sync-state.entity';
 import { FormSubmissionEntity } from './entities/form-submission.entity';
 import { FormEntity } from './entities/form.entity';
@@ -33,6 +34,7 @@ import { FormGoogleAdsLeadsService } from './services/form-google-ads-leads.serv
 import { FormInboundEmailService } from './services/form-inbound-email.service';
 import { FormLeadContactResolver } from './services/form-lead-contact.resolver';
 import { FormLeadIngestionService } from './services/form-lead-ingestion.service';
+import { FormMetaLeadsService } from './services/form-meta-leads.service';
 import { FormsAddonService } from './services/forms-addon.service';
 import { FormsService } from './services/forms.service';
 
@@ -50,6 +52,9 @@ import { FormsService } from './services/forms.service';
     EmailModule,
     // GL2: Google Ads lead import (reader, connection list, credential resolver).
     SocialIntegrationsModule,
+    // ML1: Meta Lead Ads (Pages, Page token, Graph) and the `leadgen` relay.
+    // One-way: nothing under social-organic imports FormsModule.
+    SocialOrganicModule,
     TypeOrmModule.forFeature(
       [
         FormEntity,
@@ -79,6 +84,7 @@ import { FormsService } from './services/forms.service';
     FormInboundEmailService,
     FormGoogleAdsLeadsService,
     FormGoogleAdsLeadsImportService,
+    FormMetaLeadsService,
     FormEmailImapGateway,
     FormEmailAiExtractor,
     SettingsCryptoService,

@@ -15,6 +15,7 @@ import {
   DEFAULT_FORM_AFTER_SUBMIT,
   DEFAULT_FORM_DESTINATION,
   DEFAULT_FORM_GOOGLE_ADS_LEADS,
+  DEFAULT_FORM_META_LEADS,
   DEFAULT_FORM_INBOUND_EMAIL,
   DEFAULT_FORM_SECURITY,
 } from '../forms.types';
@@ -68,6 +69,7 @@ function activeForm(overrides: Partial<FormEntity> = {}): FormEntity {
     inboundEmailAddress: null,
     inboundEmail: { ...DEFAULT_FORM_INBOUND_EMAIL },
     googleAdsLeads: { ...DEFAULT_FORM_GOOGLE_ADS_LEADS },
+    metaLeads: { ...DEFAULT_FORM_META_LEADS },
     createdByUserId: null,
     publishedAt: new Date(),
     archivedAt: null,

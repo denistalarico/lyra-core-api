@@ -272,7 +272,11 @@ export class FormsService {
    * the "at least one visible field" rule only applies when that channel is off.
    */
   private assertCanPublish(form: FormEntity) {
-    if (form.googleAdsLeads?.enabled !== true) assertPublishable(form.fields);
+    if (
+      form.googleAdsLeads?.enabled !== true &&
+      form.metaLeads?.enabled !== true
+    )
+      assertPublishable(form.fields);
   }
 
   async deactivate(ctx: RequestContext, id: string) {

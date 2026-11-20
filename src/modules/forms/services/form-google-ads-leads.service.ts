@@ -25,6 +25,7 @@ import {
 } from '../google-ads-lead.normalizer';
 import {
   DEFAULT_FORM_GOOGLE_ADS_LEADS,
+  DEFAULT_FORM_META_LEADS,
   type FormGoogleAdsLeads,
   type FormGoogleAdsLeadsView,
 } from '../forms.types';
@@ -52,10 +53,15 @@ export function googleAdsLeadsView(
   };
 }
 
+/** Every form response carries both ad-lead channels with their defaults (GL1, ML1). */
 export function withGoogleAdsLeadsView<
-  T extends Pick<FormEntity, 'publicKey' | 'googleAdsLeads'>,
+  T extends Pick<FormEntity, 'publicKey' | 'googleAdsLeads' | 'metaLeads'>,
 >(form: T) {
-  return { ...form, googleAdsLeads: googleAdsLeadsView(form) };
+  return {
+    ...form,
+    googleAdsLeads: googleAdsLeadsView(form),
+    metaLeads: { ...DEFAULT_FORM_META_LEADS, ...(form.metaLeads ?? {}) },
+  };
 }
 
 /**

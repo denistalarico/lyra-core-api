@@ -338,6 +338,7 @@ export class FormLeadIngestionService {
       ...(a.campaignId ? { campaignId: a.campaignId } : {}),
       ...(campaignName ? { campaignName } : {}),
       ...(a.adGroupId ? { adGroupId: a.adGroupId } : {}),
+      ...(a.adSetId ? { adSetId: a.adSetId } : {}),
       ...(a.assetGroupId ? { assetGroupId: a.assetGroupId } : {}),
       ...(a.adId ? { adId: a.adId } : {}),
       ...(a.formId ? { providerFormId: a.formId } : {}),
