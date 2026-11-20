@@ -1,7 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize,
-  IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -46,12 +44,6 @@ export class UpdateGoogleAdsConversionUploadDto {
   @IsString()
   @Matches(ACTION_RESOURCE)
   wonActionResource?: string | null;
-
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(50)
-  @IsUUID('all', { each: true })
-  qualifiedStageIds?: string[];
 
   @IsOptional()
   @IsBoolean()

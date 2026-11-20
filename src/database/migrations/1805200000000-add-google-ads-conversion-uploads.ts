@@ -5,8 +5,10 @@ import type { MigrationInterface, QueryRunner } from 'typeorm';
  * Plan: docs/sprints/social/social-google-ads-leads-analytics-plan-2026-11-18.md (§4.2 D-G6, revised).
  *
  * - `google_ads_conversion_upload_settings`: one row per Google Ads
- *   connection: the two `UPLOAD_CLICKS` actions, the "qualified" stage of each
- *   funnel and whether the won value is sent. Off by default.
+ *   connection: the two `UPLOAD_CLICKS` actions and whether the won value is
+ *   sent. Off by default. Which stages are "qualified" is the class of each
+ *   CRM stage (owner decision, 2026-11-20; this migration had not run in
+ *   production yet, so the per-setting stage list was dropped from it).
  * - `google_ads_conversion_uploads`: one row per (connection, transaction id
  *   `<opportunityId>:<qualified|won>`): idempotency and per-row state.
  *   Only ids, the click id, times, value and error codes; never lead PII.
@@ -26,7 +28,6 @@ export class AddGoogleAdsConversionUploads1805200000000 implements MigrationInte
         "enabled" boolean NOT NULL DEFAULT false,
         "qualified_action_resource" varchar(200) NULL,
         "won_action_resource" varchar(200) NULL,
-        "qualified_stage_ids" jsonb NOT NULL DEFAULT '[]'::jsonb,
         "send_value" boolean NOT NULL DEFAULT true,
         "created_by_id" uuid NULL,
         "updated_by_id" uuid NULL,
@@ -39,7 +40,6 @@ export class AddGoogleAdsConversionUploads1805200000000 implements MigrationInte
         CONSTRAINT "CK_google_ads_conversion_upload_settings_actions" CHECK (
           ("qualified_action_resource" IS NULL OR "qualified_action_resource" ~ '^customers/[0-9]+/conversionActions/[0-9]+$')
           AND ("won_action_resource" IS NULL OR "won_action_resource" ~ '^customers/[0-9]+/conversionActions/[0-9]+$')
-          AND jsonb_typeof("qualified_stage_ids") = 'array'
         )
       )
     `);

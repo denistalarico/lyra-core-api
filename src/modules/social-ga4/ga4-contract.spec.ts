@@ -29,7 +29,8 @@ describe('GA4 analytics contract', () => {
     ).toHaveLength(1);
   });
 
-  it('offers nine ga_ metrics on the ga4 channel only', () => {
+  // AN-CRM (§6.4) added the key event rate and two synced dimensions.
+  it('offers twelve ga_ metrics on the ga4 channel only', () => {
     expect(
       metricsForChannel('ga4')
         .map((metric) => metric.id)
@@ -38,12 +39,15 @@ describe('GA4 analytics contract', () => {
       'ga_avg_session_duration',
       'ga_engaged_sessions',
       'ga_engagement_rate',
+      'ga_key_event_rate',
       'ga_key_events',
       'ga_new_users',
       'ga_page_views',
       'ga_revenue',
       'ga_sessions',
+      'ga_sessions_by_source',
       'ga_users',
+      'ga_users_by_device',
     ]);
   });
 

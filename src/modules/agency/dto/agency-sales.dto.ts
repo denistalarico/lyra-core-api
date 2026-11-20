@@ -19,6 +19,7 @@ import type {
   AgencySalesPipelineStatus,
   AgencySalesStageType,
 } from '../entities/agency-sales.entities';
+import { AGENCY_SALES_STAGE_TYPES } from '../entities/agency-sales.entities';
 
 export class CreateAgencySalesItemDto {
   @IsString()
@@ -134,15 +135,7 @@ export class CreateAgencySalesStageDto {
   name!: string;
 
   @IsOptional()
-  @IsIn([
-    'new',
-    'qualified',
-    'proposal',
-    'negotiation',
-    'won',
-    'lost',
-    'archived',
-  ])
+  @IsIn(AGENCY_SALES_STAGE_TYPES as unknown as string[])
   type?: AgencySalesStageType;
 
   @IsOptional()
@@ -172,15 +165,7 @@ export class UpdateAgencySalesStageDto {
   name?: string;
 
   @IsOptional()
-  @IsIn([
-    'new',
-    'qualified',
-    'proposal',
-    'negotiation',
-    'won',
-    'lost',
-    'archived',
-  ])
+  @IsIn(AGENCY_SALES_STAGE_TYPES as unknown as string[])
   type?: AgencySalesStageType;
 
   @IsOptional()

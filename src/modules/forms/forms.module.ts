@@ -30,6 +30,9 @@ import { FormEntity } from './entities/form.entity';
 import { FormsController } from './forms.controller';
 import { GoogleAdsConversionUploadController } from './google-ads-conversion-upload.controller';
 import { PublicFormsController } from './public-forms.controller';
+import { SocialAnalyticsCrmController } from './social-analytics-crm.controller';
+import { FormsLeadFactsReadService } from './services/forms-lead-facts.read.service';
+import { SocialAnalyticsCrmReadService } from './services/social-analytics-crm.read.service';
 import { FormEmailAiExtractor } from './services/form-email-ai.extractor';
 import { FormEmailImapGateway } from './services/form-email-imap.gateway';
 import { FormGoogleAdsLeadsImportService } from './services/form-google-ads-leads-import.service';
@@ -87,6 +90,8 @@ import { GoogleAdsConversionUploadWorker } from './services/google-ads-conversio
     PublicFormsController,
     // GA-CONV: route under social/integrations/google, served from here.
     GoogleAdsConversionUploadController,
+    // AN-CRM: "Leads e vendas" read under social/analytics, served from here.
+    SocialAnalyticsCrmController,
   ],
   providers: [
     FormsService,
@@ -102,7 +107,11 @@ import { GoogleAdsConversionUploadWorker } from './services/google-ads-conversio
     SettingsCryptoService,
     GoogleAdsConversionUploadService,
     GoogleAdsConversionUploadWorker,
+    FormsLeadFactsReadService,
+    SocialAnalyticsCrmReadService,
   ],
-  exports: [FormsService, FormsAddonService],
+  // AN-CRM (D-A1): `FormsLeadFactsReadService` is the read port for CRM
+  // figures (aggregates only, no lead PII).
+  exports: [FormsService, FormsAddonService, FormsLeadFactsReadService],
 })
 export class FormsModule {}

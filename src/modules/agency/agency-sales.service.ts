@@ -33,6 +33,7 @@ import {
   AgencySalesOpportunityItemEntity,
   AgencySalesPipelineEntity,
   AgencySalesStageEntity,
+  agencySalesStageFlags,
 } from './entities/agency-sales.entities';
 import { QuoteEntity } from '../quotes/entities/quote.entities';
 
@@ -550,6 +551,8 @@ export class AgencySalesService {
         probability: dto.probability ?? 0,
         isClosed: dto.isClosed ?? false,
         isWon: dto.isWon ?? false,
+        // A class, when sent, decides the flags (AN-CRM, 2026-11-20).
+        ...(dto.type ? agencySalesStageFlags(dto.type) : {}),
         metadata: dto.metadata ?? {},
       }),
     );
@@ -583,6 +586,7 @@ export class AgencySalesService {
       probability: dto.probability ?? stage.probability,
       isClosed: dto.isClosed ?? stage.isClosed,
       isWon: dto.isWon ?? stage.isWon,
+      ...(dto.type ? agencySalesStageFlags(dto.type) : {}),
       metadata: metadata as never,
     });
 

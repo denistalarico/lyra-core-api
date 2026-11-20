@@ -19,7 +19,8 @@ describe('CA10 Social routes on the Surface Bridge', () => {
   it('keeps the decorator opt-ins and the adapter table identical, module by module', () => {
     // +1 (2026-11-20, GA-DET): GET social/campaigns/google/campaigns/:campaignId/details.
     expect(ca10).toHaveLength(131);
-    expect(analytics).toHaveLength(35);
+    // +1 (2026-11-20, AN-CRM): GET social/analytics/crm-leads (Owner only).
+    expect(analytics).toHaveLength(36);
     expect(
       exposed.map((route) => `${route.key} ${route.module}`).sort(),
     ).toEqual(

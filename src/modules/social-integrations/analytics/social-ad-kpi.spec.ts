@@ -2,6 +2,7 @@ import {
   deriveChange,
   derivePeriodReachKpis,
   deriveSocialAdKpis,
+  deriveSocialAdRateKpis,
   divideScaled,
   formatDerived,
 } from './social-ad-kpi';
@@ -299,6 +300,41 @@ describe('deriveChange', () => {
     expect(deriveChange(0n, money('100'))).toEqual({
       absolute: '-100.000000',
       percent: '-100.000000',
+    });
+  });
+});
+
+describe('deriveSocialAdRateKpis (AN-CRM, §6.1)', () => {
+  it('derives the Google rates from the summed inputs', () => {
+    expect(
+      deriveSocialAdRateKpis({
+        ...NO_ACTIVITY,
+        spend: money('50'),
+        impressions: 1000n,
+        clicks: 40n,
+        conversions: money('2.5'),
+        conversionValue: money('100'),
+        videoViews: 200n,
+        interactions: 60n,
+      }),
+    ).toEqual({
+      interactionRate: '6.000000',
+      conversionRate: '6.250000',
+      valuePerConversion: '40.000000',
+      videoViewRate: '20.000000',
+      costPerView: '0.250000',
+    });
+  });
+
+  it('answers null for every zero denominator and for unmeasured interactions', () => {
+    expect(
+      deriveSocialAdRateKpis({ ...NO_ACTIVITY, interactions: null }),
+    ).toEqual({
+      interactionRate: null,
+      conversionRate: null,
+      valuePerConversion: null,
+      videoViewRate: null,
+      costPerView: null,
     });
   });
 });

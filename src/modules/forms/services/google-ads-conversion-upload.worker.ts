@@ -30,9 +30,13 @@ import {
   transactionIdFor,
 } from '../google-ads-conversion.rules';
 import {
+  AGENCY_REACHED_QUALIFIED_SQL,
+  LEADFLOW_REACHED_QUALIFIED_SQL,
+  leadflowScopeOf,
+} from '../crm-qualified-stages';
+import {
   type GoogleAdsConversionScope,
   conversionUploadsAvailable,
-  leadflowScopeOf,
 } from './google-ads-conversion-upload.service';
 
 const LOCK_KEY = 'google_ads_conversion_upload';
@@ -54,13 +58,14 @@ type Candidate = {
 
 /**
  * GA-CONV (D-G6, revised 2026-11-20): every 5 minutes, (1) finds Google-click
- * leads whose CRM deal reached the "qualified" stage or was won and queues one
+ * leads whose CRM deal reached a "qualified" stage or was won and queues one
  * row per `<opportunityId>:<kind>`, then (2) sends due rows to the Data
  * Manager API, one event per request, retrying up to 5 times.
  *
- * Neither CRM publishes an in-process event (the Agency CRM has none at all;
- * §7), so this reads state: a deal at or past the qualified stage of its
- * funnel counts. Only ids, click ids and codes are logged or stored.
+ * Neither CRM publishes an in-process event, so this reads state: a deal in,
+ * or that passed through, a stage classified as qualified counts
+ * (`crm-qualified-stages.ts`). Only ids, click ids and codes are logged or
+ * stored.
  * Brake: `SOCIAL_GOOGLE_ADS_CONVERSION_UPLOAD_ENABLED`.
  */
 @Injectable()
@@ -173,7 +178,6 @@ export class GoogleAdsConversionUploadWorker {
       ).map((row) => row.transactionId),
     );
 
-    const thresholds = await this.thresholds(scope, settings.qualifiedStageIds);
     const opportunities = new Map<string, ConversionOpportunity>();
     for (const crm of ['agency_sales', 'leadflow_crm'] as const) {
       const ids = candidates
@@ -189,7 +193,7 @@ export class GoogleAdsConversionUploadWorker {
         `${candidate.target}:${candidate.opportunityId}`,
       );
       if (!opportunity) continue;
-      for (const kind of earnedConversions(opportunity, thresholds)) {
+      for (const kind of earnedConversions(opportunity)) {
         const action = this.actionFor(settings, kind);
         const transactionId = transactionIdFor(opportunity.id, kind);
         if (!action || existing.has(transactionId)) continue;
@@ -438,30 +442,6 @@ export class GoogleAdsConversionUploadWorker {
     return candidates.filter((c) => !c.campaignId || own.has(c.campaignId));
   }
 
-  /** pipelineId → position of its configured "qualified" stage, both CRMs. */
-  private async thresholds(
-    scope: GoogleAdsConversionScope,
-    stageIds: string[],
-  ): Promise<Map<string, number>> {
-    const map = new Map<string, number>();
-    if (!Array.isArray(stageIds) || stageIds.length === 0) return map;
-    const rows = await this.dataSource.query<
-      Array<{ pipelineId: string; position: number }>
-    >(
-      `SELECT "pipeline_id" AS "pipelineId", "position"
-         FROM "agency_sales_stages"
-        WHERE "tenant_id" = $1 AND "workspace_id" = $2 AND "id" = ANY($3::uuid[])
-       UNION ALL
-       SELECT "pipeline_id" AS "pipelineId", "sort_order" AS "position"
-         FROM "crm_stages"
-        WHERE "tenant_id" = $1 AND "workspace_id" = $2 AND "id" = ANY($3::uuid[])
-          AND "deleted_at" IS NULL`,
-      [scope.tenantId, scope.workspaceId, stageIds],
-    );
-    for (const row of rows) map.set(row.pipelineId, Number(row.position));
-    return map;
-  }
-
   private async opportunities(
     crm: GoogleAdsConversionCrm,
     scope: GoogleAdsConversionScope,
@@ -472,8 +452,7 @@ export class GoogleAdsConversionUploadWorker {
       id: string;
       status: string;
       pipelineId: string;
-      stagePosition: number | null;
-      stageIsLost: boolean | null;
+      reachedQualified: boolean | null;
       wonAt: Date | null;
       valueAmount: string | number | null;
       currency: string | null;
@@ -482,7 +461,7 @@ export class GoogleAdsConversionUploadWorker {
       crm === 'agency_sales'
         ? await this.dataSource.query<Row[]>(
             `SELECT o."id", o."status", o."pipeline_id" AS "pipelineId",
-                    s."position" AS "stagePosition", (s."type" = 'lost') AS "stageIsLost",
+                    ${AGENCY_REACHED_QUALIFIED_SQL} AS "reachedQualified",
                     o."closed_at" AS "wonAt", o."amount_cents" / 100.0 AS "valueAmount",
                     o."currency"
                FROM "agency_sales_opportunities" o
@@ -492,7 +471,7 @@ export class GoogleAdsConversionUploadWorker {
           )
         : await this.dataSource.query<Row[]>(
             `SELECT o."id", o."status", o."pipeline_id" AS "pipelineId",
-                    s."sort_order" AS "stagePosition", s."is_lost_stage" AS "stageIsLost",
+                    ${LEADFLOW_REACHED_QUALIFIED_SQL} AS "reachedQualified",
                     o."won_at" AS "wonAt", o."value_amount" AS "valueAmount", o."currency"
                FROM "crm_opportunities" o
                LEFT JOIN "crm_stages" s ON s."id" = o."stage_id"
@@ -513,9 +492,7 @@ export class GoogleAdsConversionUploadWorker {
       id: row.id,
       status: row.status,
       pipelineId: row.pipelineId,
-      stagePosition:
-        row.stagePosition === null ? null : Number(row.stagePosition),
-      stageIsLost: row.stageIsLost === true,
+      reachedQualified: row.reachedQualified === true,
       wonAt: row.wonAt ? new Date(row.wonAt) : null,
       valueAmount: row.valueAmount === null ? null : Number(row.valueAmount),
       currency: row.currency,

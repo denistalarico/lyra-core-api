@@ -509,6 +509,9 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
       'freshness',
     ].map((path) => [`GET ${SA}/${path}`, analytics({ query: connection })]),
   ),
+  // AN-CRM — "Leads e vendas" (aggregates only); the handler admits only the
+  // company's Owner (owner decision, 2026-11-20).
+  [`GET ${SA}/crm-leads`]: analytics({ query: connection }),
   // G3 — GA4 read model: the list takes no id, every other read names its property.
   [`GET ${SA}/ga4/properties`]: analytics(),
   ...Object.fromEntries(

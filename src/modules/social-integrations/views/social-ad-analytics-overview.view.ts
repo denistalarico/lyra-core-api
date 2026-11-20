@@ -1,4 +1,11 @@
-import type { SocialAdChange, SocialAdKpis } from '../analytics/social-ad-kpi';
+import type {
+  SocialAdChange,
+  SocialAdKpis,
+  SocialAdRateKpis,
+} from '../analytics/social-ad-kpi';
+
+/** AN-CRM: every derived KPI the overview totals carry. */
+type SocialAdTotalsKpis = SocialAdKpis & SocialAdRateKpis;
 
 /**
  * Which grain the returned `reach` was measured at.
@@ -59,7 +66,7 @@ export type SocialAdInventoryCounts = {
   boosts: string;
 };
 
-export type SocialAdAnalyticsTotals = SocialAdKpis & {
+export type SocialAdAnalyticsTotals = SocialAdTotalsKpis & {
   spend: string;
   impressions: string;
   clicks: string;
@@ -165,6 +172,14 @@ export type SocialAdAnalyticsTotals = SocialAdKpis & {
    * `frequency`.
    */
   cpp: string | null;
+
+  /**
+   * AN-CRM (§6.1): Google Ads `interactions` and `all_conversions`, kept in
+   * `actions.extras`. Null when no day of the period carried them (always, on
+   * Meta): "not measured", not zero.
+   */
+  interactions: string | null;
+  allConversions: string | null;
 };
 
 /**

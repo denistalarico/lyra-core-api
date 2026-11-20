@@ -5,6 +5,7 @@ import {
   SocialAdKpiInputs,
   deriveChange,
   deriveSocialAdKpis,
+  deriveSocialAdRateKpis,
   derivePeriodReachKpis,
   divideScaled,
   formatDerived,
@@ -197,6 +198,15 @@ type AggregateRow = {
   fact_days: string | null;
   partial_days: string | null;
   currency: string | null;
+  /**
+   * AN-CRM: Google's `actions.extras` (no column), each with the count of days
+   * that carried it, so Meta (never carries them) reads null, not zero. Only
+   * the overview aggregate selects them.
+   */
+  interactions?: string | null;
+  interaction_days?: string | null;
+  all_conversions?: string | null;
+  all_conversion_days?: string | null;
 };
 
 /**
@@ -1380,6 +1390,10 @@ export class SocialAnalyticsReadService {
       optimizationGoal: entity?.optimizationGoal ?? null,
       billingEvent: entity?.billingEvent ?? null,
       destinationType: entity?.destinationType ?? null,
+      googleKind:
+        typeof entity?.metadata?.googleKind === 'string'
+          ? entity.metadata.googleKind
+          : null,
       archived: entity?.archivedAt != null,
       spend: formatAmountText(row.spend),
       impressions: toCount(row.impressions).toString(),
@@ -1517,6 +1531,24 @@ export class SocialAnalyticsReadService {
       // the same currency, and MAX avoids a GROUP BY that would split the
       // aggregate if a legacy row disagreed.
       .addSelect('MAX(fact.currency)', 'currency')
+      // AN-CRM: Google extras, guarded so a malformed JSON value is skipped
+      // rather than failing the cast for the whole period.
+      .addSelect(
+        `SUM(CASE WHEN fact.actions->'extras'->>'interactions' ~ '^[0-9]{1,15}$' THEN (fact.actions->'extras'->>'interactions')::numeric END)`,
+        'interactions',
+      )
+      .addSelect(
+        `COUNT(*) FILTER (WHERE fact.actions->'extras'->>'interactions' ~ '^[0-9]{1,15}$')`,
+        'interaction_days',
+      )
+      .addSelect(
+        `SUM(CASE WHEN fact.actions->'extras'->>'allConversions' ~ '^[0-9]{1,12}(\\.[0-9]{1,6})?$' THEN (fact.actions->'extras'->>'allConversions')::numeric END)`,
+        'all_conversions',
+      )
+      .addSelect(
+        `COUNT(*) FILTER (WHERE fact.actions->'extras'->>'allConversions' ~ '^[0-9]{1,12}(\\.[0-9]{1,6})?$')`,
+        'all_conversion_days',
+      )
       .where('fact.connection_id = :connectionId', { connectionId })
       .andWhere('fact.entity_level = :level', { level: OVERVIEW_ENTITY_LEVEL })
       .andWhere('fact.source = :source', { source: OVERVIEW_SOURCE })
@@ -1637,6 +1669,20 @@ export class SocialAnalyticsReadService {
           ? null
           : periodReach.measuredAt.toISOString(),
       ...deriveSocialAdKpis(inputs),
+      // AN-CRM (§6.1): Google extras, null where no day carried them.
+      interactions:
+        toCount(row.interaction_days) > 0n
+          ? toCount(row.interactions).toString()
+          : null,
+      allConversions:
+        toCount(row.all_conversion_days) > 0n
+          ? formatAmountText(row.all_conversions)
+          : null,
+      ...deriveSocialAdRateKpis({
+        ...inputs,
+        interactions:
+          toCount(row.interaction_days) > 0n ? toCount(row.interactions) : null,
+      }),
       // Derived here rather than inside `deriveSocialAdKpis` because their
       // denominator is the measured period reach, which is not one of its summed
       // inputs and must not become one. Null wherever that measurement is

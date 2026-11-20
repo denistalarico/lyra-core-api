@@ -8,8 +8,9 @@ import {
 
 /**
  * GA-CONV (D-G6, revised 2026-11-20): per Google Ads connection, which
- * `UPLOAD_CLICKS` actions receive "qualified" and "won", and which stage of
- * each funnel (Agency or LeadFlow CRM) counts as qualified. Off by default.
+ * `UPLOAD_CLICKS` actions receive "qualified" and "won". Which stages are
+ * qualified is the stage's class in each CRM (`crm-qualified-stages.ts`), not
+ * a setting here. Off by default.
  */
 @Entity('google_ads_conversion_upload_settings')
 export class GoogleAdsConversionUploadSettingsEntity {
@@ -49,13 +50,6 @@ export class GoogleAdsConversionUploadSettingsEntity {
     nullable: true,
   })
   wonActionResource!: string | null;
-
-  @Column({
-    name: 'qualified_stage_ids',
-    type: 'jsonb',
-    default: () => "'[]'::jsonb",
-  })
-  qualifiedStageIds!: string[];
 
   @Column({ name: 'send_value', type: 'boolean', default: true })
   sendValue!: boolean;

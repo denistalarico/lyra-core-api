@@ -15,62 +15,38 @@ const base: ConversionOpportunity = {
   id: '00000000-0000-4000-8000-0000000000aa',
   status: 'open',
   pipelineId: 'p1',
-  stagePosition: 1,
-  stageIsLost: false,
+  reachedQualified: false,
   wonAt: null,
   valueAmount: 2500,
   currency: 'brl',
 };
-const thresholds = new Map([['p1', 2]]);
 
 describe('GA-CONV rules (D-G6 revised)', () => {
-  it('earns nothing before the qualified stage', () => {
-    expect(earnedConversions(base, thresholds)).toEqual([]);
+  it('earns nothing before a qualified stage', () => {
+    expect(earnedConversions(base)).toEqual([]);
   });
 
-  it('earns qualified at the configured stage', () => {
+  it('earns qualified once the deal reached a qualified stage', () => {
+    expect(earnedConversions({ ...base, reachedQualified: true })).toEqual([
+      'qualified',
+    ]);
+  });
+
+  it('keeps qualified when the deal was lost after the stage', () => {
     expect(
-      earnedConversions({ ...base, stagePosition: 2 }, thresholds),
+      earnedConversions({ ...base, status: 'lost', reachedQualified: true }),
     ).toEqual(['qualified']);
   });
 
-  it('earns qualified past the stage (moved on between two sweeps)', () => {
-    expect(
-      earnedConversions({ ...base, stagePosition: 5 }, thresholds),
-    ).toEqual(['qualified']);
+  it('earns qualified and won when won, even if it skipped the stage', () => {
+    expect(earnedConversions({ ...base, status: 'won' })).toEqual([
+      'qualified',
+      'won',
+    ]);
   });
 
-  it('earns qualified and won when won, even without a configured funnel', () => {
-    expect(
-      earnedConversions(
-        { ...base, status: 'won', pipelineId: 'other' },
-        thresholds,
-      ),
-    ).toEqual(['qualified', 'won']);
-  });
-
-  it('earns nothing when lost or in a lost stage', () => {
-    expect(
-      earnedConversions(
-        { ...base, status: 'lost', stagePosition: 9 },
-        thresholds,
-      ),
-    ).toEqual([]);
-    expect(
-      earnedConversions(
-        { ...base, stagePosition: 9, stageIsLost: true },
-        thresholds,
-      ),
-    ).toEqual([]);
-  });
-
-  it('earns nothing in a funnel with no qualified stage', () => {
-    expect(
-      earnedConversions(
-        { ...base, pipelineId: 'other', stagePosition: 9 },
-        thresholds,
-      ),
-    ).toEqual([]);
+  it('earns nothing when lost without ever being qualified', () => {
+    expect(earnedConversions({ ...base, status: 'lost' })).toEqual([]);
   });
 
   it('builds the transaction id Google deduplicates on', () => {

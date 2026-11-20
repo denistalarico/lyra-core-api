@@ -29,33 +29,28 @@ export type ConversionOpportunity = {
   id: string;
   status: string;
   pipelineId: string;
-  /** Agency `position` / LeadFlow `sort_order` of the current stage. */
-  stagePosition: number | null;
-  stageIsLost: boolean;
+  /**
+   * Is, or was, in a stage classified as qualified (`crm-qualified-stages.ts`).
+   * A class, never a position nor a name (owner decision, 2026-11-20).
+   */
+  reachedQualified: boolean;
   wonAt: Date | null;
   /** Major units (e.g. reais). */
   valueAmount: number | null;
   currency: string | null;
 };
 
-/** pipelineId → position of the stage configured as "qualified" in it. */
-export type QualifiedThresholds = ReadonlyMap<string, number>;
-
 /**
  * Which conversions an opportunity has earned now.
  * - won → qualified and won (a sale was qualified, even if it skipped the stage);
- * - open, not in a lost stage, at or past the funnel's qualified stage →
- *   qualified. "At or past" keeps a card that moved on between two sweeps.
+ * - reached a qualified stage → qualified, even if it moved on or was lost
+ *   later: the lead was qualified, and that is what the action measures.
  */
 export function earnedConversions(
   opportunity: ConversionOpportunity,
-  thresholds: QualifiedThresholds,
 ): GoogleAdsConversionKind[] {
   if (opportunity.status === 'won') return ['qualified', 'won'];
-  if (opportunity.status !== 'open' || opportunity.stageIsLost) return [];
-  const threshold = thresholds.get(opportunity.pipelineId);
-  if (threshold === undefined || opportunity.stagePosition === null) return [];
-  return opportunity.stagePosition >= threshold ? ['qualified'] : [];
+  return opportunity.reachedQualified ? ['qualified'] : [];
 }
 
 export function transactionIdFor(
@@ -66,8 +61,8 @@ export function transactionIdFor(
 }
 
 /**
- * When the conversion happened. Won uses the CRM's close time; qualified has
- * no stage history in the Agency CRM, so the sweep's own time stands in. The
+ * When the conversion happened. Won uses the CRM's close time; qualified uses
+ * the sweep's own time (the first sweep after the deal reached the stage). The
  * Data Manager refuses a conversion before the click or in the future.
  */
 export function conversionMoment(

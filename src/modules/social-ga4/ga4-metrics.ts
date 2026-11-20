@@ -22,6 +22,8 @@ export type Ga4Totals = Omit<Ga4Sums, 'sessionSeconds'> & {
   engagementRate: number | null;
   /** Session-weighted mean, in seconds; null with no sessions. */
   avgSessionSeconds: number | null;
+  /** AN-CRM (§6.4): Σ key events ÷ Σ sessions; null with no sessions. */
+  keyEventRate: number | null;
 };
 
 export const EMPTY_GA4_SUMS: Ga4Sums = {
@@ -44,6 +46,7 @@ export function toGa4Totals(sums: Ga4Sums): Ga4Totals {
       sums.sessions > 0 ? sums.engagedSessions / sums.sessions : null,
     avgSessionSeconds:
       sums.sessions > 0 ? sessionSeconds / sums.sessions : null,
+    keyEventRate: sums.sessions > 0 ? sums.keyEvents / sums.sessions : null,
   };
 }
 

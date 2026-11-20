@@ -10,13 +10,18 @@ import {
 /**
  * D4: the structural role a stage plays in the pipeline. Independent from the
  * legacy `type`/`is_*_stage` flags (which Agency Sales still uses). Multiple
- * `qualification`/`follow_up`/`contacted`/`custom` stages are allowed;
- * `entry`/`won`/`lost`/`handoff` are unique per pipeline.
+ * `qualification`/`qualified`/`follow_up`/`contacted`/`custom` stages are
+ * allowed; `entry`/`won`/`lost`/`handoff` are unique per pipeline.
+ *
+ * `qualification` is "being qualified"; `qualified` (AN-CRM, 2026-11-20) is
+ * "the lead is qualified": the class the Social Analytics and the Google Ads
+ * conversion upload count, never a position or a stage name.
  */
 export type CrmStageRole =
   | 'entry'
   | 'contacted'
   | 'qualification'
+  | 'qualified'
   | 'handoff'
   | 'follow_up'
   | 'won'
@@ -27,6 +32,7 @@ export const CRM_STAGE_ROLES: readonly CrmStageRole[] = [
   'entry',
   'contacted',
   'qualification',
+  'qualified',
   'handoff',
   'follow_up',
   'won',

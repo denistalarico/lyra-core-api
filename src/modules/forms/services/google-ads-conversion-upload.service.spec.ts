@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { UnprocessableEntityException } from '@nestjs/common';
 import { agencyEntities } from '../../../config/typeorm.config';
 import { GoogleAdsConversionUploadEntity } from '../entities/google-ads-conversion-upload.entity';
 import { GoogleAdsConversionUploadSettingsEntity } from '../entities/google-ads-conversion-upload-settings.entity';
@@ -16,7 +15,11 @@ const CONNECTION = '00000000-0000-4000-8000-0000000000c1';
 const ACTION_Q = 'customers/1112223334/conversionActions/11';
 const ACTION_W = 'customers/1112223334/conversionActions/22';
 
-function setup(current: Record<string, unknown> | null = null) {
+function setup(
+  current: Record<string, unknown> | null = null,
+  options: { classified?: boolean } = {},
+) {
+  const classified = options.classified ?? true;
   const settings = {
     findOne: jest.fn().mockResolvedValue(current),
     create: jest.fn((row: Record<string, unknown>) => ({ ...row })),
@@ -48,32 +51,34 @@ function setup(current: Record<string, unknown> | null = null) {
   const dataSource = {
     query: jest.fn((sql: string) =>
       Promise.resolve(
-        sql.includes('agency_sales_pipelines')
-          ? [
-              {
-                pipelineId: 'pa',
-                pipelineName: 'Vendas',
-                id: 'sa1',
-                name: 'Qualificado',
-                position: 2,
-              },
-              {
-                pipelineId: 'pa',
-                pipelineName: 'Vendas',
-                id: 'sa2',
-                name: 'Proposta',
-                position: 3,
-              },
-            ]
-          : [
-              {
-                pipelineId: 'pl',
-                pipelineName: 'LeadFlow',
-                id: 'sl1',
-                name: 'Qualificado',
-                position: 1,
-              },
-            ],
+        !classified
+          ? []
+          : sql.includes('agency_sales_pipelines')
+            ? [
+                {
+                  pipelineId: 'pa',
+                  pipelineName: 'Vendas',
+                  id: 'sa1',
+                  name: 'Qualificado',
+                  position: 2,
+                },
+                {
+                  pipelineId: 'pa',
+                  pipelineName: 'Vendas',
+                  id: 'sa2',
+                  name: 'Proposta',
+                  position: 3,
+                },
+              ]
+            : [
+                {
+                  pipelineId: 'pl',
+                  pipelineName: 'LeadFlow',
+                  id: 'sl1',
+                  name: 'Qualificado',
+                  position: 1,
+                },
+              ],
       ),
     ),
   };
@@ -111,7 +116,7 @@ function setup(current: Record<string, unknown> | null = null) {
     credentials as never,
     googleAds as never,
   );
-  return { service, settings, googleAds };
+  return { service, settings, googleAds, dataSource };
 }
 
 describe('GoogleAdsConversionUploadService (GA-CONV §5.4)', () => {
@@ -121,9 +126,11 @@ describe('GoogleAdsConversionUploadService (GA-CONV §5.4)', () => {
       enabled: false,
       qualifiedActionResource: null,
       wonActionResource: null,
-      qualifiedStageIds: [],
       sendValue: true,
     });
+    expect(await service.get(scope, CONNECTION)).not.toHaveProperty(
+      'qualifiedStageIds',
+    );
   });
 
   it('refuses a connection outside the scope or of another provider', async () => {
@@ -140,8 +147,8 @@ describe('GoogleAdsConversionUploadService (GA-CONV §5.4)', () => {
     ).rejects.toThrow('conversion_action_required');
   });
 
-  it('requires a qualified stage with the qualified action', async () => {
-    const { service } = setup();
+  it('requires a stage classified as qualified with the qualified action', async () => {
+    const { service } = setup(null, { classified: false });
     await expect(
       service.update(scope, 'u1', {
         connectionId: CONNECTION,
@@ -150,37 +157,47 @@ describe('GoogleAdsConversionUploadService (GA-CONV §5.4)', () => {
     ).rejects.toThrow('qualified_stage_required');
   });
 
-  it('refuses two qualified stages in one funnel and stages outside the scope', async () => {
-    const { service } = setup();
-    await expect(
-      service.update(scope, 'u1', {
-        connectionId: CONNECTION,
-        qualifiedActionResource: ACTION_Q,
-        qualifiedStageIds: ['sa1', 'sa2'],
-      }),
-    ).rejects.toThrow('qualified_stage_duplicate_pipeline');
-    await expect(
-      service.update(scope, 'u1', {
-        connectionId: CONNECTION,
-        qualifiedActionResource: ACTION_Q,
-        qualifiedStageIds: ['other-scope'],
-      }),
-    ).rejects.toBeInstanceOf(UnprocessableEntityException);
-  });
-
-  it('saves one stage per funnel across both CRMs', async () => {
+  it('saves the actions when some stage is classified as qualified', async () => {
     const { service } = setup();
     const view = await service.update(scope, 'u1', {
       connectionId: CONNECTION,
       enabled: true,
       qualifiedActionResource: ACTION_Q,
       wonActionResource: ACTION_W,
-      qualifiedStageIds: ['sa1', 'sl1'],
     });
     expect(view).toMatchObject({
       enabled: true,
-      qualifiedStageIds: ['sa1', 'sl1'],
+      qualifiedActionResource: ACTION_Q,
     });
+  });
+
+  it('lists the classified stages of both CRMs, by class and never by position', async () => {
+    const { service, dataSource } = setup();
+    const groups = await service.stages(scope);
+    expect(groups.map((group) => [group.crm, group.stages.length])).toEqual([
+      ['agency_sales', 2],
+      ['leadflow_crm', 1],
+    ]);
+    const [agencySql, leadflowSql] = dataSource.query.mock.calls.map(
+      ([sql]) => sql,
+    );
+    expect(agencySql).toContain(
+      `s."type" IN ('qualified', 'proposal', 'negotiation')`,
+    );
+    expect(leadflowSql).toContain(`s."role" = 'qualified'`);
+  });
+
+  it('skips the Agency CRM in a client context', async () => {
+    const { service, dataSource } = setup();
+    await service.stages({
+      ...scope,
+      agencyClientId: '00000000-0000-4000-8000-0000000000a1',
+    });
+    expect(
+      dataSource.query.mock.calls.some(([sql]) =>
+        sql.includes('agency_sales_stages'),
+      ),
+    ).toBe(false);
   });
 
   it('keeps absent fields and clears with null', async () => {
@@ -189,7 +206,6 @@ describe('GoogleAdsConversionUploadService (GA-CONV §5.4)', () => {
       enabled: true,
       qualifiedActionResource: ACTION_Q,
       wonActionResource: ACTION_W,
-      qualifiedStageIds: ['sa1'],
       sendValue: false,
     });
     const view = await service.update(scope, 'u1', {
@@ -199,7 +215,6 @@ describe('GoogleAdsConversionUploadService (GA-CONV §5.4)', () => {
     expect(view).toMatchObject({
       qualifiedActionResource: ACTION_Q,
       wonActionResource: null,
-      qualifiedStageIds: ['sa1'],
       sendValue: false,
     });
   });

@@ -33,6 +33,7 @@ import { SocialAnalyticsController } from '../social-integrations/social-analyti
 import { SocialOrganicAnalyticsController } from '../social-organic/analytics/social-organic-analytics.controller';
 import { SocialAnalyticsDashboardsController } from '../social-analytics-dashboards/social-analytics-dashboards.controller';
 import { Ga4AnalyticsController } from '../social-ga4/ga4-analytics.controller';
+import { SocialAnalyticsCrmController } from '../forms/social-analytics-crm.controller';
 import { SocialAnalyticsReportsController } from '../social-analytics-dashboards/social-analytics-reports.controller';
 import { DestinationCreativeController } from '../social-organic/publication/destination-creative.controller';
 import { SocialPublicationController } from '../social-organic/publication/social-publication.controller';
@@ -61,6 +62,8 @@ export const SOCIAL_CLIENT_AREA_CONTROLLERS = [
   SocialAnalyticsDashboardsController,
   SocialAnalyticsReportsController,
   Ga4AnalyticsController,
+  // AN-CRM — "Leads e vendas" (Owner only, checked in the handler).
+  SocialAnalyticsCrmController,
 ];
 
 const VERBS: Partial<Record<RequestMethod, string>> = {

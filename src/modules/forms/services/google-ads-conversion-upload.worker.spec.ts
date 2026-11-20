@@ -20,7 +20,6 @@ const settingsRow = {
   enabled: true,
   qualifiedActionResource: 'customers/1112223334/conversionActions/11',
   wonActionResource: 'customers/1112223334/conversionActions/22',
-  qualifiedStageIds: ['stage-q'],
   sendValue: true,
 };
 
@@ -96,16 +95,13 @@ function setup(
       ]);
     if (sql.includes('"social_ad_entities"'))
       return Promise.resolve([{ externalId: '24460619718' }]);
-    if (sql.includes('UNION ALL'))
-      return Promise.resolve([{ pipelineId: 'p-agency', position: 2 }]);
     if (sql.includes('"agency_sales_opportunities"'))
       return Promise.resolve([
         {
           id: AGENCY_OPP,
           status: 'open',
           pipelineId: 'p-agency',
-          stagePosition: 3,
-          stageIsLost: false,
+          reachedQualified: true,
           wonAt: null,
           valueAmount: 900,
           currency: 'BRL',
@@ -114,8 +110,7 @@ function setup(
           id: FOREIGN_OPP,
           status: 'won',
           pipelineId: 'p-agency',
-          stagePosition: 9,
-          stageIsLost: false,
+          reachedQualified: false,
           wonAt: null,
           valueAmount: 900,
           currency: 'BRL',
@@ -127,8 +122,7 @@ function setup(
           id: LEADFLOW_OPP,
           status: 'won',
           pipelineId: 'p-lf',
-          stagePosition: 7,
-          stageIsLost: false,
+          reachedQualified: false,
           wonAt: new Date('2026-11-15T10:00:00Z'),
           valueAmount: '1500.50',
           currency: 'BRL',
@@ -219,7 +213,7 @@ describe('GoogleAdsConversionUploadWorker (GA-CONV)', () => {
     expect(settings.find).not.toHaveBeenCalled();
   });
 
-  it('queues qualified for a deal past the stage and qualified+won for a won deal', async () => {
+  it('queues qualified for a deal that reached a qualified stage and qualified+won for a won deal', async () => {
     const { worker, inserted } = setup();
     await worker.run(NOW);
     expect(
@@ -234,6 +228,29 @@ describe('GoogleAdsConversionUploadWorker (GA-CONV)', () => {
       [`${LEADFLOW_OPP}:won`, settingsRow.wonActionResource, '1500.50'],
     ]);
     expect(inserted[2].conversionAt).toEqual(new Date('2026-11-15T10:00:00Z'));
+  });
+
+  it('detects "qualified" by the stage class and its history, never by position', async () => {
+    const { worker, query } = setup();
+    await worker.run(NOW);
+    const sqlOf = (table: string) =>
+      String(
+        query.mock.calls.find(([sql]) =>
+          String(sql).includes(`FROM "${table}" o`),
+        )?.[0],
+      );
+    const agency = sqlOf('agency_sales_opportunities');
+    expect(agency).toContain(
+      `s."type" IN ('qualified', 'proposal', 'negotiation')`,
+    );
+    expect(agency).toContain('"agency_sales_opportunity_events"');
+    const leadflow = sqlOf('crm_opportunities');
+    expect(leadflow).toContain(`s."role" = 'qualified'`);
+    expect(leadflow).toContain('"crm_opportunity_events"');
+    for (const sql of [agency, leadflow]) {
+      expect(sql).not.toContain('"position" AS');
+      expect(sql).not.toContain('"sort_order" AS');
+    }
   });
 
   it('skips a lead whose campaign belongs to another connection', async () => {

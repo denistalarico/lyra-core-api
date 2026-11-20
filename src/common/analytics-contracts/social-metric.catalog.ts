@@ -173,6 +173,42 @@ export const METRIC_IDS = [
   "ga_key_events",
   "ga_revenue",
   "ga_page_views",
+  // AN-CRM (plano 18/11 §6). Tables (`leads_by_campaign`, search terms, asset
+  // groups…) are table sources and funnels are card configurations, not
+  // metrics: only scalars and distributions are listed here.
+  // §6.4: GA4 dimensions already synced, and one rate.
+  "ga_key_event_rate",
+  "ga_sessions_by_source",
+  "ga_users_by_device",
+  // AN-CRM (§6.1): Google Ads.
+  "interactions",
+  "interaction_rate",
+  "all_conversions",
+  "conversion_rate",
+  "value_per_conversion",
+  "video_view_rate",
+  "cost_per_view",
+  "search_impression_share",
+  "top_impression_rate",
+  "conversions_by_network",
+  "spend_by_network",
+  "conversions_by_action",
+  "conversions_by_device",
+  "conversions_by_hour",
+  // AN-CRM (§6.2, D-A1): leads and sales in the CRM, from the Forms port.
+  "crm_leads",
+  "crm_qualified",
+  "crm_won",
+  "crm_won_value",
+  "cost_per_crm_lead",
+  "cost_per_qualified",
+  "real_roas",
+  "lead_to_sale_rate",
+  // AN-CRM (§6.3): Meta Ads gaps.
+  "outbound_clicks",
+  "outbound_ctr",
+  "unique_clicks",
+  "unique_ctr",
 ] as const;
 
 export type MetricId = (typeof METRIC_IDS)[number];
@@ -212,7 +248,13 @@ export type MetricSource =
    * Site traffic from the GA4 read model (G3). Not an ad account: sessions and
    * key events of a property, in the property's own time zone and currency.
    */
-  | "ga4";
+  | "ga4"
+  /**
+   * AN-CRM (D-A1): leads and sales in the CRM, read through the Forms port
+   * (`GET social/analytics/crm-leads`). People, not platform conversions: the
+   * two sit side by side and are never added.
+   */
+  | "crm";
 
 /**
  * The shape a metric's reading actually has, which decides the card that can
@@ -279,7 +321,14 @@ export type MetricGrain =
    * sessions and key events come from the same report and the same cohort, so
    * the funnel's step-to-step rates between them are legitimate.
    */
-  | "ga4_period";
+  | "ga4_period"
+  /**
+   * AN-CRM: the leads that arrived in the period (one per opportunity), and how
+   * many of *those* are qualified / won now. One cohort, so leads → qualified
+   * → sales rates are real; against platform clicks or conversions they are
+   * not (another counting unit and another attribution), so no rate crosses.
+   */
+  | "crm_lead_cohort";
 
 export type MetricDefinition = {
   id: MetricId;
@@ -374,6 +423,16 @@ const GA4_ONLY: ChannelId[] = ["ga4"];
 
 /** Metrics only a YouTube channel answers. */
 const YOUTUBE_ONLY: ChannelId[] = ["youtube"];
+
+/** Metrics only Google Ads answers (AN-CRM, §6.1). */
+const GOOGLE_ADS_ONLY: ChannelId[] = ["google_ads"];
+
+/**
+ * CRM figures (§6.2): the two ad channels whose leads enter through the Forms
+ * (D-L1). Not `summary`: a summary card is its own `summary_` id, like every
+ * other figure of that block, so the "Leads e vendas" sub-block gets its own.
+ */
+const CRM_CHANNELS: ChannelId[] = ["google_ads", "meta_ads"];
 
 /**
  * Organic figures a YouTube channel answers with the same meaning as Meta's:
@@ -1993,6 +2052,398 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     availability: "available",
     grain: "ga4_period",
   },
+  // ── AN-CRM (plano 18/11 §6.4): GA4 ─────────────────────────────────────
+  {
+    id: "ga_key_event_rate",
+    label: "Taxa de eventos-chave",
+    description:
+      "Eventos-chave divididos pelas sessões do período inteiro. Recalculada a partir dos dois totais, nunca somada entre dias.",
+    channels: GA4_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+  },
+  {
+    id: "ga_sessions_by_source",
+    label: "Sessões por origem/mídia",
+    description:
+      "De onde vieram as visitas ao site (origem / mídia), segundo o Google Analytics.",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "neutral",
+    additive: false,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+    shape: "distribution",
+  },
+  {
+    id: "ga_users_by_device",
+    label: "Usuários por dispositivo",
+    description:
+      "Usuários do site por tipo de dispositivo (computador, celular, tablet).",
+    channels: GA4_ONLY,
+    format: "integer",
+    polarity: "neutral",
+    additive: false,
+    source: "ga4",
+    availability: "available",
+    grain: "ga4_period",
+    shape: "distribution",
+  },
+
+  // ── AN-CRM (§6.1): Google Ads ──────────────────────────────────────────
+  //
+  // `interactions` and `all_conversions` come from `actions.extras` (already
+  // stored by the Google sync); the rates are derived on read by
+  // `deriveSocialAdRateKpis`. The GA-DET breakdowns are stored per campaign
+  // and the Analytics does not read them yet, so they stay `not_integrated`;
+  // impression share, device, hour and video quartiles were never ingested.
+  {
+    id: "interactions",
+    label: "Interações",
+    description:
+      "Cliques, visualizações de vídeo e outras interações principais com os anúncios, como o Google conta.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "paid",
+    availability: "available",
+    grain: "paid_period",
+  },
+  {
+    id: "interaction_rate",
+    label: "Taxa de interação",
+    description: "Interações divididas pelas impressões do período.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "available",
+    grain: "paid_period",
+  },
+  {
+    id: "all_conversions",
+    label: "Todas as conversões",
+    description:
+      "Todas as conversões que o Google registrou, inclusive as que não são principais. O Google pode dividir uma conversão entre cliques, então o número pode ter frações.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "paid",
+    availability: "available",
+    grain: "paid_period",
+  },
+  {
+    id: "conversion_rate",
+    label: "Taxa de conversão",
+    description: "Conversões divididas pelos cliques do período.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "available",
+    grain: "paid_period",
+  },
+  {
+    id: "value_per_conversion",
+    label: "Valor por conversão",
+    description: "Valor de conversão dividido pelas conversões do período.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "currency",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "available",
+    grain: "paid_period",
+  },
+  {
+    id: "video_view_rate",
+    label: "Taxa de visualização de vídeo",
+    description:
+      "Visualizações de vídeo divididas pelas impressões do período.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "available",
+    grain: "paid_period",
+  },
+  {
+    id: "cost_per_view",
+    label: "Custo por visualização",
+    description: "Valor investido dividido pelas visualizações de vídeo.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "currency",
+    polarity: "lower_is_better",
+    additive: false,
+    source: "paid",
+    availability: "available",
+    grain: "paid_period",
+  },
+  {
+    id: "search_impression_share",
+    label: "Parcela de impressões (Pesquisa)",
+    description:
+      "Das vezes em que seus anúncios de Pesquisa podiam aparecer, em quantas apareceram. Ainda não coletada.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period",
+  },
+  {
+    id: "top_impression_rate",
+    label: "Impressões no topo",
+    description:
+      "Parte das impressões que apareceram acima dos resultados orgânicos. Ainda não coletada.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period",
+  },
+  {
+    id: "conversions_by_network",
+    label: "Conversões por canal",
+    description:
+      "Onde as conversões aconteceram (Pesquisa, YouTube, Display…). Ainda não lida pelo Analytics: o detalhamento é gravado por campanha (GA-DET) e aparece no painel Detalhamento da campanha.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "integer",
+    polarity: "neutral",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period",
+    shape: "distribution",
+  },
+  {
+    id: "spend_by_network",
+    label: "Gasto por canal",
+    description:
+      "Onde o investimento foi gasto (Pesquisa, YouTube, Display…). Ainda não lida pelo Analytics: o detalhamento é gravado por campanha (GA-DET) e aparece no painel Detalhamento da campanha.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "currency",
+    polarity: "neutral",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period",
+    shape: "distribution",
+  },
+  {
+    id: "conversions_by_action",
+    label: "Conversões por tipo",
+    description:
+      "Quais ações de conversão foram registradas. Ainda não lida pelo Analytics: o detalhamento é gravado por campanha (GA-DET) e aparece no painel Detalhamento da campanha.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "integer",
+    polarity: "neutral",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period",
+    shape: "distribution",
+  },
+  {
+    id: "conversions_by_device",
+    label: "Conversões por dispositivo",
+    description: "Conversões por tipo de dispositivo. Ainda não coletada.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "integer",
+    polarity: "neutral",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period",
+    shape: "distribution",
+  },
+  {
+    id: "conversions_by_hour",
+    label: "Conversões por hora",
+    description: "Conversões por hora do dia. Ainda não coletada.",
+    channels: GOOGLE_ADS_ONLY,
+    format: "integer",
+    polarity: "neutral",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "snapshot",
+    shape: "distribution",
+  },
+
+  // ── AN-CRM (§6.2, D-A1): leads e vendas no CRM ─────────────────────────
+  //
+  // Read from `GET social/analytics/crm-leads` (one ad connection), which
+  // takes the CRM side only from the Forms port `FormsLeadFactsReadService`.
+  {
+    id: "crm_leads",
+    label: "Leads no CRM",
+    description:
+      "Pessoas que chegaram ao CRM pelos formulários de anúncio no período (uma por oportunidade). Não somar com as conversões da plataforma: a plataforma conta por clique e pode atribuir frações; o CRM conta pessoas.",
+    channels: CRM_CHANNELS,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "crm",
+    availability: "available",
+    grain: "crm_lead_cohort",
+  },
+  {
+    id: "crm_qualified",
+    label: "Leads qualificados",
+    description:
+      "Dos leads do período, quantos estão hoje na etapa de qualificação do funil ou depois dela (sem estarem perdidos), ou já foram ganhos. Sem etapa configurada, o card pede para configurar a etapa de qualificação.",
+    channels: CRM_CHANNELS,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "crm",
+    availability: "available",
+    grain: "crm_lead_cohort",
+  },
+  {
+    id: "crm_won",
+    label: "Vendas",
+    description:
+      "Dos leads do período, quantos viraram oportunidade ganha no CRM.",
+    channels: CRM_CHANNELS,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "crm",
+    availability: "available",
+    grain: "crm_lead_cohort",
+  },
+  {
+    id: "crm_won_value",
+    label: "Valor vendido",
+    description: "Soma do valor das oportunidades ganhas dos leads do período.",
+    channels: CRM_CHANNELS,
+    format: "currency",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "crm",
+    availability: "available",
+    grain: "crm_lead_cohort",
+  },
+  {
+    id: "cost_per_crm_lead",
+    label: "Custo por lead (CRM)",
+    description: "Valor investido dividido pelos leads que chegaram ao CRM.",
+    channels: CRM_CHANNELS,
+    format: "currency",
+    polarity: "lower_is_better",
+    additive: false,
+    source: "crm",
+    availability: "available",
+    grain: "crm_lead_cohort",
+  },
+  {
+    id: "cost_per_qualified",
+    label: "Custo por lead qualificado",
+    description: "Valor investido dividido pelos leads qualificados.",
+    channels: CRM_CHANNELS,
+    format: "currency",
+    polarity: "lower_is_better",
+    additive: false,
+    source: "crm",
+    availability: "available",
+    grain: "crm_lead_cohort",
+  },
+  {
+    id: "real_roas",
+    label: "ROAS real",
+    description:
+      "Valor vendido no CRM dividido pelo valor investido nos anúncios.",
+    channels: CRM_CHANNELS,
+    format: "ratio",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "crm",
+    availability: "available",
+    grain: "crm_lead_cohort",
+  },
+  {
+    id: "lead_to_sale_rate",
+    label: "Taxa lead → venda",
+    description: "Vendas divididas pelos leads do período.",
+    channels: CRM_CHANNELS,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "crm",
+    availability: "available",
+    grain: "crm_lead_cohort",
+  },
+
+  // ── AN-CRM (§6.3): lacunas do Meta Ads ─────────────────────────────────
+  //
+  // The Meta insights reader does not request these fields yet, so there is
+  // no stored figure behind them.
+  {
+    id: "outbound_clicks",
+    label: "Cliques de saída",
+    description:
+      "Cliques que levaram a pessoa para fora do Facebook ou do Instagram. Ainda não coletada.",
+    channels: META_ADS_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period",
+  },
+  {
+    id: "outbound_ctr",
+    label: "CTR de saída",
+    description:
+      "Cliques de saída divididos pelas impressões. Ainda não coletada.",
+    channels: META_ADS_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period",
+  },
+  {
+    id: "unique_clicks",
+    label: "Cliques únicos",
+    description:
+      "Pessoas que clicaram, sem repetir quem clicou mais de uma vez. Não se soma entre dias. Ainda não coletada.",
+    channels: META_ADS_ONLY,
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period_deduplicated",
+  },
+  {
+    id: "unique_ctr",
+    label: "CTR único",
+    description: "Cliques únicos divididos pelo alcance. Ainda não coletada.",
+    channels: META_ADS_ONLY,
+    format: "percent",
+    polarity: "higher_is_better",
+    additive: false,
+    source: "paid",
+    availability: "not_integrated",
+    grain: "paid_period_deduplicated",
+  },
 ];
 
 /**
@@ -2055,6 +2506,7 @@ const COMPARABLE_GRAINS: Record<MetricGrain, MetricGrain[]> = {
   snapshot: [],
   event_window: [],
   ga4_period: ["ga4_period"],
+  crm_lead_cohort: ["crm_lead_cohort"],
 };
 
 export function grainsAreComparable(a: MetricGrain, b: MetricGrain): boolean {

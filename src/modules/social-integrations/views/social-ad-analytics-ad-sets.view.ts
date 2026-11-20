@@ -44,6 +44,13 @@ export type SocialAdAdSetRow = SocialAdKpis & {
   billingEvent: string | null;
   destinationType: string | null;
 
+  /**
+   * AN-CRM (§6.1, D-G1): Google's `metadata.googleKind` (`asset_group` for a
+   * PMax asset group, `ad_group` otherwise); null on Meta and when the mirror
+   * has not seen the object. Lets the "Grupos de recursos" table filter.
+   */
+  googleKind: string | null;
+
   archived: boolean;
 
   spend: string;

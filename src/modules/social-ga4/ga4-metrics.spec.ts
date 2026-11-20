@@ -33,6 +33,17 @@ describe('GA4 period arithmetic', () => {
     expect(toGa4Totals(EMPTY_GA4_SUMS).engagementRate).toBeNull();
   });
 
+  it('computes the key event rate as Σ key events ÷ Σ sessions (AN-CRM)', () => {
+    const totals = toGa4Totals({
+      ...EMPTY_GA4_SUMS,
+      sessions: 400,
+      keyEvents: 20,
+    });
+
+    expect(totals.keyEventRate).toBeCloseTo(0.05);
+    expect(toGa4Totals(EMPTY_GA4_SUMS).keyEventRate).toBeNull();
+  });
+
   it('reports a null percent change from a zero base', () => {
     expect(ga4Change(5, 0)?.percent).toBeNull();
   });

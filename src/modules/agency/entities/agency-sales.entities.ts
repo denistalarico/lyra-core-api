@@ -24,6 +24,11 @@ export type AgencySalesItemStatus = 'active' | 'inactive' | 'archived';
 
 export type AgencySalesPipelineStatus = 'active' | 'inactive' | 'archived';
 
+/**
+ * The class of a stage ("Classe da etapa" on the CRM settings screen). It is
+ * what the rest of the platform reads — never the stage's position or name,
+ * which the agency customizes. `custom` (2026-11-20) is an ordinary stage.
+ */
 export type AgencySalesStageType =
   | 'new'
   | 'qualified'
@@ -31,7 +36,41 @@ export type AgencySalesStageType =
   | 'negotiation'
   | 'won'
   | 'lost'
-  | 'archived';
+  | 'archived'
+  | 'custom';
+
+export const AGENCY_SALES_STAGE_TYPES: readonly AgencySalesStageType[] = [
+  'new',
+  'qualified',
+  'proposal',
+  'negotiation',
+  'won',
+  'lost',
+  'archived',
+  'custom',
+];
+
+/**
+ * AN-CRM (2026-11-20): classes whose leads are qualified. A proposal or a
+ * negotiation is only offered to a qualified lead, so they count too — a
+ * deal that skipped the "Qualificado" stage is still a qualified lead.
+ */
+export const AGENCY_SALES_QUALIFIED_STAGE_TYPES: readonly AgencySalesStageType[] =
+  ['qualified', 'proposal', 'negotiation'];
+
+/**
+ * The legacy flags a class implies, so `is_won`/`is_closed` (which move the
+ * opportunity status) never contradict the class the screen shows.
+ */
+export function agencySalesStageFlags(type: AgencySalesStageType): {
+  isClosed: boolean;
+  isWon: boolean;
+} {
+  if (type === 'won') return { isClosed: true, isWon: true };
+  if (type === 'lost' || type === 'archived')
+    return { isClosed: true, isWon: false };
+  return { isClosed: false, isWon: false };
+}
 
 export type AgencySalesOpportunityStatus =
   | 'open'

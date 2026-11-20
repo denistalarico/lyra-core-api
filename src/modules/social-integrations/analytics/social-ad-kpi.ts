@@ -152,6 +152,55 @@ export function deriveSocialAdKpis(inputs: SocialAdKpiInputs): SocialAdKpis {
 }
 
 /**
+ * AN-CRM (§6.1): the rates the Google Ads cards add, from the same summed
+ * inputs. Separate from `deriveSocialAdKpis` so the campaign, ad-set and ad
+ * rows keep their shape; only the overview reports these.
+ *
+ * - **Interaction rate** — interactions / impressions, %. Null when no day
+ *   carried interactions (Meta never does), which is "not measured".
+ * - **Conversion rate** — conversions / clicks, %. Conversions are scaled.
+ * - **Value per conversion** — conversion value / conversions, money.
+ * - **Video view rate** — video views / impressions, %.
+ * - **Cost per view** — spend / video views, money.
+ */
+export type SocialAdRateKpis = {
+  interactionRate: string | null;
+  conversionRate: string | null;
+  valuePerConversion: string | null;
+  videoViewRate: string | null;
+  costPerView: string | null;
+};
+
+export function deriveSocialAdRateKpis(
+  inputs: SocialAdKpiInputs & { interactions: bigint | null },
+): SocialAdRateKpis {
+  return {
+    interactionRate:
+      inputs.interactions === null
+        ? null
+        : formatDerived(
+            divideScaled(
+              inputs.interactions * PERCENT_BASIS,
+              inputs.impressions,
+            ),
+          ),
+    conversionRate: formatDerived(
+      divideScaled(
+        inputs.conversions * PERCENT_BASIS,
+        inputs.clicks * SCALE_FACTOR,
+      ),
+    ),
+    valuePerConversion: formatDerived(
+      divideScaled(inputs.conversionValue, inputs.conversions),
+    ),
+    videoViewRate: formatDerived(
+      divideScaled(inputs.videoViews * PERCENT_BASIS, inputs.impressions),
+    ),
+    costPerView: formatDerived(divideCost(inputs.spend, inputs.videoViews)),
+  };
+}
+
+/**
  * Cost per whole unit: a scaled amount over an unscaled count.
  *
  * The count is scaled up to meet the amount rather than the amount scaled down,

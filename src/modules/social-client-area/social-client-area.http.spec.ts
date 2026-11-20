@@ -572,6 +572,9 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
         : fill(route.path, id);
     const isRead = (route: { verb: string; path: string }) =>
       route.verb === 'GET' || /\/reports\/(preview|pdf)$/.test(route.path);
+    // AN-CRM (owner decision, 2026-11-20): "Leads e vendas" is the Owner's.
+    const ownerOnlyRead = (route: { verb: string; path: string }) =>
+      route.verb === 'GET' && route.path === '/social/analytics/crm-leads';
     // Through the guards: the handler may still answer 404 on its own (an ad
     // without a thumbnail), so only the evaluator's 404 counts as refusal.
     const passed = ({ status, body }: { status: number; body: unknown }) =>
@@ -582,7 +585,7 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
       );
 
     it('refuses a Viewer on every Analytics route (D-AN-13)', async () => {
-      expect(analytics).toHaveLength(35);
+      expect(analytics).toHaveLength(36);
       access('viewer');
       expect(context.memberAccess!.analytics).toMatchObject({
         available: false,
@@ -601,7 +604,8 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
         for (const route of analytics) {
           const at = `${level} ${route.verb} ${route.path}`;
           const response = await call(verb(route), target(route));
-          if (isRead(route)) expect([at, passed(response)]).toEqual([at, true]);
+          if (isRead(route) && !ownerOnlyRead(route))
+            expect([at, passed(response)]).toEqual([at, true]);
           else expect([at, response.status]).toEqual([at, 403]);
         }
       }

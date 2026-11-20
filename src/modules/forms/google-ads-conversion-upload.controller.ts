@@ -70,7 +70,7 @@ export class GoogleAdsConversionUploadController {
     );
   }
 
-  /** Funnels and open stages of both CRMs, for the "qualificado" picker. */
+  /** Stages classified as qualified in both CRMs (read-only, for the panel). */
   @Get('conversion-upload/stages')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

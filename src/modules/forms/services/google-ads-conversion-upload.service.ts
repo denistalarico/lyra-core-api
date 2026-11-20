@@ -14,7 +14,14 @@ import { GoogleAdsError } from '../../social-integrations/sync/google-ads-error'
 import type { UpdateGoogleAdsConversionUploadDto } from '../dto/google-ads-conversion-upload.dto';
 import { GoogleAdsConversionUploadEntity } from '../entities/google-ads-conversion-upload.entity';
 import { GoogleAdsConversionUploadSettingsEntity } from '../entities/google-ads-conversion-upload-settings.entity';
+import {
+  type QualifiedStageGroup,
+  leadflowScopeOf,
+  listQualifiedStages,
+} from '../crm-qualified-stages';
 import { CONVERSION_ACTION_RESOURCE } from '../google-ads-conversion.rules';
+
+export { leadflowScopeOf };
 
 export type GoogleAdsConversionScope = {
   tenantId: string;
@@ -30,7 +37,6 @@ export type GoogleAdsConversionUploadView = {
   enabled: boolean;
   qualifiedActionResource: string | null;
   wonActionResource: string | null;
-  qualifiedStageIds: string[];
   sendValue: boolean;
   updatedAt: string | null;
 };
@@ -47,30 +53,14 @@ export type GoogleAdsConversionActionView = {
   defaultCurrencyCode: string | null;
 };
 
-export type GoogleAdsConversionStageGroup = {
-  crm: 'agency_sales' | 'leadflow_crm';
-  pipelineId: string;
-  pipelineName: string;
-  stages: Array<{ id: string; name: string; position: number }>;
-};
+/** The stages classified as qualified (read-only here; set on each CRM). */
+export type GoogleAdsConversionStageGroup = QualifiedStageGroup;
 
 /** `fields/v25/conversion_action` (checked 2026-11-20). Only ids, no user text. */
 const CONVERSION_ACTIONS_GAQL = `SELECT conversion_action.resource_name, conversion_action.id, conversion_action.name, conversion_action.category, conversion_action.primary_for_goal, conversion_action.value_settings.default_value, conversion_action.value_settings.always_use_default_value, conversion_action.value_settings.default_currency_code FROM conversion_action WHERE conversion_action.type = 'UPLOAD_CLICKS' AND conversion_action.status = 'ENABLED'`;
 
 export function conversionUploadsAvailable(): boolean {
   return process.env.SOCIAL_GOOGLE_ADS_CONVERSION_UPLOAD_ENABLED === 'true';
-}
-
-/**
- * LeadFlow CRM scope, the same rule as the Forms ingestion: a client deal
- * carries both client and company context; anything else is the agency's own.
- */
-export function leadflowScopeOf(scope: GoogleAdsConversionScope) {
-  const client = Boolean(scope.agencyClientId && scope.companyContextId);
-  return {
-    agencyClientId: client ? scope.agencyClientId : null,
-    companyContextId: client ? scope.companyContextId : null,
-  };
 }
 
 /**
@@ -129,7 +119,6 @@ export class GoogleAdsConversionUploadService {
         enabled: false,
         qualifiedActionResource: null,
         wonActionResource: null,
-        qualifiedStageIds: [],
         sendValue: true,
         createdById: userId,
       });
@@ -144,10 +133,6 @@ export class GoogleAdsConversionUploadService {
         dto.wonActionResource !== undefined
           ? dto.wonActionResource
           : current.wonActionResource,
-      qualifiedStageIds:
-        dto.qualifiedStageIds !== undefined
-          ? [...new Set(dto.qualifiedStageIds)]
-          : current.qualifiedStageIds,
       sendValue: dto.sendValue ?? current.sendValue,
     };
 
@@ -164,71 +149,21 @@ export class GoogleAdsConversionUploadService {
       !next.wonActionResource
     )
       throw new UnprocessableEntityException('conversion_action_required');
-    if (next.qualifiedActionResource && next.qualifiedStageIds.length === 0)
+    // "Qualified" is the class of the stage, set on each CRM's stage screen.
+    // Choosing the action without any such stage would never send anything.
+    if (dto.qualifiedActionResource && (await this.stages(scope)).length === 0)
       throw new UnprocessableEntityException('qualified_stage_required');
-    if (dto.qualifiedStageIds !== undefined)
-      await this.assertStages(scope, next.qualifiedStageIds);
 
     Object.assign(current, next, { updatedById: userId });
     const saved = await this.settings.save(current);
     return this.view(dto.connectionId, saved);
   }
 
-  /** Funnels of both CRMs a stage may be picked from (open stages only). */
-  async stages(
+  /** Stages classified as qualified, both CRMs (`crm-qualified-stages.ts`). */
+  stages(
     scope: GoogleAdsConversionScope,
   ): Promise<GoogleAdsConversionStageGroup[]> {
-    const groups: GoogleAdsConversionStageGroup[] = [];
-    // The Agency CRM is the agency's own; client contexts use the LeadFlow CRM.
-    if (!scope.agencyClientId) {
-      const rows = await this.dataSource.query<
-        Array<{
-          pipelineId: string;
-          pipelineName: string;
-          id: string;
-          name: string;
-          position: number;
-        }>
-      >(
-        `SELECT p."id" AS "pipelineId", p."name" AS "pipelineName", s."id", s."name", s."position"
-           FROM "agency_sales_pipelines" p
-           JOIN "agency_sales_stages" s ON s."pipeline_id" = p."id"
-          WHERE p."tenant_id" = $1 AND p."workspace_id" = $2 AND p."status" = 'active'
-            AND s."tenant_id" = $1 AND s."workspace_id" = $2
-            AND s."type" NOT IN ('won', 'lost', 'archived') AND s."is_won" = false AND s."is_closed" = false
-          ORDER BY p."position", p."name", s."position"`,
-        [scope.tenantId, scope.workspaceId],
-      );
-      groups.push(...this.group('agency_sales', rows));
-    }
-    const lf = leadflowScopeOf(scope);
-    const rows = await this.dataSource.query<
-      Array<{
-        pipelineId: string;
-        pipelineName: string;
-        id: string;
-        name: string;
-        position: number;
-      }>
-    >(
-      `SELECT p."id" AS "pipelineId", p."name" AS "pipelineName", s."id", s."name", s."sort_order" AS "position"
-         FROM "crm_pipelines" p
-         JOIN "crm_stages" s ON s."pipeline_id" = p."id"
-        WHERE p."tenant_id" = $1 AND p."workspace_id" = $2
-          AND p."agency_client_id" IS NOT DISTINCT FROM $3::uuid
-          AND p."company_context_id" IS NOT DISTINCT FROM $4::uuid
-          AND p."deleted_at" IS NULL AND s."deleted_at" IS NULL
-          AND s."type" = 'open' AND s."is_won_stage" = false AND s."is_lost_stage" = false
-        ORDER BY p."sort_order", p."name", s."sort_order"`,
-      [
-        scope.tenantId,
-        scope.workspaceId,
-        lf.agencyClientId,
-        lf.companyContextId,
-      ],
-    );
-    groups.push(...this.group('leadflow_crm', rows));
-    return groups;
+    return listQualifiedStages(this.dataSource, scope);
   }
 
   /** Live list of the account's `UPLOAD_CLICKS` actions (1 Google Ads operation). */
@@ -333,59 +268,6 @@ export class GoogleAdsConversionUploadService {
     return connection;
   }
 
-  /** Every id is an open stage of this scope, at most one per funnel. */
-  private async assertStages(scope: GoogleAdsConversionScope, ids: string[]) {
-    if (ids.length === 0) return;
-    const allowed = await this.stages(scope);
-    const byId = new Map(
-      allowed.flatMap((group) =>
-        group.stages.map((stage) => [stage.id, group.pipelineId] as const),
-      ),
-    );
-    const pipelines = new Set<string>();
-    for (const id of ids) {
-      const pipelineId = byId.get(id);
-      if (!pipelineId)
-        throw new UnprocessableEntityException('qualified_stage_invalid');
-      if (pipelines.has(pipelineId))
-        throw new UnprocessableEntityException(
-          'qualified_stage_duplicate_pipeline',
-        );
-      pipelines.add(pipelineId);
-    }
-  }
-
-  private group(
-    crm: GoogleAdsConversionStageGroup['crm'],
-    rows: Array<{
-      pipelineId: string;
-      pipelineName: string;
-      id: string;
-      name: string;
-      position: number;
-    }>,
-  ): GoogleAdsConversionStageGroup[] {
-    const groups = new Map<string, GoogleAdsConversionStageGroup>();
-    for (const row of rows) {
-      let group = groups.get(row.pipelineId);
-      if (!group) {
-        group = {
-          crm,
-          pipelineId: row.pipelineId,
-          pipelineName: row.pipelineName,
-          stages: [],
-        };
-        groups.set(row.pipelineId, group);
-      }
-      group.stages.push({
-        id: row.id,
-        name: row.name,
-        position: Number(row.position),
-      });
-    }
-    return [...groups.values()];
-  }
-
   private view(
     connectionId: string,
     row: GoogleAdsConversionUploadSettingsEntity | null,
@@ -396,9 +278,6 @@ export class GoogleAdsConversionUploadService {
       enabled: row?.enabled ?? false,
       qualifiedActionResource: row?.qualifiedActionResource ?? null,
       wonActionResource: row?.wonActionResource ?? null,
-      qualifiedStageIds: Array.isArray(row?.qualifiedStageIds)
-        ? row.qualifiedStageIds
-        : [],
       sendValue: row?.sendValue ?? true,
       updatedAt: row?.updatedAt?.toISOString() ?? null,
     };

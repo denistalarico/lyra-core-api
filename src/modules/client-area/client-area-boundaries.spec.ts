@@ -156,6 +156,7 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "crm/crm.controller.ts:reorderOpportunities",
        "crm/crm.controller.ts:reorderStages",
        "crm/crm.controller.ts:transferOpportunity",
+       "forms/social-analytics-crm.controller.ts:crmLeads",
        "inbox/channels/facebook-messenger/facebook-messenger-outbound.controller.ts:sendMedia",
        "inbox/channels/facebook-messenger/facebook-messenger-outbound.controller.ts:sendText",
        "inbox/channels/inbox-channels.controller.ts:reconcileDefaultBinding",
