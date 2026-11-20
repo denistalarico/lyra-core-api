@@ -221,6 +221,12 @@ export class UpdateFormInboundEmailDto {
 }
 
 /** GL1: settings of the Google Ads lead-form channel (§5.4). */
+/** GL2: import earlier leads through this Google Ads connection. */
+export class ImportFormGoogleAdsLeadsDto {
+  @IsUUID()
+  connectionId!: string;
+}
+
 export class UpdateFormGoogleAdsLeadsDto {
   @IsOptional()
   @IsBoolean()

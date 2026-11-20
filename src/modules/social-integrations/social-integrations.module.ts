@@ -183,6 +183,9 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     MetaAdsGraphService,
     SocialAdConnectionService,
     SocialAdCredentialResolver,
+    // GL2: Forms imports Google Ads lead-form submissions through the reader,
+    // so the operation budget and the no-developer-header rule stay in one place.
+    GoogleAdsReaderService,
     SocialPaidMediaIntelligenceAdapter,
     // Exported for the cross-domain cohort view, which needs the ad account's
     // timezone to cut both domains' days on the same boundary. It goes through

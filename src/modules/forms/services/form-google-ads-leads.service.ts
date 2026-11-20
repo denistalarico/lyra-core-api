@@ -17,6 +17,7 @@ import { FormEntity } from '../entities/form.entity';
 import { FormSubmissionEntity } from '../entities/form-submission.entity';
 import {
   GoogleAdsLeadFormatError,
+  type ParsedGoogleAdsLead,
   googleAdsExternalLeadId,
   googleAdsLeadAttribution,
   normalizeGoogleAdsLead,
@@ -139,7 +140,7 @@ export class FormGoogleAdsLeadsService {
     }
     this.assertKey(form, (body as Record<string, unknown>).google_key);
 
-    let lead: ReturnType<typeof parseGoogleAdsLead>;
+    let lead: ParsedGoogleAdsLead;
     try {
       lead = parseGoogleAdsLead(body);
     } catch (error) {
@@ -218,10 +219,15 @@ export class FormGoogleAdsLeadsService {
       throw new ForbiddenException('Invalid key.');
   }
 
-  /** Inserts the submission; `null` when the lead was already stored (the winner of the race keeps it). */
-  private async store(
+  /**
+   * Inserts the submission; `null` when the lead was already stored (the winner
+   * of the race keeps it). GL2 imports call it with `origin: 'api'`, which is
+   * kept in the payload so the import can tell its rows from the webhook's.
+   */
+  async store(
     form: FormEntity,
-    lead: ReturnType<typeof parseGoogleAdsLead>,
+    lead: ParsedGoogleAdsLead,
+    origin: 'webhook' | 'api' = 'webhook',
   ): Promise<FormSubmissionEntity | null> {
     const externalLeadId = googleAdsExternalLeadId(lead);
     const result = await this.submissions
@@ -239,6 +245,7 @@ export class FormGoogleAdsLeadsService {
         // The parsed lead (known fields only): `google_key` and unknown fields are not kept.
         payload: {
           ...lead,
+          ...(origin === 'api' ? { origin } : {}),
         } as QueryDeepPartialEntity<FormSubmissionEntity>['payload'],
         normalized: normalizeGoogleAdsLead(lead),
         attribution: googleAdsLeadAttribution(lead),

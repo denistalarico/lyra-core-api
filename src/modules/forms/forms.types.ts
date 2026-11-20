@@ -264,6 +264,32 @@ export type FormGoogleAdsLeads = {
   lastTestAt: string | null;
   receivedCount: number;
   lastError: string | null;
+  /** GL2: Google Ads connection of the last import; the daily reconciliation reuses it. */
+  importConnectionId: string | null;
+  lastImport: FormGoogleAdsLeadsImportSummary | null;
+  /** GL2: error code of the last failed import (never lead data). */
+  lastImportError: string | null;
+  /** GL2: account day (`YYYY-MM-DD`) of the last daily reconciliation that ran. */
+  lastReconciledDay: string | null;
+};
+
+/** GL2 contract (§5.4): `POST forms/:id/google-ads-leads/import`. */
+export type FormGoogleAdsLeadsImportResult = {
+  read: number;
+  created: number;
+  duplicates: number;
+  skipped: number;
+  oldestSubmittedAt: string | null;
+};
+
+export type FormGoogleAdsLeadsImportSummary = FormGoogleAdsLeadsImportResult & {
+  at: string;
+  trigger: 'manual' | 'daily';
+  /** Stored, but the CRM step failed (the panel reprocesses them). */
+  failed: number;
+  /** D-L3 evidence: API id equal to / different from the webhook `lead_id`. */
+  idMatchesWebhook: number;
+  idDiffersFromWebhook: number;
 };
 
 export const DEFAULT_FORM_GOOGLE_ADS_LEADS: FormGoogleAdsLeads = {
@@ -275,6 +301,10 @@ export const DEFAULT_FORM_GOOGLE_ADS_LEADS: FormGoogleAdsLeads = {
   lastTestAt: null,
   receivedCount: 0,
   lastError: null,
+  importConnectionId: null,
+  lastImport: null,
+  lastImportError: null,
+  lastReconciledDay: null,
 };
 
 /** Read DTO of the channel (§5.4): the stored settings plus the URL to paste in Google Ads. */

@@ -51,6 +51,14 @@ const AD_QUERY =
 const METRIC_FIELDS =
   'segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value, metrics.video_trueview_views, metrics.interactions, metrics.all_conversions';
 
+/**
+ * GL2: lead-form submissions. Fields checked in
+ * https://developers.google.com/google-ads/api/fields/v25/lead_form_submission_data
+ * (`asset` is the lead form asset; `asset_group` is not an attributed resource).
+ */
+const LEAD_SUBMISSION_QUERY =
+  'SELECT lead_form_submission_data.id, lead_form_submission_data.gclid, lead_form_submission_data.submission_date_time, lead_form_submission_data.lead_form_submission_fields, lead_form_submission_data.custom_lead_form_submission_fields, campaign.id, asset.id FROM lead_form_submission_data';
+
 /** Insights level → the GAQL resource and the id fields that name the row. */
 const METRIC_QUERY_BY_LEVEL: Record<SocialAdInsightsLevel, string> = {
   account: 'SELECT customer.id, ' + METRIC_FIELDS + ' FROM customer',
@@ -118,6 +126,26 @@ export class GoogleAdsReaderService {
       credential,
       loginCustomerId,
       `${METRIC_QUERY_BY_LEVEL[level]} WHERE segments.date BETWEEN '${window.since}' AND '${window.until}'`,
+    );
+  }
+
+  /**
+   * GL2: lead-form submissions since `since` (`YYYY-MM-DD`, account day), one
+   * query. The rows carry lead PII: callers must never log them.
+   */
+  async readLeadSubmissions(
+    credential: ResolvedAdCredential,
+    since: string,
+  ): Promise<GoogleAdsRawPage> {
+    const loginCustomerId = await this.loginCustomerId(credential);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+      throw new GoogleAdsError('permanent', 'google_ads_bad_request');
+    }
+
+    return this.query(
+      credential,
+      loginCustomerId,
+      `${LEAD_SUBMISSION_QUERY} WHERE lead_form_submission_data.submission_date_time >= '${since} 00:00:00'`,
     );
   }
 

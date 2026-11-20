@@ -3,6 +3,7 @@ import {
   googleAdsExternalLeadId,
   googleAdsLeadAttribution,
   normalizeGoogleAdsLead,
+  parseGoogleAdsApiLead,
   parseGoogleAdsLead,
 } from './google-ads-lead.normalizer';
 
@@ -153,5 +154,62 @@ describe('google-ads-lead normalizer', () => {
     ['no columns array', { lead_id: 'x' }],
   ])('rejects a body with %s', (_label, input) => {
     expect(() => parseGoogleAdsLead(input)).toThrow(GoogleAdsLeadFormatError);
+  });
+});
+
+describe('parseGoogleAdsApiLead (GL2)', () => {
+  // Fictional `googleAds:searchStream` row (camelCase JSON, int64 as strings).
+  const row = {
+    leadFormSubmissionData: {
+      resourceName: 'customers/1/leadFormSubmissionData/api-lead-1',
+      id: 'api-lead-1',
+      gclid: 'gclid-fixture',
+      submissionDateTime: '2026-11-18 09:30:00-03:00',
+      leadFormSubmissionFields: [
+        { fieldType: 'FULL_NAME', fieldValue: 'Pessoa Fictícia' },
+        { fieldType: 'EMAIL', fieldValue: 'Lead.Ficticio@Example.com' },
+        { fieldType: 'PHONE_NUMBER', fieldValue: '+5511900000000' },
+        { fieldType: 'CITY', fieldValue: 'Cidade Fictícia' },
+      ],
+      customLeadFormSubmissionFields: [
+        { questionText: 'Qual o orçamento?', fieldValue: 'Até 5 mil' },
+      ],
+      futureField: 'ignored',
+    },
+    campaign: { resourceName: 'customers/1/campaigns/20', id: '20' },
+    asset: { resourceName: 'customers/1/assets/10', id: '10' },
+  };
+
+  it('maps the API row to the webhook shape', () => {
+    const lead = parseGoogleAdsApiLead(row);
+    expect(lead).toMatchObject({
+      leadId: 'api-lead-1',
+      formId: '10',
+      campaignId: '20',
+      gclid: 'gclid-fixture',
+      isTest: false,
+      submittedAt: '2026-11-18T12:30:00.000Z',
+    });
+    expect(googleAdsExternalLeadId(lead!)).toBe('api-lead-1');
+  });
+
+  it('normalizes standard and custom fields like the webhook', () => {
+    const normalized = normalizeGoogleAdsLead(parseGoogleAdsApiLead(row)!);
+    expect(normalized.lead).toMatchObject({
+      name: 'Pessoa Fictícia',
+      email: 'lead.ficticio@example.com',
+    });
+    expect(normalized.summaryLines).toEqual([
+      'Cidade: Cidade Fictícia',
+      'Qual o orçamento?: Até 5 mil',
+    ]);
+  });
+
+  it.each([
+    ['not an object', null],
+    ['no submission data', { campaign: { id: '1' } }],
+    ['no id', { leadFormSubmissionData: { gclid: 'x' } }],
+  ])('returns null for a row with %s', (_label, input) => {
+    expect(parseGoogleAdsApiLead(input)).toBeNull();
   });
 });

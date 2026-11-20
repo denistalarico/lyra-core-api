@@ -54,6 +54,33 @@ describe('GoogleAdsReaderService', () => {
     );
   });
 
+  it('GL2: reads lead-form submissions since the given day in one query', async () => {
+    const fetchSpy = respond(200, [
+      { results: [{ leadFormSubmissionData: { id: 'x' } }] },
+    ]);
+
+    const page = await build().readLeadSubmissions(CREDENTIAL, '2026-10-20');
+
+    const { query } = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    ) as { query: string };
+    expect(query).toBe(
+      "SELECT lead_form_submission_data.id, lead_form_submission_data.gclid, lead_form_submission_data.submission_date_time, lead_form_submission_data.lead_form_submission_fields, lead_form_submission_data.custom_lead_form_submission_fields, campaign.id, asset.id FROM lead_form_submission_data WHERE lead_form_submission_data.submission_date_time >= '2026-10-20 00:00:00'",
+    );
+    expect(page).toMatchObject({
+      rows: [{ leadFormSubmissionData: { id: 'x' } }],
+      apiCalls: 1,
+    });
+  });
+
+  it('GL2: refuses a malformed day before any request', async () => {
+    const fetchSpy = respond(200, [{ results: [] }]);
+    await expect(
+      build().readLeadSubmissions(CREDENTIAL, "2026-10-20' OR 1=1"),
+    ).rejects.toThrow(GoogleAdsError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('takes the API version from the environment', async () => {
     process.env.GOOGLE_ADS_API_VERSION = 'v26';
     const fetchSpy = respond(200, [{ results: [] }]);

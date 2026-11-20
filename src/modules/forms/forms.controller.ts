@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../permissions';
 import {
   CreateFormDto,
+  ImportFormGoogleAdsLeadsDto,
   ListFormSubmissionsQueryDto,
   ListFormsQueryDto,
   PatchFormDto,
@@ -29,6 +30,7 @@ import {
   FormGoogleAdsLeadsService,
   withGoogleAdsLeadsView,
 } from './services/form-google-ads-leads.service';
+import { FormGoogleAdsLeadsImportService } from './services/form-google-ads-leads-import.service';
 import { FormInboundEmailService } from './services/form-inbound-email.service';
 import { FormsAddonService } from './services/forms-addon.service';
 import { FormsService } from './services/forms.service';
@@ -48,6 +50,7 @@ export class FormsController {
     private readonly addon: FormsAddonService,
     private readonly inboundEmail: FormInboundEmailService,
     private readonly googleAdsLeads: FormGoogleAdsLeadsService,
+    private readonly googleAdsLeadsImport: FormGoogleAdsLeadsImportService,
   ) {}
 
   @Get('addon')
@@ -227,6 +230,32 @@ export class FormsController {
     return this.googleAdsLeads.updateSettings(
       await this.forms.get(ctx, id),
       dto,
+    );
+  }
+
+  /** GL2: Google Ads connections in the form's scope, for the import picker. */
+  @Get(':id/google-ads-leads/connections')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async listGoogleAdsLeadsConnections(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.googleAdsLeadsImport.listConnections(
+      await this.forms.get(ctx, id),
+    );
+  }
+
+  /** GL2: earlier leads through the API; also enables the daily reconciliation. */
+  @Post(':id/google-ads-leads/import')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  async importGoogleAdsLeads(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ImportFormGoogleAdsLeadsDto,
+  ) {
+    return this.googleAdsLeadsImport.importLeads(
+      await this.forms.get(ctx, id),
+      dto.connectionId,
     );
   }
 

@@ -117,6 +117,59 @@ export function parseGoogleAdsLead(body: unknown): ParsedGoogleAdsLead {
 }
 
 /**
+ * GL2: one `lead_form_submission_data` row of `googleAds:searchStream` (JSON
+ * is camelCase) in the webhook's shape, so normalization and attribution are
+ * the same code. `field_type` uses the webhook's `column_id` enum; custom
+ * questions keep their text as the label. `null` when the row has no id.
+ */
+export function parseGoogleAdsApiLead(
+  row: unknown,
+): ParsedGoogleAdsLead | null {
+  const data = asRecord(asRecord(row)?.leadFormSubmissionData);
+  const leadId = asText(data?.id, MAX_LEAD_ID);
+  if (!data || !leadId) return null;
+
+  const columns: GoogleAdsLeadColumn[] = [];
+  const standard = Array.isArray(data.leadFormSubmissionFields)
+    ? data.leadFormSubmissionFields
+    : [];
+  for (const raw of standard.slice(0, MAX_COLUMNS)) {
+    const item = asRecord(raw);
+    const id = asText(item?.fieldType, 80);
+    const value = asText(item?.fieldValue);
+    if (id && value) columns.push({ id, name: null, value });
+  }
+  const custom = Array.isArray(data.customLeadFormSubmissionFields)
+    ? data.customLeadFormSubmissionFields
+    : [];
+  custom.slice(0, MAX_COLUMNS).forEach((raw, index) => {
+    const item = asRecord(raw);
+    const value = asText(item?.fieldValue);
+    if (value)
+      columns.push({
+        id: `CUSTOM_QUESTION_${index + 1}`,
+        name: asText(item?.questionText, 200),
+        value,
+      });
+  });
+
+  // `submission_date_time` is "yyyy-mm-dd hh:mm:ss+|-hh:mm".
+  const submitted = asText(data.submissionDateTime, 64);
+  return {
+    leadId,
+    formId: asText(asRecord(asRecord(row)?.asset)?.id, 80),
+    campaignId: asText(asRecord(asRecord(row)?.campaign)?.id, 80),
+    adGroupId: null,
+    assetGroupId: null,
+    creativeId: null,
+    gclid: asText(data.gclid, 500),
+    isTest: false,
+    submittedAt: asIsoDate(submitted?.replace(' ', 'T')),
+    columns: columns.slice(0, MAX_COLUMNS),
+  };
+}
+
+/**
  * D-L3 layer 1. The test button can resend the same `lead_id`, and a swallowed
  * test looks like a broken integration, so tests also key on their submit time.
  */
