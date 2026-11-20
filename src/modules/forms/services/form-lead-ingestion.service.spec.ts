@@ -168,8 +168,13 @@ describe('FormLeadIngestionService', () => {
         source: 'Formulário',
         formId: 'form-1',
         formSubmissionId: 'sub-1',
+        // The Agency card/drawer read the contact here (else it shows the contact UUID).
+        contactName: 'Maria Silva',
+        phone: '+5511987654321',
+        email: 'maria@x.com',
       },
     });
+    expect(salesDto.metadata).not.toHaveProperty('companyName');
     expect(result).toMatchObject({
       status: 'accepted',
       contactId: 'contact-new',

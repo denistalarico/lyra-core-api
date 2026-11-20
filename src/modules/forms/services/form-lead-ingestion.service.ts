@@ -93,6 +93,21 @@ export function formRequestContext(form: FormEntity): RequestContext {
   };
 }
 
+/** Agency CRM opportunity keys for the contact (`contactName`, `companyName`, `phone`, `email`). */
+export function agencyContactMetadata(
+  lead: NormalizedSubmission['lead'],
+): Record<string, string> {
+  const entries: Array<[string, string | null]> = [
+    ['contactName', lead.name],
+    ['companyName', lead.company],
+    ['phone', lead.phone],
+    ['email', lead.email],
+  ];
+  return Object.fromEntries(
+    entries.filter((entry): entry is [string, string] => Boolean(entry[1])),
+  );
+}
+
 export function buildOpportunityDescription(
   form: FormEntity,
   submission: Pick<FormSubmissionEntity, 'source' | 'attribution'>,
@@ -388,6 +403,9 @@ export class FormLeadIngestionService {
         metadata: {
           source: adSource?.agencySource ?? 'Formulário',
           ...this.metadata(form, submission, campaignName),
+          // The Agency card and drawer read the contact from these keys; without
+          // them the card falls back to the contact UUID.
+          ...agencyContactMetadata(normalized.lead),
         },
       },
     );
