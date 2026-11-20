@@ -311,7 +311,7 @@ describe('FormGoogleAdsLeadsService admin', () => {
   it('generateKey stores only the sha256 and returns the key once with its last 4 chars', async () => {
     const { service, forms } = setup();
     const { key, keyHint } = await service.generateKey(makeForm());
-    expect(key).toMatch(/^[0-9a-f]{64}$/);
+    expect(key).toMatch(/^[0-9a-f]{48}$/); // Google Ads limits the key field to 50 chars
     expect(keyHint).toBe(key.slice(-4));
     const params = firstCall(forms.query)[1] as string[];
     expect(params[1]).toBe(hashGoogleAdsLeadsKey(key));

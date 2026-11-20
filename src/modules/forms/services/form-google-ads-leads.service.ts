@@ -80,9 +80,13 @@ export class FormGoogleAdsLeadsService {
 
   // ── Admin ────────────────────────────────────────────────────────────────
 
-  /** The key leaves the server exactly once, here; only its sha256 is kept. */
+  /**
+   * The key leaves the server exactly once, here; only its sha256 is kept.
+   * 24 random bytes = 48 hex chars (192 bits): the Google Ads webhook "Key"
+   * field accepts at most 50 characters.
+   */
   async generateKey(form: FormEntity) {
-    const key = randomBytes(32).toString('hex');
+    const key = randomBytes(24).toString('hex');
     const keyHint = key.slice(-4);
     await this.forms.query(
       `UPDATE "forms"
