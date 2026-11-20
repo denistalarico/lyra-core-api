@@ -312,6 +312,63 @@ export class AgencySalesOpportunityItemEntity {
 }
 
 
+export type AgencySalesOpportunityEventType =
+  | 'opportunity_created'
+  | 'stage_changed'
+  | 'status_changed'
+  | 'opportunity_won'
+  | 'opportunity_lost'
+  | 'opportunity_reopened'
+  | 'opportunity_archived'
+  | 'opportunity_updated';
+
+export type AgencySalesEventActorType = 'user' | 'system';
+
+/** AG-EVT: insert-only history; never title, description or contact. */
+@Entity('agency_sales_opportunity_events')
+export class AgencySalesOpportunityEventEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'tenant_id', type: 'uuid' })
+  tenantId!: string;
+
+  @Column({ name: 'workspace_id', type: 'uuid' })
+  workspaceId!: string;
+
+  @Column({ name: 'opportunity_id', type: 'uuid' })
+  opportunityId!: string;
+
+  @Column({ name: 'event_type', type: 'varchar', length: 40 })
+  eventType!: AgencySalesOpportunityEventType;
+
+  @Column({ name: 'before_data', type: 'jsonb', nullable: true })
+  beforeData!: Record<string, unknown> | null;
+
+  @Column({ name: 'after_data', type: 'jsonb' })
+  afterData!: Record<string, unknown>;
+
+  @Column({ name: 'actor_type', type: 'varchar', length: 16 })
+  actorType!: AgencySalesEventActorType;
+
+  @Column({ name: 'actor_user_id', type: 'uuid', nullable: true })
+  actorUserId!: string | null;
+
+  @Column({
+    name: 'idempotency_key',
+    type: 'varchar',
+    length: 120,
+    nullable: true,
+  })
+  idempotencyKey!: string | null;
+
+  @Column({ name: 'occurred_at', type: 'timestamptz', precision: 3 })
+  occurredAt!: Date;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
 export type AgencySalesActivityType =
   | 'follow_up'
   | 'meeting'

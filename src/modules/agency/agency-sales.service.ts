@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, EntityManager, ILike, Repository } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
+import { opportunityEventRows, snapshotOf } from './agency-sales-events.rules';
 import type {
   CompleteAgencySalesActivityDto,
   CreateAgencySalesActivityDto,
@@ -27,6 +29,7 @@ import {
   AgencySalesActivityEntity,
   AgencySalesItemEntity,
   AgencySalesOpportunityEntity,
+  AgencySalesOpportunityEventEntity,
   AgencySalesOpportunityItemEntity,
   AgencySalesPipelineEntity,
   AgencySalesStageEntity,
@@ -84,7 +87,55 @@ export class AgencySalesService {
     private readonly opportunityItemsRepo: Repository<AgencySalesOpportunityItemEntity>,
     @InjectRepository(QuoteEntity, AGENCY_CONNECTION)
     private readonly quotesRepo: Repository<QuoteEntity>,
+    @InjectDataSource(AGENCY_CONNECTION)
+    private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * AG-EVT: every opportunity write goes through here (or `createOpportunity`)
+   * so the change and its events commit together.
+   */
+  private async changeOpportunity(
+    context: AgencyContext,
+    opportunityId: string,
+    patch: QueryDeepPartialEntity<AgencySalesOpportunityEntity>,
+  ) {
+    await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(AgencySalesOpportunityEntity);
+      const where = {
+        id: opportunityId,
+        tenantId: context.tenantId,
+        workspaceId: context.workspaceId,
+      };
+      const before = await repo.findOne({
+        where,
+        lock: { mode: 'pessimistic_write' },
+      });
+      await repo.update(where, patch);
+      if (!before) return;
+      const after = await repo.findOne({ where });
+      if (after) await this.recordEvents(manager, context, before, after);
+    });
+  }
+
+  private async recordEvents(
+    manager: EntityManager,
+    context: AgencyContext,
+    before: AgencySalesOpportunityEntity | null,
+    after: AgencySalesOpportunityEntity,
+  ) {
+    const rows = opportunityEventRows(
+      context,
+      after.id,
+      before ? snapshotOf(before) : null,
+      snapshotOf(after),
+      new Date(),
+    );
+    if (rows.length)
+      await manager
+        .getRepository(AgencySalesOpportunityEventEntity)
+        .insert(rows as never);
+  }
 
   health() {
     return {
@@ -598,26 +649,31 @@ export class AgencySalesService {
     context: AgencyContext,
     dto: CreateAgencySalesOpportunityDto,
   ) {
-    return this.opportunitiesRepo.save(
-      this.opportunitiesRepo.create({
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-        title: dto.title,
-        description: dto.description ?? null,
-        pipelineId: dto.pipelineId,
-        stageId: dto.stageId,
-        contactId: dto.contactId ?? null,
-        companyContactId: dto.companyContactId ?? null,
-        ownerUserId: dto.ownerUserId ?? context.userId ?? null,
-        amountCents: dto.amountCents ?? 0,
-        recurringAmountCents: dto.recurringAmountCents ?? 0,
-        currency: dto.currency ?? 'BRL',
-        status: dto.status ?? 'open',
-        expectedCloseDate: dto.expectedCloseDate ?? null,
-        lostReason: dto.lostReason ?? null,
-        metadata: dto.metadata ?? {},
-      }),
-    );
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(AgencySalesOpportunityEntity);
+      const saved = await repo.save(
+        repo.create({
+          tenantId: context.tenantId,
+          workspaceId: context.workspaceId,
+          title: dto.title,
+          description: dto.description ?? null,
+          pipelineId: dto.pipelineId,
+          stageId: dto.stageId,
+          contactId: dto.contactId ?? null,
+          companyContactId: dto.companyContactId ?? null,
+          ownerUserId: dto.ownerUserId ?? context.userId ?? null,
+          amountCents: dto.amountCents ?? 0,
+          recurringAmountCents: dto.recurringAmountCents ?? 0,
+          currency: dto.currency ?? 'BRL',
+          status: dto.status ?? 'open',
+          expectedCloseDate: dto.expectedCloseDate ?? null,
+          lostReason: dto.lostReason ?? null,
+          metadata: dto.metadata ?? {},
+        }),
+      );
+      await this.recordEvents(manager, context, null, saved);
+      return saved;
+    });
   }
 
   async winOpportunity(
@@ -638,26 +694,19 @@ export class AgencySalesService {
 
     const closedAt = dto.closedAt ? new Date(dto.closedAt) : new Date();
 
-    await this.opportunitiesRepo.update(
-      {
-        id: opportunity.id,
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
+    await this.changeOpportunity(context, opportunity.id, {
+      pipelineId: targetStage.pipelineId,
+      stageId: targetStage.id,
+      status: 'won',
+      closedAt,
+      lostReason: null,
+      metadata: {
+        ...(opportunity.metadata ?? {}),
+        outcome: dto.outcome ?? undefined,
+        closedByUserId: context.userId ?? undefined,
+        closedAs: 'won',
       },
-      {
-        pipelineId: targetStage.pipelineId,
-        stageId: targetStage.id,
-        status: 'won',
-        closedAt,
-        lostReason: null,
-        metadata: {
-          ...(opportunity.metadata ?? {}),
-          outcome: dto.outcome ?? undefined,
-          closedByUserId: context.userId ?? undefined,
-          closedAs: 'won',
-        },
-      },
-    );
+    });
 
     return this.getOpportunityDetail(context, opportunity.id);
   }
@@ -685,26 +734,19 @@ export class AgencySalesService {
       throw new BadRequestException('Loss reason is required.');
     }
 
-    await this.opportunitiesRepo.update(
-      {
-        id: opportunity.id,
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
+    await this.changeOpportunity(context, opportunity.id, {
+      pipelineId: targetStage.pipelineId,
+      stageId: targetStage.id,
+      status: 'lost',
+      closedAt,
+      lostReason,
+      metadata: {
+        ...(opportunity.metadata ?? {}),
+        outcome: dto.outcome ?? undefined,
+        closedByUserId: context.userId ?? undefined,
+        closedAs: 'lost',
       },
-      {
-        pipelineId: targetStage.pipelineId,
-        stageId: targetStage.id,
-        status: 'lost',
-        closedAt,
-        lostReason,
-        metadata: {
-          ...(opportunity.metadata ?? {}),
-          outcome: dto.outcome ?? undefined,
-          closedByUserId: context.userId ?? undefined,
-          closedAs: 'lost',
-        },
-      },
-    );
+    });
 
     return this.getOpportunityDetail(context, opportunity.id);
   }
@@ -755,25 +797,18 @@ export class AgencySalesService {
       );
     }
 
-    await this.opportunitiesRepo.update(
-      {
-        id: opportunity.id,
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
+    await this.changeOpportunity(context, opportunity.id, {
+      pipelineId: targetPipeline.id,
+      stageId: targetStage.id,
+      status: 'open',
+      closedAt: null,
+      lostReason: null,
+      metadata: {
+        ...(opportunity.metadata ?? {}),
+        reopenedByUserId: context.userId ?? undefined,
+        reopenedAt: new Date().toISOString(),
       },
-      {
-        pipelineId: targetPipeline.id,
-        stageId: targetStage.id,
-        status: 'open',
-        closedAt: null,
-        lostReason: null,
-        metadata: {
-          ...(opportunity.metadata ?? {}),
-          reopenedByUserId: context.userId ?? undefined,
-          reopenedAt: new Date().toISOString(),
-        },
-      },
-    );
+    });
 
     return this.getOpportunityDetail(context, opportunity.id);
   }
@@ -1177,21 +1212,14 @@ export class AgencySalesService {
       throw new BadRequestException('Loss reason is required.');
     }
 
-    await this.opportunitiesRepo.update(
-      {
-        id: opportunity.id,
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-      },
-      {
-        pipelineId: targetPipeline.id,
-        stageId: targetStage.id,
-        status,
-        closedAt: targetStage.isClosed ? new Date() : null,
-        lostReason:
-          status === 'lost' ? (lostReason ?? opportunity.lostReason) : null,
-      },
-    );
+    await this.changeOpportunity(context, opportunity.id, {
+      pipelineId: targetPipeline.id,
+      stageId: targetStage.id,
+      status,
+      closedAt: targetStage.isClosed ? new Date() : null,
+      lostReason:
+        status === 'lost' ? (lostReason ?? opportunity.lostReason) : null,
+    });
 
     return this.opportunitiesRepo.findOne({
       where: {
@@ -1388,17 +1416,10 @@ export class AgencySalesService {
       0,
     );
 
-    await this.opportunitiesRepo.update(
-      {
-        id: opportunityId,
-        tenantId: context.tenantId,
-        workspaceId: context.workspaceId,
-      },
-      {
-        amountCents,
-        recurringAmountCents,
-      },
-    );
+    await this.changeOpportunity(context, opportunityId, {
+      amountCents,
+      recurringAmountCents,
+    });
   }
 
   async updateOpportunity(
@@ -1413,23 +1434,19 @@ export class AgencySalesService {
       throw new BadRequestException('Loss reason is required.');
     }
 
-    await this.opportunitiesRepo.update(
-      { id, tenantId: context.tenantId, workspaceId: context.workspaceId },
-      {
-        ...opportunityPatch,
-        description: dto.description ?? undefined,
-        contactId: dto.contactId ?? undefined,
-        companyContactId: dto.companyContactId ?? undefined,
-        ownerUserId:
-          dto.ownerUserId === undefined ? undefined : dto.ownerUserId,
-        expectedCloseDate: dto.expectedCloseDate ?? undefined,
-        lostReason:
-          dto.status === 'open' || dto.status === 'won'
-            ? null
-            : (lostReason ?? undefined),
-        metadata: metadata as never,
-      },
-    );
+    await this.changeOpportunity(context, id, {
+      ...opportunityPatch,
+      description: dto.description ?? undefined,
+      contactId: dto.contactId ?? undefined,
+      companyContactId: dto.companyContactId ?? undefined,
+      ownerUserId: dto.ownerUserId === undefined ? undefined : dto.ownerUserId,
+      expectedCloseDate: dto.expectedCloseDate ?? undefined,
+      lostReason:
+        dto.status === 'open' || dto.status === 'won'
+          ? null
+          : (lostReason ?? undefined),
+      metadata: metadata as never,
+    });
 
     return this.opportunitiesRepo.findOne({
       where: {
