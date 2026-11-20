@@ -69,6 +69,8 @@ import { EmailTwoFactorCodeEntity } from '../modules/auth/entities/email-2fa-cod
 import { ContactEntity } from '../modules/contacts/entities/contact.entity';
 import { FormEntity } from '../modules/forms/entities/form.entity';
 import { FormSubmissionEntity } from '../modules/forms/entities/form-submission.entity';
+import { GoogleAdsConversionUploadEntity } from '../modules/forms/entities/google-ads-conversion-upload.entity';
+import { GoogleAdsConversionUploadSettingsEntity } from '../modules/forms/entities/google-ads-conversion-upload-settings.entity';
 import { FormEmailSyncStateEntity } from '../modules/forms/entities/form-email-sync-state.entity';
 import { FiscalIntakeRequestEntity } from '../modules/fiscal-intake/entities/fiscal-intake-request.entity';
 import { FiscalProfileAuditEventEntity } from '../modules/fiscal-intake/entities/fiscal-profile-audit-event.entity';
@@ -824,6 +826,8 @@ export const agencyEntities = [
   FormEntity,
   FormSubmissionEntity,
   FormEmailSyncStateEntity,
+  GoogleAdsConversionUploadSettingsEntity,
+  GoogleAdsConversionUploadEntity,
   FiscalIntakeRequestEntity,
   FiscalProfileAuditEventEntity,
 ];

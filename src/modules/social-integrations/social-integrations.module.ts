@@ -51,6 +51,7 @@ import { SocialAdRetentionService } from './services/social-ad-retention.service
 import { SocialAdRetentionScheduler } from './services/social-ad-retention.scheduler';
 import { GoogleAdsReaderService } from './services/google-ads-reader.service';
 import { GoogleAdsMutationClient } from './services/google-ads-mutation.client';
+import { GoogleDataManagerClient } from './services/google-data-manager.client';
 import { GoogleAdsSyncService } from './services/google-ads-sync.service';
 import { LinkedInAdsApiClient } from './services/linkedin-ads-api.client';
 import { LinkedInAdsOAuthService } from './services/linkedin-ads-oauth.service';
@@ -151,6 +152,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     GoogleAdsReaderService,
     // GA-WRITE: governed writes (D-G5); GA-CONV reuses it for conversions.
     GoogleAdsMutationClient,
+    GoogleDataManagerClient,
     GoogleAdsSyncService,
     // GA-DET: the campaign pass writes search terms (D-G4).
     SocialAdSearchTermWriterService,
@@ -197,6 +199,7 @@ import { SocialIntegrationsController } from './social-integrations.controller';
     // GA-WRITE: only the governed manual-action adapter in social-campaigns
     // calls it; the brake, policy and confirmation live there.
     GoogleAdsMutationClient,
+    GoogleDataManagerClient,
     SocialPaidMediaIntelligenceAdapter,
     // Exported for the cross-domain cohort view, which needs the ad account's
     // timezone to cut both domains' days on the same boundary. It goes through

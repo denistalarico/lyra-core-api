@@ -49,9 +49,11 @@ describe('Google OAuth scopes', () => {
       'openid',
       'https://www.googleapis.com/auth/analytics.readonly',
     ]);
+    // GA-CONV: Data Manager rides along with Ads, optional (D-G6 revised).
     expect(scopesForProduct('ads')).toEqual([
       'openid',
       'https://www.googleapis.com/auth/adwords',
+      'https://www.googleapis.com/auth/datamanager',
     ]);
     expect(scopesForProduct('business_profile')).toEqual([
       'openid',

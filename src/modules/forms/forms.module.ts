@@ -24,8 +24,11 @@ import { SocialIntegrationsModule } from '../social-integrations/social-integrat
 import { SocialOrganicModule } from '../social-organic/social-organic.module';
 import { FormEmailSyncStateEntity } from './entities/form-email-sync-state.entity';
 import { FormSubmissionEntity } from './entities/form-submission.entity';
+import { GoogleAdsConversionUploadEntity } from './entities/google-ads-conversion-upload.entity';
+import { GoogleAdsConversionUploadSettingsEntity } from './entities/google-ads-conversion-upload-settings.entity';
 import { FormEntity } from './entities/form.entity';
 import { FormsController } from './forms.controller';
+import { GoogleAdsConversionUploadController } from './google-ads-conversion-upload.controller';
 import { PublicFormsController } from './public-forms.controller';
 import { FormEmailAiExtractor } from './services/form-email-ai.extractor';
 import { FormEmailImapGateway } from './services/form-email-imap.gateway';
@@ -37,6 +40,8 @@ import { FormLeadIngestionService } from './services/form-lead-ingestion.service
 import { FormMetaLeadsService } from './services/form-meta-leads.service';
 import { FormsAddonService } from './services/forms-addon.service';
 import { FormsService } from './services/forms.service';
+import { GoogleAdsConversionUploadService } from './services/google-ads-conversion-upload.service';
+import { GoogleAdsConversionUploadWorker } from './services/google-ads-conversion-upload.worker';
 
 /**
  * Forms addon — F1–F4 backend (2026-11-17).
@@ -71,11 +76,18 @@ import { FormsService } from './services/forms.service';
         ContactListMemberEntity,
         LeadFlowContactCompanyEntity,
         SocialAdEntity,
+        GoogleAdsConversionUploadSettingsEntity,
+        GoogleAdsConversionUploadEntity,
       ],
       'agency',
     ),
   ],
-  controllers: [FormsController, PublicFormsController],
+  controllers: [
+    FormsController,
+    PublicFormsController,
+    // GA-CONV: route under social/integrations/google, served from here.
+    GoogleAdsConversionUploadController,
+  ],
   providers: [
     FormsService,
     FormsAddonService,
@@ -88,6 +100,8 @@ import { FormsService } from './services/forms.service';
     FormEmailImapGateway,
     FormEmailAiExtractor,
     SettingsCryptoService,
+    GoogleAdsConversionUploadService,
+    GoogleAdsConversionUploadWorker,
   ],
   exports: [FormsService, FormsAddonService],
 })

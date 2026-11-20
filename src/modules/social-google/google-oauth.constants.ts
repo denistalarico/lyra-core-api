@@ -46,6 +46,24 @@ export const GOOGLE_PRODUCT_REQUIRED_SCOPES: Record<
   ],
 };
 
+/**
+ * GA-CONV (D-G6, revised 2026-11-20): offline click conversions go through the
+ * Data Manager API, whose only documented scope is this one (sensitive).
+ */
+export const GOOGLE_DATA_MANAGER_SCOPE =
+  'https://www.googleapis.com/auth/datamanager';
+
+/**
+ * Scopes requested with a product but not required for it to count as
+ * granted. Ads reads and governed writes keep working on a token issued before
+ * the conversion upload existed; only the upload needs a reconnection.
+ */
+export const GOOGLE_PRODUCT_OPTIONAL_SCOPES: Partial<
+  Record<GoogleProduct, readonly string[]>
+> = {
+  ads: [GOOGLE_DATA_MANAGER_SCOPE],
+};
+
 /** True when `granted` covers every scope the product requires. */
 export function hasProductScopes(
   granted: readonly string[],
@@ -65,7 +83,11 @@ export function isGoogleProduct(value: unknown): value is GoogleProduct {
 
 /** Scopes requested for one product: identity + that product only. */
 export function scopesForProduct(product: GoogleProduct): string[] {
-  return [GOOGLE_IDENTITY_SCOPE, ...GOOGLE_PRODUCT_REQUIRED_SCOPES[product]];
+  return [
+    GOOGLE_IDENTITY_SCOPE,
+    ...GOOGLE_PRODUCT_REQUIRED_SCOPES[product],
+    ...(GOOGLE_PRODUCT_OPTIONAL_SCOPES[product] ?? []),
+  ];
 }
 
 export const GOOGLE_OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
