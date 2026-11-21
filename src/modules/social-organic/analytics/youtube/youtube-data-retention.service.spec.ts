@@ -1,23 +1,23 @@
 import {
   YOUTUBE_REAUTH_GRACE_DAYS,
-  YoutubeDataRetentionService,
+  YOUTUBE_UNVERIFIED_GRACE_DAYS,
   youtubeDataRetentionEnabled,
   youtubePurgeReason,
 } from './youtube-data-retention.service';
 
 const NOW = new Date('2026-11-21T03:30:00Z');
 const DAY = 86_400_000;
+const daysAgo = (days: number) => new Date(NOW.getTime() - days * DAY);
 const live = {
-  assetId: 'asset-1',
-  tenantId: 'tenant-1',
   organicActive: true,
   authorizationId: 'auth-1',
   authorizationStatus: 'connected',
   reauthSince: null,
+  confirmedAt: daysAgo(1),
 };
 
 describe('youtubePurgeReason', () => {
-  it('keeps a live channel', () => {
+  it('keeps a live, recently confirmed channel', () => {
     expect(youtubePurgeReason(live, NOW)).toBeNull();
   });
 
@@ -33,20 +33,69 @@ describe('youtubePurgeReason', () => {
     ).toBe('disconnected');
   });
 
-  it('waits the grace period after reauth_required, then purges', () => {
+  it('counts reauth_required from the last confirmation, which precedes the revocation', () => {
     const reauth = { ...live, authorizationStatus: 'reauth_required' };
-    const within = new Date(
-      NOW.getTime() - (YOUTUBE_REAUTH_GRACE_DAYS - 1) * DAY,
-    );
-    const past = new Date(NOW.getTime() - YOUTUBE_REAUTH_GRACE_DAYS * DAY);
-    expect(youtubePurgeReason({ ...reauth, reauthSince: within }, NOW)).toBe(
-      null,
-    );
-    expect(youtubePurgeReason({ ...reauth, reauthSince: past }, NOW)).toBe(
-      'reauth_expired',
-    );
-    // Unknown start: the clock starts now, never an immediate purge.
-    expect(youtubePurgeReason(reauth, NOW)).toBeNull();
+    // Detected only 2 days ago, but last confirmed 20 days ago: purge now.
+    expect(
+      youtubePurgeReason(
+        {
+          ...reauth,
+          confirmedAt: daysAgo(YOUTUBE_REAUTH_GRACE_DAYS),
+          reauthSince: daysAgo(2),
+        },
+        NOW,
+      ),
+    ).toBe('reauth_expired');
+    expect(
+      youtubePurgeReason(
+        {
+          ...reauth,
+          confirmedAt: daysAgo(YOUTUBE_REAUTH_GRACE_DAYS - 1),
+          reauthSince: daysAgo(2),
+        },
+        NOW,
+      ),
+    ).toBeNull();
+    // No confirmation known: the refusal itself starts the clock.
+    expect(
+      youtubePurgeReason(
+        {
+          ...reauth,
+          confirmedAt: null,
+          reauthSince: daysAgo(YOUTUBE_REAUTH_GRACE_DAYS),
+        },
+        NOW,
+      ),
+    ).toBe('reauth_expired');
+    // Nothing known: never an immediate purge.
+    expect(
+      youtubePurgeReason(
+        { ...reauth, confirmedAt: null, reauthSince: null },
+        NOW,
+      ),
+    ).toBeNull();
+  });
+
+  it('purges a connected channel no check has confirmed for weeks', () => {
+    expect(
+      youtubePurgeReason(
+        { ...live, confirmedAt: daysAgo(YOUTUBE_UNVERIFIED_GRACE_DAYS) },
+        NOW,
+      ),
+    ).toBe('unverified');
+    expect(
+      youtubePurgeReason(
+        { ...live, confirmedAt: daysAgo(YOUTUBE_UNVERIFIED_GRACE_DAYS - 1) },
+        NOW,
+      ),
+    ).toBeNull();
+    // Before the first stamp (legacy rows) the rule does not apply.
+    expect(youtubePurgeReason({ ...live, confirmedAt: null }, NOW)).toBeNull();
+  });
+
+  it('keeps every deadline inside the YouTube 30-day limit', () => {
+    expect(YOUTUBE_REAUTH_GRACE_DAYS).toBeLessThan(30);
+    expect(YOUTUBE_UNVERIFIED_GRACE_DAYS).toBeLessThan(30);
   });
 });
 
@@ -58,51 +107,5 @@ describe('youtubeDataRetentionEnabled', () => {
     expect(youtubeDataRetentionEnabled()).toBe(true);
     process.env[key] = 'FALSE';
     expect(youtubeDataRetentionEnabled()).toBe(false);
-  });
-});
-
-describe('YoutubeDataRetentionService.purgeAsset', () => {
-  function build(candidate: Record<string, unknown> | undefined) {
-    const manager = {
-      query: jest.fn(async (sql: string, _params?: unknown[]) => {
-        if (sql.includes('FROM social_organic_assets a')) {
-          return candidate ? [candidate] : [];
-        }
-        if (sql.startsWith('DELETE')) return [[], 3];
-        return [];
-      }),
-    };
-    const dataSource = {
-      transaction: (work: (m: typeof manager) => unknown) => work(manager),
-    };
-    return {
-      manager,
-      service: new YoutubeDataRetentionService(dataSource as never),
-    };
-  }
-
-  it('deletes metrics, scrubs the channel and audits the purge', async () => {
-    const { service, manager } = build({ ...live, organicActive: false });
-    await expect(service.purgeAsset('asset-1', NOW)).resolves.toBe(6);
-    const sql = manager.query.mock.calls.map(([s]) => s);
-    expect(sql.filter((s) => s.startsWith('DELETE'))).toEqual([
-      'DELETE FROM social_organic_post_metrics_daily WHERE asset_id = $1',
-      'DELETE FROM social_organic_account_metrics_daily WHERE asset_id = $1',
-    ]);
-    expect(sql.some((s) => s.includes('display_name = NULL'))).toBe(true);
-    const audit = manager.query.mock.calls.find(([s]) =>
-      String(s).includes('youtube_data_purged'),
-    )!;
-    expect(audit[1]).toEqual([
-      'tenant-1',
-      'auth-1',
-      'disconnected:asset=asset-1',
-    ]);
-  });
-
-  it('does nothing when the channel became live again under the lock', async () => {
-    const { service, manager } = build(live);
-    await expect(service.purgeAsset('asset-1', NOW)).resolves.toBeNull();
-    expect(manager.query).toHaveBeenCalledTimes(1);
   });
 });

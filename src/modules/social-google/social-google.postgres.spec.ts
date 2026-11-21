@@ -5,6 +5,7 @@ import type { CompanyAwareScope } from '../../common/context/company-aware-scope
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { CreateSocialGoogleOAuth1803700000000 } from '../../database/migrations/1803700000000-create-social-google-oauth';
 import { SocialGoogleIdentityPerAuthorization1804000000000 } from '../../database/migrations/1804000000000-social-google-identity-per-authorization';
+import { SocialGoogleYoutubeProduct1804200000000 } from '../../database/migrations/1804200000000-social-google-youtube-product';
 import { SocialAdAccountConnectionEntity } from '../social-integrations/entities/social-ad-account-connection.entity';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import {
@@ -12,7 +13,10 @@ import {
   GoogleOAuthError,
   type GoogleTokenSet,
 } from './google-oauth.client';
-import { GOOGLE_PRODUCT_SCOPES } from './google-oauth.constants';
+import {
+  GOOGLE_PRODUCT_REQUIRED_SCOPES,
+  GOOGLE_PRODUCT_SCOPES,
+} from './google-oauth.constants';
 import {
   SocialGoogleAuditEventEntity,
   SocialGoogleAuthorizationEntity,
@@ -103,6 +107,7 @@ run('Google OAuth foundation against PostgreSQL', () => {
 
   const GA4 = GOOGLE_PRODUCT_SCOPES.ga4;
   const ADS = GOOGLE_PRODUCT_SCOPES.ads;
+  const YOUTUBE_SCOPES = GOOGLE_PRODUCT_REQUIRED_SCOPES.youtube;
 
   const newScope = (
     overrides: Partial<CompanyAwareScope> = {},
@@ -132,7 +137,7 @@ run('Google OAuth foundation against PostgreSQL', () => {
   async function startAndCallback(
     scope: CompanyAwareScope,
     userId: string,
-    product: 'ga4' | 'ads' | 'business_profile',
+    product: 'ga4' | 'ads' | 'business_profile' | 'youtube',
     next: Grant,
   ) {
     google.nextGrant = next;
@@ -149,7 +154,7 @@ run('Google OAuth foundation against PostgreSQL', () => {
   async function connect(
     scope: CompanyAwareScope,
     userId: string,
-    product: 'ga4' | 'ads' | 'business_profile',
+    product: 'ga4' | 'ads' | 'business_profile' | 'youtube',
     next: Grant,
   ) {
     const { params } = await startAndCallback(scope, userId, product, next);
@@ -204,6 +209,7 @@ run('Google OAuth foundation against PostgreSQL', () => {
     await migration.down(runner);
     await migration.up(runner);
     await new SocialGoogleIdentityPerAuthorization1804000000000().up(runner);
+    await new SocialGoogleYoutubeProduct1804200000000().up(runner);
     await runner.release();
   });
 
@@ -789,6 +795,51 @@ run('Google OAuth foundation against PostgreSQL', () => {
         accessTokenEncrypted: null,
         refreshTokenEncrypted: null,
       });
+    });
+
+    it('revokes at Google when YouTube is the last product (YouTube III.D.2.3)', async () => {
+      const scope = newScope();
+      await connect(
+        scope,
+        randomUUID(),
+        'youtube',
+        grant({ scopes: ['openid', ...YOUTUBE_SCOPES], refreshToken: 'rt-YT' }),
+      );
+      const result = await auth.disconnectProduct({
+        scope,
+        userId: null,
+        product: 'youtube',
+      });
+      expect(result).toMatchObject({
+        authorizationRevoked: true,
+        providerRevoked: true,
+        remoteGrantRetained: false,
+      });
+      expect(google.revokeImpl).toHaveBeenCalledWith('rt-YT');
+      const events = await dataSource.query<Array<{ event: string }>>(
+        `SELECT event FROM social_google_audit_events WHERE tenant_id = $1`,
+        [scope.tenantId],
+      );
+      expect(events.map((e) => e.event)).toContain('authorization_revoked');
+    });
+
+    it('keeps the grant when YouTube goes but the identity is shared', async () => {
+      const a = newScope();
+      const b = newScope();
+      const youtube = { scopes: ['openid', ...YOUTUBE_SCOPES] };
+      await connect(a, randomUUID(), 'youtube', grant(youtube));
+      await connect(b, randomUUID(), 'youtube', grant(youtube));
+      const result = await auth.disconnectProduct({
+        scope: a,
+        userId: null,
+        product: 'youtube',
+      });
+      expect(result).toMatchObject({
+        authorizationRevoked: true,
+        providerRevoked: null,
+        remoteGrantRetained: true,
+      });
+      expect(google.revokeImpl).not.toHaveBeenCalled();
     });
 
     it('does not revoke at Google by default on full disconnect', async () => {

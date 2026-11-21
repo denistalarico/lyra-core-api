@@ -17,6 +17,7 @@ import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.cl
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
 import { YoutubeDataRetentionScheduler } from './analytics/youtube/youtube-data-retention.scheduler';
 import { YoutubeDataRetentionService } from './analytics/youtube/youtube-data-retention.service';
+import { YoutubeOrganicHealthService } from './providers/youtube/youtube-organic-health.service';
 import {
   MEDIA_ASSET_METADATA_READER,
   MediaAssetController,
@@ -275,10 +276,11 @@ describe('SocialOrganicModule', () => {
       LinkedInPublisherAdapter,
       LinkedInPublisherRegistration,
       MetaOrganicHealthService,
+      YoutubeOrganicHealthService,
       {
         provide: SOCIAL_ORGANIC_HEALTH_PROVIDERS,
         useFactory: createOrganicHealthProviders,
-        inject: [MetaOrganicHealthService],
+        inject: [MetaOrganicHealthService, YoutubeOrganicHealthService],
       },
       SocialOrganicHealthScheduler,
       MetaOrganicInsightsService,

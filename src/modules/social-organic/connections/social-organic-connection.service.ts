@@ -11,6 +11,11 @@ import type { EntityManager } from 'typeorm';
 import { DataSource, IsNull, Repository } from 'typeorm';
 import { SocialGoogleAuthorizationService } from '../../social-google/social-google-authorization.service';
 import { googleProductForOrganicProvider } from '../credentials/social-organic-google-products';
+import {
+  YoutubeDataRetentionService,
+  youtubeDataRetentionEnabled,
+} from '../analytics/youtube/youtube-data-retention.service';
+import { YOUTUBE_PROVIDER } from '../providers/youtube/youtube-capabilities';
 import { SocialOrganicCredentialResolver } from '../credentials';
 import {
   SocialOrganicAssetEntity,
@@ -75,6 +80,8 @@ export class SocialOrganicConnectionService {
     private readonly publicationCancellation?: SocialOrganicPublicationCancellationHook,
     @Optional()
     private readonly googleAuthorization?: SocialGoogleAuthorizationService,
+    @Optional()
+    private readonly youtubeRetention?: YoutubeDataRetentionService,
   ) {}
 
   async list(
@@ -136,6 +143,7 @@ export class SocialOrganicConnectionService {
     const companyContextId = input.companyContextId ?? null;
     let googleProduct: ReturnType<typeof googleProductForOrganicProvider> =
       null;
+    let youtubeAssetIds: string[] = [];
     const view = await this.dataSource.transaction(async (manager) => {
       const connections = manager.getRepository(SocialOrganicConnectionEntity);
       const assets = manager.getRepository(SocialOrganicAssetEntity);
@@ -258,6 +266,9 @@ export class SocialOrganicConnectionService {
       }
 
       connection.assets = boundAssets;
+      if (connection.provider === YOUTUBE_PROVIDER) {
+        youtubeAssetIds = boundAssets.map((asset) => asset.id);
+      }
       if (connection.authorizationMethod === 'google_oauth') {
         googleProduct = googleProductForOrganicProvider(connection.provider);
       }
@@ -281,6 +292,21 @@ export class SocialOrganicConnectionService {
         });
       } catch (error) {
         if (!(error instanceof NotFoundException)) throw error;
+      }
+    }
+    // YouTube API Services III.D.2.3: data of a channel disconnected in Lyra
+    // goes now; the nightly retention sweep is the fallback if this fails.
+    if (this.youtubeRetention && youtubeDataRetentionEnabled()) {
+      for (const assetId of youtubeAssetIds) {
+        try {
+          await this.youtubeRetention.purgeAsset(assetId, new Date());
+        } catch (error) {
+          this.logger.warn(
+            `YouTube data purge after disconnect deferred to the nightly sweep: ${
+              error instanceof Error ? error.name : 'unknown_error'
+            }`,
+          );
+        }
       }
     }
     return view;

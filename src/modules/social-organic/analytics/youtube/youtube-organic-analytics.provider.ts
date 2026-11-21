@@ -19,6 +19,7 @@ import {
   type YoutubeReportRow,
   type YoutubeVideoDetail,
 } from './youtube-analytics.client';
+import { refreshYoutubeVideoDetails } from './youtube-data-retention.service';
 import {
   isPartialDay,
   normalizeYoutubeAccountDay,
@@ -146,36 +147,13 @@ export class YoutubeOrganicAnalyticsProvider implements SocialOrganicAnalyticsPr
 
     const written = await this.writer.upsert({ accountRows, postRows });
     counters.rowsWritten += written.accountRows + written.postRows;
-    await this.refreshVideoDetails(credential.assetId, videoIds, details);
-  }
-
-  /**
-   * YouTube policy (III.E.4): stored Data API fields must be refreshed or
-   * deleted within 30 days. Every older row of a video just read gets its
-   * current title and publish time; a video `videos.list` no longer returns
-   * (deleted or private) loses them. Unread videos expire in
-   * `YoutubeDataRetentionService.expireStaleDetails`.
-   */
-  private async refreshVideoDetails(
-    assetId: string,
-    videoIds: string[],
-    details: ReadonlyMap<string, YoutubeVideoDetail>,
-  ) {
-    if (videoIds.length === 0) return;
-    await this.dataSource.query(
-      `UPDATE social_organic_post_metrics_daily p
-          SET caption = d.title, published_at = d.published_at
-         FROM unnest($2::text[], $3::text[], $4::timestamptz[])
-                AS d(video_id, title, published_at)
-        WHERE p.asset_id = $1 AND p.external_publication_id = d.video_id
-          AND (p.caption IS DISTINCT FROM d.title
-               OR p.published_at IS DISTINCT FROM d.published_at)`,
-      [
-        assetId,
-        videoIds,
-        videoIds.map((id) => details.get(id)?.title ?? null),
-        videoIds.map((id) => details.get(id)?.publishedAt ?? null),
-      ],
+    // YouTube policy (III.E.4): older rows of each video read get its current
+    // title and publish time (see YoutubeDataRetentionService).
+    await refreshYoutubeVideoDetails(
+      this.dataSource,
+      credential.assetId,
+      videoIds,
+      details,
     );
   }
 

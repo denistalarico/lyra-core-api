@@ -338,28 +338,42 @@ export class SocialGoogleAuthorizationService {
         return {
           authorizationRevoked: false,
           authorizationId: authorization.id,
+          token: null,
         };
       }
-      await this.tearDown(
+      // YouTube API Services III.D.2.3: an in-app revocation must revoke the
+      // token at Google right away. Only when YouTube was the last product and
+      // no other live connection shares the identity (it would break them).
+      const revokeRemote =
+        input.product === 'youtube' &&
+        (await this.countOtherLiveHolders(manager, authorization)) === 0;
+      const token = await this.tearDown(
         manager,
         input.scope,
         authorization,
         input.userId,
-        'credentials_discarded',
+        revokeRemote ? 'authorization_revoked' : 'credentials_discarded',
       );
-      return { authorizationRevoked: true, authorizationId: authorization.id };
+      return {
+        authorizationRevoked: true,
+        authorizationId: authorization.id,
+        token: revokeRemote ? token : null,
+      };
     });
 
+    const providerRevoked = outcome.token
+      ? await this.revokeAtProvider(outcome.token)
+      : null;
     return {
       product: input.product,
       status: 'disconnected' as const,
       // True when the last product went away and local credentials were wiped.
       authorizationRevoked: outcome.authorizationRevoked,
-      // Never revoked at Google by a product disconnect. The Google grant stays
-      // until `revoke` with `revokeAtGoogle`, or the user removes it in their
-      // Google account.
-      providerRevoked: null,
-      remoteGrantRetained: outcome.authorizationRevoked,
+      // Other products: never revoked at Google by a product disconnect; the
+      // grant stays until `revoke` with `revokeAtGoogle`, or the user removes it
+      // in their Google account. YouTube as the last product: revoked above.
+      providerRevoked,
+      remoteGrantRetained: outcome.authorizationRevoked && !providerRevoked,
       // Google cannot drop a single scope from a live grant; the other
       // connected products keep theirs until the authorization is revoked.
       remainingProducts: outcome.authorizationRevoked

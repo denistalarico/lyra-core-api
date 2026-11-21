@@ -189,7 +189,9 @@ export class SocialOrganicYoutubeService {
       asset.status = 'active';
       asset.lastHealthCheckAt = null;
       asset.lastHealthStatus = null;
-      asset.metadata = {};
+      // A fresh `channels.list` just confirmed the grant and the channel: the
+      // first stamp of the YouTube retention clock (see the health check).
+      asset.metadata = { youtubeConfirmedAt: new Date().toISOString() };
       const saved = await assets.save(asset);
 
       connection.assets = [saved];
