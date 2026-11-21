@@ -39,6 +39,8 @@ import type {
   TelemetryContributionScope,
 } from '../types/leadflow-telemetry.types';
 import {
+  isEligibleContributionRow,
+  isEligibleContributionSource,
   TelemetryContributionRegistry,
   type TelemetryContribution,
 } from './telemetry-contribution.port';
@@ -681,14 +683,23 @@ export class LeadFlowTelemetryPrivacyService {
 
     return Promise.all(
       sources.map(async (source) => {
+        // Google API data never enters the collective contribution, not even
+        // aggregated: the source is not asked at all.
+        if (!isEligibleContributionSource(source)) {
+          this.logger.warn(
+            `Telemetry contribution source ${source.contributionSourceKey} skipped: restricted or undeclared data origin.`,
+          );
+          return { sourceKey: source.contributionSourceKey, contributions: [] };
+        }
         try {
+          const contributions = await source.buildContributions({
+            scope: contributionScope,
+            since: window.since,
+            until: window.until,
+          });
           return {
             sourceKey: source.contributionSourceKey,
-            contributions: await source.buildContributions({
-              scope: contributionScope,
-              since: window.since,
-              until: window.until,
-            }),
+            contributions: contributions.filter(isEligibleContributionRow),
           };
         } catch (error) {
           this.logger.warn(

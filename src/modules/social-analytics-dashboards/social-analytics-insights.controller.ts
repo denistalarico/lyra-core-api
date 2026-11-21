@@ -71,6 +71,7 @@ export class SocialAnalyticsInsightsController {
   ) {
     try {
       return await this.service.generate(resolveCompanyAwareScope(ctx), {
+        channel: dto.channel,
         sectionTitle: dto.sectionTitle,
         channelLabel: dto.channelLabel,
         since: dto.since,

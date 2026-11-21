@@ -15,6 +15,7 @@ const scope: CompanyAwareScope = {
 };
 
 const request: SocialAnalyticsInsightRequest = {
+  channel: 'meta_ads',
   sectionTitle: 'Ads',
   channelLabel: 'Meta Ads',
   since: '2026-09-01',
@@ -137,6 +138,58 @@ describe('SocialAnalyticsInsightConfigService', () => {
 });
 
 describe('SocialAnalyticsInsightService', () => {
+  it.each([
+    ['a YouTube section', { channel: 'youtube' }],
+    ['a Google Ads section', { channel: 'google_ads' }],
+    ['a GA4 section', { channel: 'ga4' }],
+    ['the cross-channel summary', { channel: 'summary' }],
+    ['a section labelled YouTube', { channelLabel: 'YouTube' }],
+    [
+      'a metric mentioning Google Ads',
+      {
+        metrics: [
+          { label: 'Cliques Google Ads', value: '10', description: null },
+        ],
+      },
+    ],
+  ])('never sends %s to the AI provider', async (_label, patch) => {
+    await withEnv(
+      { SOCIAL_ANALYTICS_INSIGHT_PROVIDER_MODE: 'mock' },
+      async () => {
+        const { service, provider } = buildService({});
+
+        const failure = await service
+          .generate(scope, { ...request, ...patch })
+          .catch((error: unknown) => error);
+
+        expect(failure).toBeInstanceOf(SocialAnalyticsInsightError);
+        expect((failure as SocialAnalyticsInsightError).code).toBe(
+          'insight_source_restricted',
+        );
+        expect(
+          SocialAnalyticsInsightService.statusFor(
+            failure as SocialAnalyticsInsightError,
+          ),
+        ).toBe(422);
+        expect(provider.generate).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it('still analyses an own-context Meta section', async () => {
+    await withEnv(
+      { SOCIAL_ANALYTICS_INSIGHT_PROVIDER_MODE: 'mock' },
+      async () => {
+        const { service, provider } = buildService({});
+
+        await expect(service.generate(scope, request)).resolves.toMatchObject({
+          body: 'Uma análise.',
+        });
+        expect(provider.generate).toHaveBeenCalledTimes(1);
+      },
+    );
+  });
+
   it('records an estimated cost in cents from the configured rates', async () => {
     await withEnv(
       {

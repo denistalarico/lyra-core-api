@@ -6,9 +6,12 @@ import {
   SocialAnalyticsInsightProvider,
   type InsightMetricInput,
 } from './social-analytics-insight.provider';
+import { isGoogleApiDataOrigin } from '../../../common/intelligence/intelligence-data-origin';
 import { SocialAnalyticsInsightError } from './social-analytics-insight.errors';
 
 export type SocialAnalyticsInsightRequest = {
+  /** Dashboard section channel (`meta_ads`, `instagram`, `youtube`, ...). */
+  channel: string;
   sectionTitle: string;
   channelLabel: string;
   since: string;
@@ -61,6 +64,10 @@ export class SocialAnalyticsInsightService {
     scope: CompanyAwareScope,
     request: SocialAnalyticsInsightRequest,
   ): Promise<SocialAnalyticsInsightView> {
+    if (carriesGoogleApiData(request)) {
+      throw new SocialAnalyticsInsightError('insight_source_restricted');
+    }
+
     const result = await this.provider.generate({
       idempotencyKey: randomUUID(),
       sectionTitle: request.sectionTitle,
@@ -121,6 +128,8 @@ export class SocialAnalyticsInsightService {
         return 429;
       case 'insight_context_empty':
         return 400;
+      case 'insight_source_restricted':
+        return 422;
       default:
         return 502;
     }
@@ -137,8 +146,31 @@ export class SocialAnalyticsInsightService {
         return 'O Orion está recebendo muitas solicitações. Tente novamente em instantes.';
       case 'insight_context_empty':
         return 'Esta seção não tem métricas com valor para analisar.';
+      case 'insight_source_restricted':
+        return 'Dados de YouTube, Google Ads e Google Analytics não são enviados ao Orion.';
       default:
         return 'Não foi possível gerar a análise agora.';
     }
   }
+}
+
+/**
+ * Google API data (YouTube, Google Ads, GA4) is never sent to the AI provider:
+ * Google API Services User Data Policy (Limited Use, no transfers) and YouTube
+ * API Services Developer Policies III.E.3. The cross-channel summary is refused
+ * too, since it can mix those numbers in; labels are checked as a second net.
+ */
+function carriesGoogleApiData(request: SocialAnalyticsInsightRequest): boolean {
+  if (request.channel === 'summary' || isGoogleApiDataOrigin(request.channel)) {
+    return true;
+  }
+  const texts = [
+    request.sectionTitle,
+    request.channelLabel,
+    ...request.metrics.flatMap((metric) => [
+      metric.label,
+      metric.description ?? '',
+    ]),
+  ];
+  return texts.some((text) => /youtube|google|\bga4\b/i.test(text));
 }

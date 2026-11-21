@@ -30,6 +30,7 @@
  * contact or user id. The only identity permitted anywhere near a fact row is
  * the existing `scope_pseudonym`.
  */
+import { isGoogleApiDataOrigin } from './intelligence-data-origin';
 
 /** Version prefix. Bumped when the encoding changes, never reused. */
 export const BENCHMARK_COHORT_VERSION = 'v1';
@@ -262,7 +263,11 @@ function assertEligibleCohort(
     );
   }
 
-  if (!ELIGIBLE_PROVIDERS.has(cohort.provider)) {
+  // Checked before the allow-list so extending it can never admit Google data.
+  if (
+    isGoogleApiDataOrigin(cohort.provider) ||
+    !ELIGIBLE_PROVIDERS.has(cohort.provider)
+  ) {
     throw new Error(
       `Provider "${cohort.provider}" is not a benchmark provider.`,
     );

@@ -9,6 +9,7 @@
 export * from './intelligence-benchmark';
 export * from './intelligence-benchmark-cohort';
 export * from './intelligence-business-mode';
+export * from './intelligence-data-origin';
 export * from './intelligence-fact';
 export * from './intelligence-minor-units';
 export * from './intelligence-percentiles';

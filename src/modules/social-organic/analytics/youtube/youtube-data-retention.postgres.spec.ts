@@ -4,6 +4,7 @@ import { SocialGoogleYoutubeProduct1804200000000 } from '../../../../database/mi
 import { describePostgresIntegration } from '../../../../testing/postgres-integration';
 import { SocialOrganicAssetEntity } from '../../entities';
 import { YoutubeOrganicHealthService } from '../../providers/youtube/youtube-organic-health.service';
+import { YOUTUBE_DATA_REQUEST_REPORT_SQL } from '../../../../scripts/youtube-data-request-report';
 import { YoutubeDataRetentionService } from './youtube-data-retention.service';
 
 const run = describePostgresIntegration();
@@ -387,6 +388,39 @@ run('YouTube data retention against PostgreSQL', () => {
     await expect(service.purgeAsset(gone.assetId, NOW)).resolves.toBe(4);
   });
 
+  it('reports what a deletion request leaves stored, before and after the purge', async () => {
+    const gone = await channel({ assetStatus: 'revoked', google: 'connected' });
+    await report(gone.workspaceId, ['youtube']);
+    const read = async () => {
+      const [row] = await AgencyDataSource.query<
+        Array<Record<string, unknown>>
+      >(YOUTUBE_DATA_REQUEST_REPORT_SQL, [`UC-${gone.assetId}`]);
+      return row;
+    };
+    expect(await read()).toMatchObject({
+      assetId: gone.assetId,
+      workspaceId: gone.workspaceId,
+      assetStatus: 'revoked',
+      channelDetailsStored: true,
+      videoMetricRows: 3,
+      channelMetricRows: 1,
+      reportsWithYoutube: 1,
+      googleYoutubeLinks: 'connected/connected',
+      lastPurgedAt: null,
+    });
+
+    await service.purgeAsset(gone.assetId, NOW);
+
+    const after = await read();
+    expect(after).toMatchObject({
+      channelDetailsStored: false,
+      videoMetricRows: 0,
+      channelMetricRows: 0,
+      reportsWithYoutube: 0,
+    });
+    expect(after.lastPurgedAt).not.toBeNull();
+  });
+
   describe('YoutubeOrganicHealthService', () => {
     function health(input: {
       channels?: Array<{ channelId: string }>;
@@ -486,6 +520,54 @@ run('YouTube data retention against PostgreSQL', () => {
       expect(await count('social_organic_post_metrics_daily', ch.assetId)).toBe(
         3,
       );
+    });
+
+    it('verifies a large channel in rotating batches and stamps only a full pass', async () => {
+      const ch = await channel({
+        google: 'connected',
+        confirmedAt: daysAgo(10),
+      });
+      const firstDay = health({
+        channels: [{ channelId: (await entity(ch.assetId)).externalAssetId }],
+        videos: ['vid-live'],
+      });
+      firstDay.videoBatchSize = 1;
+      expect(await firstDay.runCheck(await entity(ch.assetId), NOW)).toBe(
+        'healthy',
+      );
+      let after = await asset(ch.assetId);
+      expect(after.metadata).toMatchObject({
+        youtubeConfirmedAt: NOW.toISOString(),
+        youtubeVideosVerifiedAt: daysAgo(10).toISOString(),
+        youtubeVideoCursor: 'vid-live',
+        youtubeVideoCycleStartedAt: NOW.toISOString(),
+      });
+
+      // Next day: the rest of the pass. vid-old is gone at YouTube.
+      const nextDay = new Date(NOW.getTime() + 86_400_000);
+      const secondDay = health({
+        channels: [{ channelId: (await entity(ch.assetId)).externalAssetId }],
+        videos: ['vid-live'],
+      });
+      secondDay.videoBatchSize = 1;
+      expect(await secondDay.runCheck(await entity(ch.assetId), nextDay)).toBe(
+        'healthy',
+      );
+      after = await asset(ch.assetId);
+      expect(after.metadata.youtubeVideosVerifiedAt).toBe(NOW.toISOString());
+      expect(after.metadata.youtubeConfirmedAt).toBe(nextDay.toISOString());
+      expect(after.metadata.youtubeVideoCursor).toBeUndefined();
+      expect(after.metadata.youtubeVideoCycleStartedAt).toBeUndefined();
+      const videos = await AgencyDataSource.query<
+        Array<{ external_publication_id: string }>
+      >(
+        `SELECT DISTINCT external_publication_id FROM social_organic_post_metrics_daily
+          WHERE asset_id = $1`,
+        [ch.assetId],
+      );
+      expect(videos.map((v) => v.external_publication_id)).toEqual([
+        'vid-live',
+      ]);
     });
 
     it('only checks live channels not checked in the last day', async () => {

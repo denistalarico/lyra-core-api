@@ -14,6 +14,19 @@ export const GOOGLE_PRODUCTS = [
 ] as const;
 export type GoogleProduct = (typeof GOOGLE_PRODUCTS)[number];
 
+/**
+ * Products a new authorization may be started for. Business Profile is not
+ * released: `business.manage` is never requested until it is (and listed in
+ * the OAuth verification and the Privacy Policy).
+ */
+export const GOOGLE_AUTHORIZABLE_PRODUCTS = ['ga4', 'ads', 'youtube'] as const;
+
+export function isGoogleAuthorizableProduct(
+  product: string,
+): product is (typeof GOOGLE_AUTHORIZABLE_PRODUCTS)[number] {
+  return (GOOGLE_AUTHORIZABLE_PRODUCTS as readonly string[]).includes(product);
+}
+
 export const GOOGLE_IDENTITY_SCOPE = 'openid';
 
 /**

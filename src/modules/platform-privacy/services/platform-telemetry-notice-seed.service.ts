@@ -22,6 +22,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LeadFlowTelemetryConsentNoticeEntity } from '../../leadflow-privacy/entities';
 import {
+  CLIENT_AREA_ESSENTIAL_NOTICE_BODY,
+  CLIENT_AREA_ESSENTIAL_NOTICE_TITLE,
+  CLIENT_AREA_ESSENTIAL_NOTICE_VERSION,
+  CLIENT_AREA_ESSENTIAL_PURPOSE_KEY,
+  clientAreaEssentialNoticeContentHash,
   PLATFORM_PRODUCT_TELEMETRY_PURPOSE,
   PLATFORM_TELEMETRY_NOTICE_CATEGORIES,
   PLATFORM_TELEMETRY_NOTICE_K_ANONYMITY,
@@ -30,11 +35,15 @@ import {
   PLATFORM_TELEMETRY_NOTICE_TITLE,
   PLATFORM_TELEMETRY_NOTICE_BODY,
   PLATFORM_TELEMETRY_NOTICE_VERSION,
+  PLATFORM_TELEMETRY_NOTICE_V2_BODY,
+  PLATFORM_TELEMETRY_NOTICE_V2_TITLE,
+  PLATFORM_TELEMETRY_NOTICE_V2_VERSION,
   PLATFORM_TELEMETRY_NOTICE_V1_CATEGORIES,
   PLATFORM_TELEMETRY_NOTICE_V1_TITLE,
   PLATFORM_TELEMETRY_NOTICE_V1_BODY,
   platformTelemetryNoticeContentHash,
   platformTelemetryNoticeV1ContentHash,
+  platformTelemetryNoticeV2ContentHash,
 } from '../platform-telemetry-purpose';
 
 const V1_VERSION = 1;
@@ -68,10 +77,18 @@ export class PlatformTelemetryNoticeSeedService implements OnApplicationBootstra
         );
       }
 
+      await this.seedV2();
       const current = await this.seed();
       if (current.action === 'created') {
         this.logger.log(
           `Seeded neutral telemetry notice ${PLATFORM_PRODUCT_TELEMETRY_PURPOSE} v${PLATFORM_TELEMETRY_NOTICE_VERSION}.`,
+        );
+      }
+
+      const essential = await this.seedEssentialNotice();
+      if (essential.action === 'created') {
+        this.logger.log(
+          `Seeded ${CLIENT_AREA_ESSENTIAL_PURPOSE_KEY} v${CLIENT_AREA_ESSENTIAL_NOTICE_VERSION}.`,
         );
       }
     } catch (error) {
@@ -87,8 +104,8 @@ export class PlatformTelemetryNoticeSeedService implements OnApplicationBootstra
    * when its stored body differs from the constant, because rewriting a
    * notice that consents already point at is exactly what D-4 forbids.
    *
-   * Seeds the CURRENT version — `PLATFORM_TELEMETRY_NOTICE_VERSION` (2, as of
-   * I6.2) — never the original v1. `seedV1` below is what keeps v1 present for
+   * Seeds the CURRENT version — `PLATFORM_TELEMETRY_NOTICE_VERSION` (3, since
+   * the Google OAuth review) — never the original v1. `seedV1` below is what keeps v1 present for
    * a deployment that has never booted this service before; it is a distinct
    * method rather than a loop over versions so that "the version this seeds"
    * is never ambiguous from the call site.
@@ -119,6 +136,39 @@ export class PlatformTelemetryNoticeSeedService implements OnApplicationBootstra
    * as history even though it is no longer the version anyone resolves
    * against for a new acceptance.
    */
+  /** Version 2, exactly as I6.2 shipped it, kept present as history. */
+  private async seedV2(): Promise<PlatformTelemetryNoticeSeedResult> {
+    return this.seedVersion({
+      version: PLATFORM_TELEMETRY_NOTICE_V2_VERSION,
+      title: PLATFORM_TELEMETRY_NOTICE_V2_TITLE,
+      body: PLATFORM_TELEMETRY_NOTICE_V2_BODY,
+      contentHash: platformTelemetryNoticeV2ContentHash(),
+      categories: PLATFORM_TELEMETRY_NOTICE_CATEGORIES,
+      retentionDays: PLATFORM_TELEMETRY_NOTICE_RETENTION_DAYS,
+      kAnonymityThreshold: PLATFORM_TELEMETRY_NOTICE_K_ANONYMITY,
+      legalReviewStatus: 'provisional',
+    });
+  }
+
+  /**
+   * Client-area essential notice v2: the v1 placeholder plus the provider
+   * restriction clause. Still `pending`: the essential text awaits legal
+   * approval (EXT-CA-4) and only `approved` releases its acceptance.
+   */
+  async seedEssentialNotice(): Promise<PlatformTelemetryNoticeSeedResult> {
+    return this.seedVersion({
+      purposeKey: CLIENT_AREA_ESSENTIAL_PURPOSE_KEY,
+      version: CLIENT_AREA_ESSENTIAL_NOTICE_VERSION,
+      title: CLIENT_AREA_ESSENTIAL_NOTICE_TITLE,
+      body: CLIENT_AREA_ESSENTIAL_NOTICE_BODY,
+      contentHash: clientAreaEssentialNoticeContentHash(),
+      categories: [],
+      retentionDays: 365,
+      kAnonymityThreshold: 5,
+      legalReviewStatus: 'pending',
+    });
+  }
+
   private async seedV1(): Promise<PlatformTelemetryNoticeSeedResult> {
     return this.seedVersion({
       version: V1_VERSION,
@@ -133,6 +183,7 @@ export class PlatformTelemetryNoticeSeedService implements OnApplicationBootstra
   }
 
   private async seedVersion(input: {
+    purposeKey?: string;
     version: number;
     title: string;
     body: string;
@@ -142,9 +193,10 @@ export class PlatformTelemetryNoticeSeedService implements OnApplicationBootstra
     kAnonymityThreshold: number;
     legalReviewStatus: 'pending' | 'provisional' | 'approved' | 'rejected';
   }): Promise<PlatformTelemetryNoticeSeedResult> {
+    const purposeKey = input.purposeKey ?? PLATFORM_PRODUCT_TELEMETRY_PURPOSE;
     const existing = await this.notices.findOne({
       where: {
-        purposeKey: PLATFORM_PRODUCT_TELEMETRY_PURPOSE,
+        purposeKey,
         version: input.version,
         locale: PLATFORM_TELEMETRY_NOTICE_LOCALE,
       },
@@ -163,7 +215,7 @@ export class PlatformTelemetryNoticeSeedService implements OnApplicationBootstra
 
     await this.notices.save(
       this.notices.create({
-        purposeKey: PLATFORM_PRODUCT_TELEMETRY_PURPOSE,
+        purposeKey,
         version: input.version,
         locale: PLATFORM_TELEMETRY_NOTICE_LOCALE,
         title: input.title,

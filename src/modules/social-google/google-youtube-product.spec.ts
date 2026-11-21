@@ -1,7 +1,12 @@
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { StartGoogleConnectionDto } from './dto/start-google-connection.dto';
 import {
+  GOOGLE_AUTHORIZABLE_PRODUCTS,
   GOOGLE_PRODUCTS,
   GOOGLE_PRODUCT_REQUIRED_SCOPES,
   hasProductScopes,
+  isGoogleAuthorizableProduct,
   scopesForProduct,
 } from './google-oauth.constants';
 import { toGoogleStatusView } from './social-google.support';
@@ -29,6 +34,20 @@ describe('youtube Google product (D-I1)', () => {
   it('keeps a single scope for the other products', () => {
     for (const product of ['ga4', 'ads', 'business_profile'] as const) {
       expect(GOOGLE_PRODUCT_REQUIRED_SCOPES[product]).toHaveLength(1);
+    }
+  });
+
+  it('never starts an authorization for Business Profile (business.manage)', () => {
+    expect(GOOGLE_AUTHORIZABLE_PRODUCTS).toEqual(['ga4', 'ads', 'youtube']);
+    expect(isGoogleAuthorizableProduct('business_profile')).toBe(false);
+    const errors = (product: string) =>
+      validateSync(plainToInstance(StartGoogleConnectionDto, { product }));
+    expect(errors('business_profile')).not.toHaveLength(0);
+    for (const product of GOOGLE_AUTHORIZABLE_PRODUCTS) {
+      expect(errors(product)).toHaveLength(0);
+      expect(scopesForProduct(product)).not.toContain(
+        'https://www.googleapis.com/auth/business.manage',
+      );
     }
   });
 

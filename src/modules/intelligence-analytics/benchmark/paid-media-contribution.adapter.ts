@@ -46,6 +46,8 @@ export class PaidMediaContributionAdapter
 {
   /** Names the domain in the audit trail, not the metric family. */
   readonly contributionSourceKey = 'social_paid_media';
+  /** The builder reads `provider = 'meta_ads'` rows only. */
+  readonly dataOrigins = ['meta_ads'] as const;
 
   constructor(
     private readonly contributions: PaidMediaContributionService,

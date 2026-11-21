@@ -16,9 +16,14 @@ import { YOUTUBE_PROVIDER } from './youtube-capabilities';
 
 /** One check per channel per day, from the hourly health scheduler. */
 const CHECK_EVERY_MS = 20 * 60 * 60 * 1000;
-/** Above this many stored videos the check skips the video verification (and
- * its stamp), leaving the 30-day expiry to clear stale titles. */
-const MAX_VERIFIED_VIDEOS = 10_000;
+/**
+ * Stored videos re-read per daily check (200 `videos.list` calls). A larger
+ * channel is verified in rotating batches (`metadata.youtubeVideoCursor`), so a
+ * full pass over up to 290,000 videos still completes inside 30 days.
+ */
+export const YOUTUBE_VIDEO_VERIFY_BATCH = 10_000;
+const CURSOR_KEY = 'youtubeVideoCursor';
+const CYCLE_KEY = 'youtubeVideoCycleStartedAt';
 
 export type YoutubeHealthOutcome =
   | 'healthy'
@@ -34,17 +39,20 @@ export type YoutubeHealthOutcome =
  *    marks the authorization `reauth_required`);
  * 2. confirms the channel is still reachable by the authorized account and
  *    refreshes its name, handle and avatar;
- * 3. re-reads every stored video: titles and publish times are refreshed, and
- *    the metrics of a video YouTube no longer returns (deleted) are removed;
- * 4. stamps `metadata.youtubeConfirmedAt` (grant and channel) and, when every
- *    stored video was re-read, `metadata.youtubeVideosVerifiedAt`: the clocks
- *    the retention rules use.
+ * 3. re-reads the stored videos (all of them, or the next batch of a large
+ *    channel): titles and publish times are refreshed, and the metrics of a
+ *    video YouTube no longer returns (deleted) are removed;
+ * 4. stamps `metadata.youtubeConfirmedAt` (grant and channel) and, when a pass
+ *    over every stored video completes, `metadata.youtubeVideosVerifiedAt`
+ *    (the pass's start): the clocks the retention rules use.
  * A definitive failure marks the asset `unhealthy`; a transient one changes
  * nothing and is retried next hour.
  */
 @Injectable()
 export class YoutubeOrganicHealthService implements SocialOrganicHealthProvider {
   readonly providers = [YOUTUBE_PROVIDER];
+  /** Videos per check; lowered only by specs. */
+  videoBatchSize = YOUTUBE_VIDEO_VERIFY_BATCH;
   private readonly logger = new Logger(YoutubeOrganicHealthService.name);
 
   constructor(
@@ -80,7 +88,15 @@ export class YoutubeOrganicHealthService implements SocialOrganicHealthProvider 
     let channel:
       | { title: string; customUrl: string | null; thumbnailUrl: string | null }
       | undefined;
+    const metadata = asset.metadata ?? {};
+    const cursor =
+      typeof metadata[CURSOR_KEY] === 'string' ? metadata[CURSOR_KEY] : null;
+    const cycleStartedAt =
+      cursor && typeof metadata[CYCLE_KEY] === 'string'
+        ? metadata[CYCLE_KEY]
+        : now.toISOString();
     let videoIds: string[];
+    let passComplete: boolean;
     let details: Awaited<
       ReturnType<YoutubeAnalyticsClient['videoDetails']>
     >['details'];
@@ -100,9 +116,11 @@ export class YoutubeOrganicHealthService implements SocialOrganicHealthProvider 
       if (!channel)
         return this.markUnhealthy(asset, now, 'channel_unavailable');
 
-      videoIds = await this.storedVideoIds(asset.id);
+      const batch = await this.storedVideoIds(asset.id, cursor);
+      passComplete = batch.length <= this.videoBatchSize;
+      videoIds = batch.slice(0, this.videoBatchSize);
       details =
-        videoIds.length > 0 && videoIds.length <= MAX_VERIFIED_VIDEOS
+        videoIds.length > 0
           ? (await this.youtube.videoDetails(token, videoIds)).details
           : [];
     } catch (error) {
@@ -114,11 +132,11 @@ export class YoutubeOrganicHealthService implements SocialOrganicHealthProvider 
       return 'skipped_transient';
     }
 
-    const verified = videoIds.length <= MAX_VERIFIED_VIDEOS;
     const byId = new Map(details.map((detail) => [detail.videoId, detail]));
-    const missing = verified ? videoIds.filter((id) => !byId.has(id)) : [];
-    if (missing.length > 0 && missing.length === videoIds.length) {
+    const missing = videoIds.filter((id) => !byId.has(id));
+    if (videoIds.length > 1 && missing.length === videoIds.length) {
       // Every video gone at once is more likely a wrong answer than a purge.
+      // No stamp either: if it persists, the unverified rule purges the channel.
       this.logger.warn(
         `YouTube health check for asset ${asset.id}: none of ${videoIds.length} stored videos returned; nothing deleted.`,
       );
@@ -138,9 +156,7 @@ export class YoutubeOrganicHealthService implements SocialOrganicHealthProvider 
       // Disconnected meanwhile: the retention purge owns it now.
       if (live.length === 0) return 'skipped_inactive' as const;
 
-      if (verified) {
-        await refreshYoutubeVideoDetails(manager, asset.id, videoIds, byId);
-      }
+      await refreshYoutubeVideoDetails(manager, asset.id, videoIds, byId);
       if (missing.length > 0) {
         await manager.query(
           `DELETE FROM social_organic_post_metrics_daily
@@ -151,15 +167,21 @@ export class YoutubeOrganicHealthService implements SocialOrganicHealthProvider 
           `YouTube health check for asset ${asset.id}: metrics of ${missing.length} video(s) no longer on YouTube deleted.`,
         );
       }
+      // A finished pass stamps when it started: every video was re-read at or
+      // after that moment. An unfinished one carries the cursor to tomorrow.
+      const stamps: Record<string, string> = passComplete
+        ? { youtubeVideosVerifiedAt: cycleStartedAt }
+        : {
+            [CURSOR_KEY]: videoIds[videoIds.length - 1],
+            [CYCLE_KEY]: cycleStartedAt,
+          };
       await manager.query(
         `UPDATE social_organic_assets
             SET display_name = $2, username = $3, avatar_url = $4,
                 last_health_status = 'healthy', last_health_check_at = $5,
-                metadata = COALESCE(metadata, '{}'::jsonb)
-                  || jsonb_build_object('youtubeConfirmedAt', $7::text)
-                  || CASE WHEN $6::boolean
-                       THEN jsonb_build_object('youtubeVideosVerifiedAt', $7::text)
-                       ELSE '{}'::jsonb END,
+                metadata = (COALESCE(metadata, '{}'::jsonb) - $8::text - $9::text)
+                  || jsonb_build_object('youtubeConfirmedAt', $6::text)
+                  || $7::jsonb,
                 updated_at = now()
           WHERE id = $1`,
         [
@@ -168,21 +190,30 @@ export class YoutubeOrganicHealthService implements SocialOrganicHealthProvider 
           channel.customUrl?.slice(0, 180) ?? null,
           channel.thumbnailUrl,
           now,
-          verified,
           now.toISOString(),
+          JSON.stringify(stamps),
+          CURSOR_KEY,
+          CYCLE_KEY,
         ],
       );
       return 'healthy' as const;
     });
   }
 
-  private async storedVideoIds(assetId: string): Promise<string[]> {
+  /** The next batch of stored video ids after the cursor, plus one look-ahead
+   * row that tells whether the pass continues. */
+  private async storedVideoIds(
+    assetId: string,
+    after: string | null,
+  ): Promise<string[]> {
     const rows = await this.dataSource.query<Array<{ id: string }>>(
       `SELECT DISTINCT external_publication_id AS id
          FROM social_organic_post_metrics_daily
         WHERE asset_id = $1
-        LIMIT ${MAX_VERIFIED_VIDEOS + 1}`,
-      [assetId],
+          AND ($2::text IS NULL OR external_publication_id > $2::text)
+        ORDER BY id
+        LIMIT $3`,
+      [assetId, after, this.videoBatchSize + 1],
     );
     return rows.map((row) => row.id);
   }

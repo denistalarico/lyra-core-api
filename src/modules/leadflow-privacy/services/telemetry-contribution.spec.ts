@@ -90,11 +90,13 @@ function spySource(
       metricValue: '4200',
     },
   ],
+  dataOrigins: readonly string[] = ['meta_ads'],
 ): TelemetryContributionSource & { calls: jest.Mock } {
   const calls = jest.fn().mockResolvedValue(rows);
 
   return {
     contributionSourceKey: key,
+    dataOrigins,
     buildContributions: calls,
     calls,
   };
@@ -436,6 +438,7 @@ describe('telemetry contribution wiring', () => {
       ]);
       const broken: TelemetryContributionSource = {
         contributionSourceKey: 'social_paid_media',
+        dataOrigins: ['meta_ads'],
         buildContributions: jest.fn().mockRejectedValue(new Error('boom')),
       };
       const fixture = consented([broken, healthy]);
@@ -449,6 +452,92 @@ describe('telemetry contribution wiring', () => {
         ]),
       );
       expect(fixture.dailyFacts.upsert).toHaveBeenCalled();
+    });
+
+    describe('Google API data stays out of the collective contribution', () => {
+      const writtenKeys = (fixture: ReturnType<typeof consented>) => {
+        const calls = fixture.dailyFacts.upsert.mock.calls as Array<
+          [Array<{ dimensionKey: string }>]
+        >;
+        return calls.flatMap(([facts]) =>
+          facts.map((fact) => fact.dimensionKey),
+        );
+      };
+
+      it.each([
+        ['Google Ads', ['google_ads']],
+        ['GA4', ['ga4']],
+        ['Data Manager', ['google_data_manager']],
+        ['YouTube', ['youtube']],
+        ['a mixed Meta + Google source', ['meta_ads', 'google_ads']],
+        ['a mixed Meta + YouTube source', ['meta_ads', 'youtube']],
+        ['an undeclared origin', []],
+      ])('never asks %s', async (_label, origins) => {
+        const source = spySource('restricted', undefined, origins);
+        const fixture = consented([source]);
+
+        const result = await fixture.service.collectSnapshot(ctx, period);
+
+        expect(source.calls).not.toHaveBeenCalled();
+        expect(result.contributionsBySource).toEqual([
+          { sourceKey: 'restricted', factsWritten: 0 },
+        ]);
+        expect(writtenKeys(fixture).some((key) => key.includes('p='))).toBe(
+          false,
+        );
+      });
+
+      it('drops rows naming a Google provider from an eligible source', async () => {
+        const source = spySource('social_paid_media', [
+          {
+            observedOn: '2026-09-01',
+            metricKey: 'paid_impressions',
+            dimensionKey: 'v1|bm=agency_services|p=meta|d=whatsapp',
+            metricValue: '10',
+          },
+          {
+            observedOn: '2026-09-01',
+            metricKey: 'paid_impressions',
+            dimensionKey: 'v1|bm=agency_services|p=google_ads|d=website',
+            metricValue: '20',
+          },
+          {
+            observedOn: '2026-09-01',
+            metricKey: 'paid_impressions',
+            dimensionKey: 'v1|bm=agency_services|p=youtube|d=website',
+            metricValue: '30',
+          },
+        ]);
+        const fixture = consented([source]);
+
+        const result = await fixture.service.collectSnapshot(ctx, period);
+
+        expect(result.contributionsBySource).toEqual([
+          { sourceKey: 'social_paid_media', factsWritten: 1 },
+        ]);
+        expect(
+          writtenKeys(fixture).filter((key) => key.includes('p=')),
+        ).toEqual(['v1|bm=agency_services|p=meta|d=whatsapp']);
+      });
+
+      it('keeps an eligible Meta source contributing next to a restricted one', async () => {
+        const meta = spySource();
+        const google = spySource('google_paid_media', undefined, [
+          'google_ads',
+        ]);
+        const fixture = consented([google, meta]);
+
+        const result = await fixture.service.collectSnapshot(ctx, period);
+
+        expect(meta.calls).toHaveBeenCalledTimes(1);
+        expect(google.calls).not.toHaveBeenCalled();
+        expect(result.contributionsBySource).toEqual(
+          expect.arrayContaining([
+            { sourceKey: 'social_paid_media', factsWritten: 1 },
+            { sourceKey: 'google_paid_media', factsWritten: 0 },
+          ]),
+        );
+      });
     });
 
     it('records each source in the audit trail', async () => {

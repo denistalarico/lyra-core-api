@@ -14,7 +14,8 @@ export type SocialAnalyticsInsightErrorCode =
   | 'insight_provider_request_rejected'
   | 'insight_response_missing'
   | 'insight_schema_invalid'
-  | 'insight_context_empty';
+  | 'insight_context_empty'
+  | 'insight_source_restricted';
 
 export class SocialAnalyticsInsightError extends Error {
   constructor(

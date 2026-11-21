@@ -22,6 +22,7 @@ import {
 import {
   GOOGLE_OAUTH_SESSION_TTL_MS,
   hasProductScopes,
+  isGoogleAuthorizableProduct,
   SOCIAL_GOOGLE_CHANNEL_PATH,
   scopesForProduct,
   type GoogleProduct,
@@ -72,6 +73,10 @@ export class SocialGoogleOAuthService {
     product: GoogleProduct;
   }) {
     if (!input.userId) throw new BadRequestException('invalid_user');
+    // Business Profile (`business.manage`) is not released.
+    if (!isGoogleAuthorizableProduct(input.product)) {
+      throw new BadRequestException('product_unavailable');
+    }
 
     const state = generateOpaque();
     const nonce = generateOpaque();

@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
+  IsIn,
   IsISO8601,
   IsOptional,
   IsString,
@@ -10,6 +11,10 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import {
+  DASHBOARD_CHANNEL_IDS,
+  type DashboardChannelId,
+} from '../dashboard-layout.contract';
 
 /**
  * One metric the section is showing, as the operator sees it.
@@ -49,6 +54,10 @@ export class SocialAnalyticsInsightMetricDto {
 const MAX_METRICS = 40;
 
 export class CreateSocialAnalyticsInsightDto {
+  /** The section's channel; Google and mixed sections are refused (service). */
+  @IsIn([...DASHBOARD_CHANNEL_IDS])
+  channel!: DashboardChannelId;
+
   @IsString()
   @MinLength(1)
   @MaxLength(120)

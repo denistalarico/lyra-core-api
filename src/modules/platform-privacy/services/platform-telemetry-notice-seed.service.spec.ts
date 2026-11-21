@@ -9,7 +9,15 @@
 // rather than one.
 
 import {
+  CLIENT_AREA_ESSENTIAL_NOTICE_BODY,
+  CLIENT_AREA_ESSENTIAL_NOTICE_V1_BODY,
+  CLIENT_AREA_ESSENTIAL_PURPOSE_KEY,
   PLATFORM_PRODUCT_TELEMETRY_PURPOSE,
+  PLATFORM_TELEMETRY_NOTICE_TITLE,
+  PLATFORM_TELEMETRY_NOTICE_V2_BODY,
+  PROVIDER_RESTRICTED_CONTRIBUTION_CLAUSE,
+  PROVIDER_RESTRICTED_ESSENTIAL_CLAUSE,
+  platformTelemetryNoticeV2ContentHash,
   PLATFORM_TELEMETRY_NOTICE_BODY,
   PLATFORM_TELEMETRY_NOTICE_CATEGORIES,
   PLATFORM_TELEMETRY_NOTICE_VERSION,
@@ -29,6 +37,77 @@ function noticesMock() {
 
 describe('PlatformTelemetryNoticeSeedService', () => {
   afterEach(() => jest.clearAllMocks());
+
+  describe('Google OAuth review: provider restriction clauses', () => {
+    it('keeps v2 byte-identical to the stored, accepted text', () => {
+      // The hash production stores for v2 (and that one consent points at).
+      expect(platformTelemetryNoticeV2ContentHash()).toBe(
+        '0f40fe077b89f6033ae04515899327552d9ab6c2cf7970fce7e6dfbadef99903',
+      );
+      expect(PLATFORM_TELEMETRY_NOTICE_V2_BODY).not.toContain(
+        PROVIDER_RESTRICTED_CONTRIBUTION_CLAUSE,
+      );
+    });
+
+    it('ships v3 with the new title and the restriction paragraph', () => {
+      expect(PLATFORM_TELEMETRY_NOTICE_VERSION).toBe(3);
+      expect(PLATFORM_TELEMETRY_NOTICE_TITLE).toBe(
+        'Contribuição estatística opcional para melhoria da plataforma',
+      );
+      const paragraphs = PLATFORM_TELEMETRY_NOTICE_BODY.split('\n\n');
+      expect(paragraphs[2]).toBe(PROVIDER_RESTRICTED_CONTRIBUTION_CLAUSE);
+      expect(PLATFORM_TELEMETRY_NOTICE_BODY).toContain(
+        'os dados obtidos por meio das APIs do Google não integram a contribuição estatística coletiva da Lyra',
+      );
+      // The rest of v2 is preserved, provisional status paragraph included.
+      expect(paragraphs.filter((p) => p !== paragraphs[2]).join('\n\n')).toBe(
+        PLATFORM_TELEMETRY_NOTICE_V2_BODY,
+      );
+      expect(platformTelemetryNoticeContentHash()).not.toBe(
+        platformTelemetryNoticeV2ContentHash(),
+      );
+    });
+
+    it('seeds the essential notice v2 with the clause, still pending', async () => {
+      const notices = noticesMock();
+      const service = new PlatformTelemetryNoticeSeedService(notices as never);
+
+      await expect(service.seedEssentialNotice()).resolves.toEqual({
+        action: 'created',
+      });
+
+      expect(CLIENT_AREA_ESSENTIAL_NOTICE_BODY).toBe(
+        `${CLIENT_AREA_ESSENTIAL_NOTICE_V1_BODY}\n\n${PROVIDER_RESTRICTED_ESSENTIAL_CLAUSE}`,
+      );
+      expect(notices.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purposeKey: CLIENT_AREA_ESSENTIAL_PURPOSE_KEY,
+          version: 2,
+          body: CLIENT_AREA_ESSENTIAL_NOTICE_BODY,
+          legalReviewStatus: 'pending',
+        }),
+      );
+    });
+
+    it('seeds every version on boot without rewriting an existing one', async () => {
+      const notices = noticesMock();
+      const service = new PlatformTelemetryNoticeSeedService(notices as never);
+
+      await service.onApplicationBootstrap();
+
+      const written = (
+        notices.save.mock.calls as Array<
+          [{ purposeKey: string; version: number }]
+        >
+      ).map(([row]) => `${row.purposeKey}:v${row.version}`);
+      expect(written).toEqual([
+        `${PLATFORM_PRODUCT_TELEMETRY_PURPOSE}:v1`,
+        `${PLATFORM_PRODUCT_TELEMETRY_PURPOSE}:v2`,
+        `${PLATFORM_PRODUCT_TELEMETRY_PURPOSE}:v3`,
+        `${CLIENT_AREA_ESSENTIAL_PURPOSE_KEY}:v2`,
+      ]);
+    });
+  });
 
   describe('seed() — the current version', () => {
     it('creates the current (v2, provisional) notice when it is absent', async () => {

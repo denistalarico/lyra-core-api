@@ -32,6 +32,7 @@
  * - **Return complete days only.** The window handed in already excludes today;
  *   an implementation must not widen it.
  */
+import { isCollectiveContributionEligible } from '../../../common/intelligence/intelligence-data-origin';
 import type { TelemetryContributionScope } from '../types/leadflow-telemetry.types';
 
 /**
@@ -58,6 +59,13 @@ export interface TelemetryContributionSource {
    * can see which domains produced a snapshot.
    */
   readonly contributionSourceKey: string;
+
+  /**
+   * Every provider whose data the rows derive from (`meta_ads`, ...). The
+   * collector skips a source that declares none, or any Google API origin
+   * (Google Ads, GA4, Data Manager, YouTube): see `intelligence-data-origin`.
+   */
+  readonly dataOrigins: readonly string[];
 
   /**
    * The rows this domain would contribute for a scope and completed-day range.
@@ -96,6 +104,28 @@ export interface TelemetryContributionSource {
  * that could remove another would be a way to silently suppress a domain's
  * facts, and order cannot matter when every row is keyed independently.
  */
+/**
+ * Whether a source, and each of its rows, may enter the collective
+ * contribution. Rows are checked too: a cohort key naming a Google provider
+ * (`p=google_ads`) is dropped even from an otherwise eligible source, so a
+ * mixed metric cannot get through under a Meta-only declaration.
+ */
+export function isEligibleContributionSource(
+  source: Pick<TelemetryContributionSource, 'dataOrigins'>,
+): boolean {
+  return isCollectiveContributionEligible(source.dataOrigins);
+}
+
+export function isEligibleContributionRow(
+  contribution: TelemetryContribution,
+): boolean {
+  const provider = contribution.dimensionKey
+    .split('|')
+    .find((segment) => segment.startsWith('p='))
+    ?.slice(2);
+  return provider === undefined || isCollectiveContributionEligible([provider]);
+}
+
 export class TelemetryContributionRegistry {
   private readonly sources: TelemetryContributionSource[] = [];
 

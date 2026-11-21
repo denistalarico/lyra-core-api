@@ -83,13 +83,55 @@ export const PLATFORM_TELEMETRY_NOTICE_V1_CATEGORIES = [
  * forbidden-identifier list in `benchmark.boundary.spec` and
  * `paid-media-contribution.adapter.ts` exactly.
  */
-export const PLATFORM_TELEMETRY_NOTICE_VERSION = 2;
+export const PLATFORM_TELEMETRY_NOTICE_V2_VERSION = 2;
 
-export const PLATFORM_TELEMETRY_NOTICE_TITLE =
+export const PLATFORM_TELEMETRY_NOTICE_V2_TITLE =
   'Contribuição anônima para melhorar o Lyra';
 
-export const PLATFORM_TELEMETRY_NOTICE_BODY =
+export const PLATFORM_TELEMETRY_NOTICE_V2_BODY =
   'O Lyra pode usar dados estatísticos e agregados da operação para melhorar análises, benchmarks e recursos de inteligência da plataforma.\n\nQuando esta opção estiver ativada, podemos processar métricas operacionais como investimento em mídia, impressões, cliques, leads reportados pelas plataformas de anúncios e informações gerais sobre o tipo de negócio configurado.\n\nAntes de qualquer contribuição ser utilizada para aprendizado agregado, o contexto da empresa é substituído por um identificador aleatório. Os dados enviados para essa camada não incluem nomes de clientes, contatos, conteúdo de mensagens, telefones, e-mails, nomes de campanhas ou anúncios, nem os identificadores originais da empresa, contas de anúncios, campanhas, conjuntos de anúncios ou anúncios.\n\nOs benchmarks somente são disponibilizados quando existe uma quantidade mínima de empresas participantes suficiente para preservar o anonimato. Atualmente, o Lyra exige pelo menos 5 contextos independentes em uma mesma comparação.\n\nOs resultados são apresentados apenas de forma agregada, como medianas, faixas percentuais e quantidade de participantes elegíveis. O Lyra não revela quais empresas participaram de uma comparação.\n\nEsta contribuição é opcional. Não aceitar não limita o funcionamento do Lyra, do LeadFlow, do Social ou das análises operacionais da sua própria empresa.\n\nVocê pode retirar este consentimento posteriormente. Após a revogação, novas contribuições deixam de ser realizadas, e os dados associados à contribuição podem ser removidos conforme as políticas de retenção e exclusão da plataforma.\n\nEste consentimento se aplica somente à empresa ou contexto atualmente selecionado. Caso você tenha acesso a mais de uma empresa, cada uma possui seu próprio consentimento.\n\nEste texto é provisório e poderá ser atualizado antes do lançamento comercial do Lyra. Quando houver alteração relevante no conteúdo do consentimento, uma nova aceitação poderá ser solicitada.';
+
+/**
+ * Version 3 (Google OAuth review, 2026-11-21): version 2 with the provider
+ * restriction paragraph and the new title. Data obtained through Google APIs
+ * never enters the collective contribution (`intelligence-data-origin`), and
+ * the text now says so. Version 2 stays seeded, unchanged, as history; an
+ * acceptance of it does not count for version 3 (version + hash binding).
+ */
+export const PLATFORM_TELEMETRY_NOTICE_VERSION = 3;
+
+export const PLATFORM_TELEMETRY_NOTICE_TITLE =
+  'Contribuição estatística opcional para melhoria da plataforma';
+
+/** Shared by the optional notice and shown wherever the contribution is described. */
+export const PROVIDER_RESTRICTED_CONTRIBUTION_CLAUSE =
+  'A contribuição estatística está limitada às fontes de dados elegíveis, considerando as políticas e condições de utilização dos serviços integrados. Mesmo quando agregados ou desidentificados, dados provenientes de plataformas externas poderão ser excluídos dessa contribuição em razão de restrições específicas de seus fornecedores. Atualmente, os dados obtidos por meio das APIs do Google não integram a contribuição estatística coletiva da Lyra.';
+
+const V2_SECOND_PARAGRAPH_END =
+  'informações gerais sobre o tipo de negócio configurado.\n\n';
+
+export const PLATFORM_TELEMETRY_NOTICE_BODY =
+  PLATFORM_TELEMETRY_NOTICE_V2_BODY.replace(
+    V2_SECOND_PARAGRAPH_END,
+    `${V2_SECOND_PARAGRAPH_END}${PROVIDER_RESTRICTED_CONTRIBUTION_CLAUSE}\n\n`,
+  );
+
+/**
+ * The essential-processing clause on provider restrictions, appended to the
+ * client-area essential notice as its version 2 (version 1, the provisional
+ * placeholder of migration 1799700000000, is never rewritten).
+ */
+export const PROVIDER_RESTRICTED_ESSENTIAL_CLAUSE =
+  'Os dados provenientes de plataformas e serviços externos são utilizados conforme as permissões concedidas, as funcionalidades habilitadas e as políticas aplicáveis de cada fornecedor. A aceitação da coleta de dados essenciais não autoriza automaticamente o uso dessas informações para aprendizado coletivo, benchmarks entre empresas ou treinamento de modelos de inteligência artificial.';
+
+export const CLIENT_AREA_ESSENTIAL_PURPOSE_KEY =
+  'client_area_essential_processing';
+export const CLIENT_AREA_ESSENTIAL_NOTICE_V1_BODY =
+  'AVISO PROVISÓRIO — texto jurídico de tratamento essencial pendente de aprovação (EXT-CA-4). Não liberar produtos a clientes reais.';
+export const CLIENT_AREA_ESSENTIAL_NOTICE_VERSION = 2;
+export const CLIENT_AREA_ESSENTIAL_NOTICE_TITLE =
+  'Tratamento essencial de dados';
+export const CLIENT_AREA_ESSENTIAL_NOTICE_BODY = `${CLIENT_AREA_ESSENTIAL_NOTICE_V1_BODY}\n\n${PROVIDER_RESTRICTED_ESSENTIAL_CLAUSE}`;
 
 export const PLATFORM_TELEMETRY_NOTICE_CTA =
   'Li e concordo · Contribuir anonimamente para melhorar o Lyra';
@@ -122,6 +164,15 @@ function contentHashOf(body: string): string {
 /** The hash of the seeded, unmodifiable version 1 body. */
 export function platformTelemetryNoticeV1ContentHash(): string {
   return contentHashOf(PLATFORM_TELEMETRY_NOTICE_V1_BODY);
+}
+
+/** The hash of the seeded, unmodifiable version 2 body. */
+export function platformTelemetryNoticeV2ContentHash(): string {
+  return contentHashOf(PLATFORM_TELEMETRY_NOTICE_V2_BODY);
+}
+
+export function clientAreaEssentialNoticeContentHash(): string {
+  return contentHashOf(CLIENT_AREA_ESSENTIAL_NOTICE_BODY);
 }
 
 /** The hash of the current version's body — what a new seed writes. */

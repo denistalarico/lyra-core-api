@@ -1,6 +1,9 @@
 import type { BusinessModeDimension } from '../../../common/intelligence';
 import type { BusinessModeDimensionAdapter } from '../../leadflow-analytics/intelligence/business-mode-dimension.adapter';
-import type { TelemetryContributionRegistry } from '../../leadflow-privacy';
+import {
+  isEligibleContributionSource,
+  type TelemetryContributionRegistry,
+} from '../../leadflow-privacy';
 import { PaidMediaContributionAdapter } from './paid-media-contribution.adapter';
 import type { PaidMediaContributionService } from './paid-media-contribution.service';
 
@@ -203,6 +206,13 @@ describe('PaidMediaContributionAdapter', () => {
       const { adapter } = build(dimension({}));
 
       expect(adapter.contributionSourceKey).toBe('social_paid_media');
+    });
+
+    it('declares Meta as its only data origin, which the collector accepts', () => {
+      const { adapter } = build(dimension({}));
+
+      expect(adapter.dataOrigins).toEqual(['meta_ads']);
+      expect(isEligibleContributionSource(adapter)).toBe(true);
     });
   });
 });

@@ -183,6 +183,14 @@ describe('PaidMediaContributionService', () => {
      * days; summing them triples every figure. Ad set is also the only level
      * carrying a destination.
      */
+    it('reads Meta rows only: no Google Ads, GA4 or YouTube data', async () => {
+      const { sql } = await capture();
+
+      expect(sql).toMatch(/metrics\.provider = 'meta_ads'/);
+      expect(sql).toMatch(/entity\.provider = 'meta_ads'/);
+      expect(sql).not.toMatch(/google|youtube|ga4/i);
+    });
+
     it('reads ad-set rows only', async () => {
       const { sql } = await capture();
 
