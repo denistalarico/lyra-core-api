@@ -157,6 +157,7 @@ export class Ga4AnalyticsReadService {
     const rows = await this.dataSource.query<Array<Record<string, unknown>>>(
       `SELECT dimension_value AS value,
               SUM(sessions) AS sessions, SUM(engaged_sessions) AS engaged_sessions,
+              SUM(total_users) AS users,
               SUM(key_events) AS key_events, SUM(total_revenue) AS revenue
          FROM social_ga4_dimension_daily
         WHERE ${this.scopeSql()} AND property_id = $5 AND dimension = $6
@@ -177,6 +178,7 @@ export class Ga4AnalyticsReadService {
           value: String(row.value),
           isOther: row.value === GA4_OTHER_BUCKET,
           sessions,
+          users: num(row.users),
           engagedSessions,
           engagementRate: sessions > 0 ? engagedSessions / sessions : null,
           keyEvents: num(row.key_events),
@@ -193,6 +195,9 @@ export class Ga4AnalyticsReadService {
       period,
       items: items.slice(0, limit),
       total: items.length,
+      // Same rule as the overview: over more than one day `users` is Σ daily
+      // actives of each value, not unique people (AN-FE, ga_users_by_device).
+      usersExact: period.days === 1,
     };
   }
 

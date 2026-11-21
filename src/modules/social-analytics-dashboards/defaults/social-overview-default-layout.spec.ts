@@ -13,7 +13,7 @@ describe('Social overview default layout', () => {
         section.cards.filter((card) => card.highlighted === true).length,
       ]),
     ).toEqual([
-      ['summary', 5, 5],
+      ['summary', 6, 5],
       ['instagram', 13, 3],
       ['meta_ads', 20, 5],
       ['facebook', 7, 2],
@@ -24,6 +24,6 @@ describe('Social overview default layout', () => {
     const first = socialOverviewDefaultLayout();
     first.sections[0].cards.length = 0;
 
-    expect(socialOverviewDefaultLayout().sections[0].cards).toHaveLength(5);
+    expect(socialOverviewDefaultLayout().sections[0].cards).toHaveLength(6);
   });
 });

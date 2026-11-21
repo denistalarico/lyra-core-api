@@ -17,6 +17,17 @@
 import type { ChannelId } from "./social-channels";
 import type { SocialKpiFormat, SocialKpiPolarity } from "./social-kpi.types";
 
+export const SUMMARY_CRM_METRICS = {
+  summary_crm_leads: "crm_leads",
+  summary_crm_qualified: "crm_qualified",
+  summary_crm_won: "crm_won",
+  summary_crm_won_value: "crm_won_value",
+  summary_crm_cost_per_lead: "cost_per_crm_lead",
+  summary_crm_cost_per_qualified: "cost_per_qualified",
+  summary_crm_real_roas: "real_roas",
+  summary_crm_lead_to_sale_rate: "lead_to_sale_rate",
+} as const;
+
 export const METRIC_IDS = [
   // Paid — available today, from SocialAdAnalyticsTotals.
   "spend",
@@ -204,6 +215,14 @@ export const METRIC_IDS = [
   "cost_per_qualified",
   "real_roas",
   "lead_to_sale_rate",
+  "summary_crm_leads",
+  "summary_crm_qualified",
+  "summary_crm_won",
+  "summary_crm_won_value",
+  "summary_crm_cost_per_lead",
+  "summary_crm_cost_per_qualified",
+  "summary_crm_real_roas",
+  "summary_crm_lead_to_sale_rate",
   // AN-CRM (§6.3): Meta Ads gaps.
   "outbound_clicks",
   "outbound_ctr",
@@ -2305,7 +2324,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "crm_qualified",
     label: "Leads qualificados",
     description:
-      "Dos leads do período, quantos estão hoje na etapa de qualificação do funil ou depois dela (sem estarem perdidos), ou já foram ganhos. Sem etapa configurada, o card pede para configurar a etapa de qualificação.",
+      "Dos leads do período, quantos estão ou já passaram por uma etapa classificada como Qualificado no CRM, ou já foram ganhos. Sem nenhuma etapa classificada, o card pede para classificar uma.",
     channels: CRM_CHANNELS,
     format: "integer",
     polarity: "higher_is_better",
@@ -2461,6 +2480,20 @@ export const DERIVED_METRICS: Partial<
     op: "subtract",
   },
 };
+
+for (const id of Object.keys(SUMMARY_CRM_METRICS) as Array<
+  keyof typeof SUMMARY_CRM_METRICS
+>) {
+  const metric = SOCIAL_METRIC_CATALOG.find(
+    (entry) => entry.id === SUMMARY_CRM_METRICS[id],
+  )!;
+  SOCIAL_METRIC_CATALOG.push({
+    ...metric,
+    id,
+    channels: SUMMARY_ONLY,
+    source: "summary",
+  });
+}
 
 const BY_ID = new Map(
   SOCIAL_METRIC_CATALOG.map((metric) => [metric.id, metric] as const),

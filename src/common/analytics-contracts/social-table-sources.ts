@@ -61,6 +61,9 @@ export const TABLE_SOURCE_IDS = [
   "ga4_source_medium",
   "ga4_campaigns",
   "ga4_landing_pages",
+  // AN-FE (§6.1/§6.2).
+  "asset_groups",
+  "crm_campaigns",
 ] as const;
 
 export type TableSourceId = (typeof TABLE_SOURCE_IDS)[number];
@@ -130,7 +133,14 @@ export type TableSourceKind =
    * page) read from `GET social/analytics/ga4/breakdown`. Neither paid nor
    * organic: it is the site's traffic, with no ad account behind it.
    */
-  | "ga4";
+  | "ga4"
+  /**
+   * "Leads e vendas por campanha": the `campaigns` of
+   * `GET social/analytics/crm-leads`, already loaded for the CRM KPIs, so the
+   * card costs no request. On Resumo the rows of Google and Meta are listed
+   * together, never summed (they are different campaigns).
+   */
+  | "crm";
 
 /**
  * Whether a kind reads from the ad account rather than from a connected page.
@@ -153,6 +163,7 @@ export function isPaidSourceKind(kind: TableSourceKind): boolean {
     case "conversions":
     case "action_types":
     case "ad_interactions":
+    case "crm":
       return true;
     case "ga4":
       return false;
@@ -407,6 +418,9 @@ const INSTAGRAM_ONLY: ChannelId[] = ["instagram"];
 const FACEBOOK_ONLY: ChannelId[] = ["facebook"];
 const ORGANIC_NETWORKS: ChannelId[] = ["instagram", "facebook"];
 const GA4_ONLY: ChannelId[] = ["ga4"];
+const GOOGLE_ADS_ONLY: ChannelId[] = ["google_ads"];
+/** The networks whose ad forms feed the CRM, and Resumo, which lists both. */
+const CRM_TABLE_CHANNELS: ChannelId[] = ["google_ads", "meta_ads", "summary"];
 
 /**
  * The columns of a GA4 ranking. Sorting is the endpoint's (sessions, desc), so
@@ -755,6 +769,50 @@ export const TABLE_SOURCES: TableSourceDefinition[] = [
     "Página",
     false,
   ),
+  {
+    /**
+     * PMax asset groups (§6.1 `asset_groups_ranking`): the `ad_sets` rows the
+     * GA-INT/HIER sync marks `googleKind: 'asset_group'`, filtered on read.
+     * Same endpoint and sort keys as `ad_sets`, so no request of its own shape.
+     */
+    id: "asset_groups",
+    label: "Grupos de recursos",
+    description: "Desempenho por grupo de recursos das campanhas Performance Max.",
+    kind: "paid",
+    channels: GOOGLE_ADS_ONLY,
+    surface: null,
+    columns: [
+      { id: "name", label: "Grupo de recursos", format: "text", sortKey: "name", numeric: false },
+      { id: "status", label: "Status", format: "text", sortKey: null, numeric: false },
+      ...sharedMetricColumns(),
+    ],
+    defaultColumnIds: ["name", "status", "spend", "conversions", "clicks", "ctr"],
+    defaultSort: { columnId: "spend", direction: "desc" },
+  },
+  {
+    id: "crm_campaigns",
+    label: "Leads e vendas por campanha",
+    description:
+      "Leads que chegaram ao CRM pelos formulários de anúncio, com qualificados, vendas e custo por campanha. Os leads do CRM não somam com as conversões da plataforma.",
+    kind: "crm",
+    channels: CRM_TABLE_CHANNELS,
+    surface: null,
+    columns: [
+      { id: "name", label: "Campanha", format: "text", sortKey: null, numeric: false },
+      { id: "spend", label: "Investimento", format: "currency", sortKey: null, numeric: true },
+      { id: "leads", label: "Leads no CRM", format: "integer", sortKey: null, numeric: true },
+      { id: "qualified", label: "Qualificados", format: "integer", sortKey: null, numeric: true },
+      { id: "won", label: "Vendas", format: "integer", sortKey: null, numeric: true },
+      { id: "wonValue", label: "Valor vendido", format: "currency", sortKey: null, numeric: true },
+      { id: "costPerLead", label: "Custo por lead", format: "currency", sortKey: null, numeric: true },
+      { id: "costPerQualified", label: "Custo por qualificado", format: "currency", sortKey: null, numeric: true },
+      { id: "realRoas", label: "ROAS real", format: "ratio", sortKey: null, numeric: true },
+      { id: "leadToSaleRate", label: "Lead → venda", format: "percent", sortKey: null, numeric: true },
+    ],
+    defaultColumnIds: ["name", "spend", "leads", "qualified", "won", "wonValue", "costPerLead"],
+    // The API already orders by leads, then spend; nothing is re-sorted.
+    defaultSort: { columnId: "leads", direction: "desc" },
+  },
 ];
 
 const SOURCES_BY_ID = new Map(TABLE_SOURCES.map((source) => [source.id, source] as const));

@@ -28,6 +28,13 @@ export type SocialAdKpis = {
 };
 
 export type SocialAdAnalyticsTotals = SocialAdKpis & {
+  interactions?: string | null;
+  interactionRate?: string | null;
+  allConversions?: string | null;
+  conversionRate?: string | null;
+  valuePerConversion?: string | null;
+  videoViewRate?: string | null;
+  costPerView?: string | null;
   spend: string;
   impressions: string;
   clicks: string;
@@ -271,6 +278,57 @@ export type SocialAdActionTypeTotal = {
 
 export type SocialAdSeriesMode = "continuous";
 
+export type SocialAnalyticsCrmTotals = {
+  /** Whole counts as text; money and ratios as 6-decimal text. */
+  leads: string;
+  qualified: string | null;
+  won: string;
+  wonValue: string;
+  spend: string;
+  costPerLead: string | null;
+  costPerQualified: string | null;
+  /** Won value / spend, a bare multiplier. */
+  realRoas: string | null;
+  /** Won / leads, as a percentage. */
+  leadToSaleRate: string | null;
+};
+
+export type SocialAnalyticsCrmCampaignRow = SocialAnalyticsCrmTotals & {
+  campaignExternalId: string;
+  name: string | null;
+};
+
+export type SocialAnalyticsCrmSeriesPoint = {
+  date: string;
+  leads: string;
+  qualified: string | null;
+  won: string;
+  wonValue: string;
+};
+
+export type SocialAnalyticsCrmView = {
+  connectionId: string;
+  provider: "google_ads" | "meta_ads";
+  timezone: string;
+  currency: string | null;
+  period: { since: string; until: string };
+  comparisonPeriod: { since: string; until: string };
+  /** False → every `qualified` is null: "configure a etapa de qualificação". */
+  qualifiedConfigured: boolean;
+  current: SocialAnalyticsCrmTotals;
+  previous: SocialAnalyticsCrmTotals;
+  change: {
+    leads: SocialAdChange;
+    qualified: SocialAdChange | null;
+    won: SocialAdChange;
+    wonValue: SocialAdChange;
+  };
+  /** One point per day of the period, ascending; a day without leads is 0. */
+  series: SocialAnalyticsCrmSeriesPoint[];
+  /** Campaigns with spend or CRM leads in the period. */
+  campaigns: SocialAnalyticsCrmCampaignRow[];
+};
+
 /**
  * One calendar day.
  *
@@ -401,6 +459,7 @@ export type SocialAdAdSetSort = (typeof SOCIAL_AD_SET_SORTS)[number];
  * from the campaign, which is why they have no counterpart on `SocialAdCampaignRow`.
  */
 export type SocialAdAdSetRow = SocialAdKpis & {
+  googleKind?: "asset_group" | "ad_group" | null;
   externalId: string;
   /** The parent campaign, denormalised onto every ad-set fact. */
   campaignExternalId: string | null;

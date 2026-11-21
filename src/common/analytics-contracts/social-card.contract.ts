@@ -155,7 +155,14 @@ export type AnalyticsDashboardCard =
   | AnalyticsInsightCard;
 
 /** The kinds of content a sub-block groups. */
-export const SUB_BLOCK_CATEGORIES = ["posts", "reels", "stories"] as const;
+// `leads` is Resumo's "Leads e vendas" (AN-FE, §6.5): the CRM figures of the
+// ad networks, grouped. The organic categories stay organic-only.
+export const SUB_BLOCK_CATEGORIES = [
+  "posts",
+  "reels",
+  "stories",
+  "leads",
+] as const;
 
 export type SubBlockCategory = (typeof SUB_BLOCK_CATEGORIES)[number];
 

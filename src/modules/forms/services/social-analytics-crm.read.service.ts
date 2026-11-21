@@ -3,11 +3,16 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import type {
+  SocialAnalyticsCrmCampaignRow,
+  SocialAnalyticsCrmSeriesPoint,
+  SocialAnalyticsCrmTotals,
+  SocialAnalyticsCrmView,
+} from '../../../common/analytics-contracts/social-analytics.types';
 import {
   deriveChange,
   divideScaled,
   formatDerived,
-  type SocialAdChange,
 } from '../../social-integrations/analytics/social-ad-kpi';
 import {
   parseAnalyticsPeriod,
@@ -27,68 +32,12 @@ import {
   type LeadFactsScope,
 } from './forms-lead-facts.read.service';
 
-/**
- * AN-CRM (D-A1, §6.2): "Leads e vendas" for one ad connection, served from the
- * Forms module (which already imports the Social read model; the reverse
- * import would be a cycle). The CRM side comes only from the
- * `FormsLeadFactsReadService` port and the spend only from
- * `SocialAnalyticsReadService`, so neither the Analytics nor this class reads
- * `form_submissions` or a CRM table, and no provider is called.
- *
- * Every quotient is derived here, from two sums, with the shared KPI
- * utility (D-A2): nothing is stored.
- */
-
-export type SocialAnalyticsCrmTotals = {
-  /** Whole counts as text; money and ratios as 6-decimal text. */
-  leads: string;
-  qualified: string | null;
-  won: string;
-  wonValue: string;
-  spend: string;
-  costPerLead: string | null;
-  costPerQualified: string | null;
-  /** Won value / spend, a bare multiplier. */
-  realRoas: string | null;
-  /** Won / leads, as a percentage. */
-  leadToSaleRate: string | null;
-};
-
-export type SocialAnalyticsCrmCampaignRow = SocialAnalyticsCrmTotals & {
-  campaignExternalId: string;
-  name: string | null;
-};
-
-export type SocialAnalyticsCrmSeriesPoint = {
-  date: string;
-  leads: string;
-  qualified: string | null;
-  won: string;
-  wonValue: string;
-};
-
-export type SocialAnalyticsCrmView = {
-  connectionId: string;
-  provider: LeadFactsProvider;
-  timezone: string;
-  currency: string | null;
-  period: { since: string; until: string };
-  comparisonPeriod: { since: string; until: string };
-  /** False → every `qualified` is null: "configure a etapa de qualificação". */
-  qualifiedConfigured: boolean;
-  current: SocialAnalyticsCrmTotals;
-  previous: SocialAnalyticsCrmTotals;
-  change: {
-    leads: SocialAdChange;
-    qualified: SocialAdChange | null;
-    won: SocialAdChange;
-    wonValue: SocialAdChange;
-  };
-  /** One point per day of the period, ascending; a day without leads is 0. */
-  series: SocialAnalyticsCrmSeriesPoint[];
-  /** Campaigns with spend or CRM leads in the period. */
-  campaigns: SocialAnalyticsCrmCampaignRow[];
-};
+export type {
+  SocialAnalyticsCrmCampaignRow,
+  SocialAnalyticsCrmSeriesPoint,
+  SocialAnalyticsCrmTotals,
+  SocialAnalyticsCrmView,
+} from '../../../common/analytics-contracts/social-analytics.types';
 
 type Sums = {
   leads: bigint;
@@ -101,6 +50,17 @@ type Sums = {
 const SCALE = 1_000_000n;
 const PERCENT_BASIS = 100n;
 
+/**
+ * AN-CRM (D-A1, §6.2): "Leads e vendas" for one ad connection, served from the
+ * Forms module (which already imports the Social read model; the reverse
+ * import would be a cycle). The CRM side comes only from the
+ * `FormsLeadFactsReadService` port and the spend only from
+ * `SocialAnalyticsReadService`, so neither the Analytics nor this class reads
+ * `form_submissions` or a CRM table, and no provider is called.
+ *
+ * Every quotient is derived here, from two sums, with the shared KPI
+ * utility (D-A2): nothing is stored.
+ */
 @Injectable()
 export class SocialAnalyticsCrmReadService {
   constructor(
