@@ -19,6 +19,8 @@ import { LinkedInOrganicAnalyticsProvider } from './analytics/linkedin/linkedin-
 import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
+import { YoutubeDataRetentionScheduler } from './analytics/youtube/youtube-data-retention.scheduler';
+import { YoutubeDataRetentionService } from './analytics/youtube/youtube-data-retention.service';
 import { SocialOrganicYoutubeService } from './connections/social-organic-youtube.service';
 import { SocialGoogleModule } from '../social-google/social-google.module';
 import {
@@ -316,6 +318,8 @@ export function createOrganicHealthProviders(meta: MetaOrganicHealthService) {
     },
     YoutubeAnalyticsClient,
     YoutubeOrganicAnalyticsProvider,
+    YoutubeDataRetentionService,
+    YoutubeDataRetentionScheduler,
     TiktokOrganicAnalyticsProvider,
     LinkedInOrganicAnalyticsProvider,
     SocialOrganicAnalyticsProviderRegistry,

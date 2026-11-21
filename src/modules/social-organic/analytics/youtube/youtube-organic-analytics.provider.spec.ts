@@ -149,6 +149,16 @@ describe('YoutubeOrganicAnalyticsProvider', () => {
     });
   });
 
+  it('refreshes the title and publish time on every stored row of each video read', async () => {
+    const { dataSource } = await run('2026-11-15', '2026-11-16');
+    const refresh = dataSource.query.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE social_organic_post_metrics_daily'),
+    )!;
+    const [assetId, ids, titles] = refresh[1] as [string, string[], string[]];
+    expect(assetId).toBe(credential.assetId);
+    expect(titles[ids.indexOf('vid1')]).toBe('Meu vídeo');
+  });
+
   it('keeps a backfill window as asked (no widening, no future days)', async () => {
     const { client } = await run('2026-10-01', '2026-10-03');
     const day = client.query.mock.calls.find(
