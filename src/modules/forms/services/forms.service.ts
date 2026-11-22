@@ -301,10 +301,11 @@ export class FormsService {
     return this.forms.save(form);
   }
 
-  async remove(ctx: RequestContext, id: string) {
+  /** Submissions cascade with the form, so deleting them needs an explicit opt-in. */
+  async remove(ctx: RequestContext, id: string, withSubmissions = false) {
     const form = await this.get(ctx, id);
     const count = await this.submissions.count({ where: { formId: form.id } });
-    if (count > 0)
+    if (count > 0 && !withSubmissions)
       throw new ConflictException('Form has submissions; archive it instead.');
     await this.forms.delete({
       id: form.id,
@@ -322,18 +323,80 @@ export class FormsService {
     const form = await this.get(ctx, formId);
     const limit = Math.min(Math.max(Number(query.limit ?? 50) || 50, 1), 200);
     const offset = Math.max(Number(query.offset ?? 0) || 0, 0);
-    const [items, total] = await this.submissions.findAndCount({
-      where: {
-        tenantId: form.tenantId,
+    const qb = this.submissions
+      .createQueryBuilder('s')
+      .where('s.tenant_id = :tenantId', { tenantId: form.tenantId })
+      .andWhere('s.workspace_id = :workspaceId', {
         workspaceId: form.workspaceId,
-        formId: form.id,
-        ...(query.status ? { status: query.status } : {}),
-      },
-      order: { createdAt: 'DESC' },
-      take: limit,
-      skip: offset,
-    });
-    return { items, total, limit, offset };
+      })
+      .andWhere('s.form_id = :formId', { formId: form.id });
+    if (query.status)
+      qb.andWhere('s.status = :status', { status: query.status });
+    if (query.from) qb.andWhere('s.created_at >= :from', { from: query.from });
+    if (query.to) qb.andWhere('s.created_at < :to', { to: query.to });
+    const search = query.q?.trim();
+    if (search) {
+      const like = `%${search.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+      const digits = search.replace(/\D/g, '');
+      qb.andWhere(
+        `(s.normalized -> 'lead' ->> 'name' ILIKE :like
+          OR s.normalized -> 'lead' ->> 'email' ILIKE :like
+          OR s.normalized -> 'lead' ->> 'phone' ILIKE :like${
+            digits.length >= 3
+              ? ` OR regexp_replace(COALESCE(s.normalized -> 'lead' ->> 'phone', ''), '\\D', '', 'g') LIKE :digits`
+              : ''
+          })`,
+        { like, digits: `%${digits}%` },
+      );
+    }
+    const [items, total] = await qb
+      .orderBy('s.createdAt', 'DESC')
+      .limit(limit)
+      .offset(offset)
+      .getManyAndCount();
+    const contactTags = await this.contactTagsOf(
+      form,
+      items
+        .map((item) => item.contactId)
+        .filter((value): value is string => Boolean(value)),
+    );
+    return {
+      items: items.map((item) => ({
+        ...item,
+        contactTags: item.contactId
+          ? (contactTags.get(item.contactId) ?? [])
+          : [],
+      })),
+      total,
+      limit,
+      offset,
+    };
+  }
+
+  /** Tags of the leads' contacts (same `contact_tags` the Contacts screen edits). */
+  private async contactTagsOf(form: FormEntity, contactIds: string[]) {
+    const map = new Map<
+      string,
+      Array<{ id: string; name: string; color: string }>
+    >();
+    if (!contactIds.length) return map;
+    const rows: Array<{
+      contactId: string;
+      id: string;
+      name: string;
+      color: string;
+    }> = await this.submissions.manager.query(
+      `SELECT a.contact_id AS "contactId", t.id, t.name, t.color
+         FROM contact_tag_assignments a
+         JOIN contact_tags t ON t.id = a.tag_id
+          AND t.tenant_id = a.tenant_id AND t.workspace_id = a.workspace_id
+        WHERE a.tenant_id = $1 AND a.workspace_id = $2 AND a.contact_id = ANY($3::uuid[])
+        ORDER BY t.name ASC`,
+      [form.tenantId, form.workspaceId, [...new Set(contactIds)]],
+    );
+    for (const { contactId, ...tag } of rows)
+      map.set(contactId, [...(map.get(contactId) ?? []), tag]);
+    return map;
   }
 
   async getSubmission(ctx: RequestContext, submissionId: string) {

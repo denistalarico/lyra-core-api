@@ -10,8 +10,16 @@ import {
   Post,
   Put,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import {
+  FilesService,
+  MAX_IMAGE_UPLOAD_BYTES,
+} from '../../common/files/files.service';
 import { RequestContextData } from '../../common/context/request-context.decorator';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -23,6 +31,7 @@ import {
   ListFormsQueryDto,
   MetaLeadsPagesQueryDto,
   PatchFormDto,
+  RemoveFormQueryDto,
   SetFormsAddonDto,
   UpdateFormGoogleAdsLeadsDto,
   UpdateFormInboundEmailDto,
@@ -55,6 +64,7 @@ export class FormsController {
     private readonly googleAdsLeads: FormGoogleAdsLeadsService,
     private readonly googleAdsLeadsImport: FormGoogleAdsLeadsImportService,
     private readonly metaLeads: FormMetaLeadsService,
+    private readonly files: FilesService,
   ) {}
 
   @Get('addon')
@@ -198,8 +208,33 @@ export class FormsController {
   remove(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: RemoveFormQueryDto,
   ) {
-    return this.forms.remove(ctx, id);
+    return this.forms.remove(ctx, id, query.withSubmissions === 'true');
+  }
+
+  /** Stores the logo only; the editor puts the URL in the draft and saves it with the form. */
+  @Post(':id/logo')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_IMAGE_UPLOAD_BYTES },
+    }),
+  )
+  async uploadLogo(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Missing multipart field "file".');
+    const form = await this.forms.get(ctx, id);
+    const stored = await this.files.uploadImageAsset({
+      file,
+      path: `tenants/${form.tenantId}/forms/${form.id}/logo-${Date.now()}.webp`,
+      maxDimension: 512,
+    });
+    return { logoUrl: stored.url };
   }
 
   @Post(':id/publish')

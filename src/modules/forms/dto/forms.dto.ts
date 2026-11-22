@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEmail,
   IsIn,
   IsInt,
@@ -144,6 +145,29 @@ export class ListFormSubmissionsQueryDto {
   @IsOptional()
   @IsNumberString()
   offset?: string;
+
+  /** Name, e-mail or phone of the lead (case-insensitive, partial). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+
+  /** Inclusive lower bound of `createdAt` (ISO 8601). */
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  /** Exclusive upper bound of `createdAt` (ISO 8601). */
+  @IsOptional()
+  @IsDateString()
+  to?: string;
+}
+
+export class RemoveFormQueryDto {
+  /** Explicit opt-in: deleting a form with submissions deletes them too. */
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  withSubmissions?: 'true' | 'false';
 }
 
 export class SetFormsAddonDto {

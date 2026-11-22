@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { FilesModule } from '../../common/files/files.module';
 import { AgencySalesModule } from '../agency/agency-sales.module';
 import { AgencySettingsModule } from '../agency/agency-settings.module';
 import {
@@ -52,6 +53,7 @@ import { GoogleAdsConversionUploadWorker } from './services/google-ads-conversio
  */
 @Module({
   imports: [
+    FilesModule,
     PermissionsModule,
     CrmModule,
     AgencySalesModule,
