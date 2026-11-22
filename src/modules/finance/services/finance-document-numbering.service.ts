@@ -47,17 +47,19 @@ export class FinanceDocumentNumberingService {
         .getOne();
 
       if (!sequence) {
-        sequence = await manager.getRepository(FinanceDocumentSequence).save(
-          manager.getRepository(FinanceDocumentSequence).create({
-            tenantId: ctx.tenantId,
-            workspaceId: ctx.workspaceId,
-            documentType,
-            periodYear,
-            prefix,
-            nextNumber: 1,
-            padding: 6,
-          }),
-        );
+        const repo = manager.getRepository(FinanceDocumentSequence);
+        const scope = {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          documentType,
+          periodYear,
+        };
+        await repo.createQueryBuilder().insert().values({ ...scope, prefix })
+          .orIgnore().execute();
+        sequence = await repo.findOneOrFail({
+          where: scope,
+          lock: { mode: 'pessimistic_write' },
+        });
       }
 
       let generatedNumber: string;
@@ -128,19 +130,23 @@ export class FinanceDocumentNumberingService {
     id: string,
     dto: { prefix?: string; padding?: number; nextNumber?: number },
   ) {
-    const sequence = await this.sequencesRepo.findOne({
-      where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+    return this.sequencesRepo.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(FinanceDocumentSequence);
+      const sequence = await repo.findOne({
+        where: { id, tenantId: ctx.tenantId, workspaceId: ctx.workspaceId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!sequence) {
+        throw new Error('Sequence not found');
+      }
+      if (dto.prefix !== undefined)
+        sequence.prefix = dto.prefix.trim() || sequence.prefix;
+      if (dto.padding !== undefined && dto.padding > 0)
+        sequence.padding = dto.padding;
+      if (dto.nextNumber !== undefined && dto.nextNumber > 0)
+        sequence.nextNumber = dto.nextNumber;
+      return repo.save(sequence);
     });
-    if (!sequence) {
-      throw new Error('Sequence not found');
-    }
-    if (dto.prefix !== undefined)
-      sequence.prefix = dto.prefix.trim() || sequence.prefix;
-    if (dto.padding !== undefined && dto.padding > 0)
-      sequence.padding = dto.padding;
-    if (dto.nextNumber !== undefined && dto.nextNumber > 0)
-      sequence.nextNumber = dto.nextNumber;
-    return this.sequencesRepo.save(sequence);
   }
 
   async upsertDefaults(ctx: FinanceRequestContext) {
@@ -158,17 +164,15 @@ export class FinanceDocumentNumberingService {
         },
       });
       if (!seq) {
-        seq = await this.sequencesRepo.save(
-          this.sequencesRepo.create({
-            tenantId: ctx.tenantId,
-            workspaceId: ctx.workspaceId,
-            documentType: docType as FinanceDocumentType,
-            periodYear: year,
-            prefix,
-            nextNumber: 1,
-            padding: 6,
-          }),
-        );
+        const scope = {
+          tenantId: ctx.tenantId,
+          workspaceId: ctx.workspaceId,
+          documentType: docType as FinanceDocumentType,
+          periodYear: year,
+        };
+        await this.sequencesRepo.createQueryBuilder().insert()
+          .values({ ...scope, prefix }).orIgnore().execute();
+        seq = await this.sequencesRepo.findOneByOrFail(scope);
       }
       results.push(seq);
     }

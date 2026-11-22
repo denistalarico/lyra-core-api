@@ -156,6 +156,7 @@ function storedLevel(
 export function resolveModuleAccess(
   role: PlatformRoleKey,
   rows: ReadonlyArray<{ appKey: string; access: string }>,
+  { maskBlockedAgency = true } = {},
 ): Record<string, ModuleAccessLevel | null> {
   const stored = new Map(rows.map((row) => [row.appKey, row.access]));
   const levels: Record<string, ModuleAccessLevel | null> = {};
@@ -172,7 +173,7 @@ export function resolveModuleAccess(
         : storedLevel(role, access);
   }
 
-  if (isModuleScopedRole(role) && levels.agency === null) {
+  if (maskBlockedAgency && isModuleScopedRole(role) && levels.agency === null) {
     for (const module of AGENCY_ACCESS_MODULES) levels[module] = null;
   }
 

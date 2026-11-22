@@ -22,6 +22,7 @@ import {
   InviteAgencyWorkspaceUserDto,
   PatchAgencyAdvancedDto,
   PatchAgencyAppsDto,
+  PatchAgencyAppAvailabilityDto,
   PatchAgencyEmailDto,
   PatchAgencyFinanceDto,
   PatchAgencyIntegrationsDto,
@@ -328,6 +329,32 @@ export class AgencySettingsController {
     );
   }
 
+  @Get('app-availability')
+  @RequirePermission('agency.settings.account.view.self')
+  getAppAvailability(@RequestContextData() ctx: RequestContext) {
+    this.assertWorkspaceContext(ctx);
+    return this.agencySettingsService.getAppAvailability(
+      ctx.tenantId,
+      ctx.workspaceId,
+    );
+  }
+
+  @Patch('app-availability/:key')
+  @RequirePermission('agency.settings.apps.manage.admin')
+  patchAppAvailability(
+    @RequestContextData() ctx: RequestContext,
+    @Param('key') key: string,
+    @Body() dto: PatchAgencyAppAvailabilityDto,
+  ) {
+    this.assertWorkspaceContext(ctx);
+    return this.agencySettingsService.patchAppAvailability(
+      ctx.tenantId,
+      ctx.workspaceId,
+      key,
+      dto,
+    );
+  }
+
   @Get('apps-integrations')
   @RequirePermission('agency.settings.apps.manage.admin')
   async getAppsIntegrations(@RequestContextData() ctx: RequestContext) {
@@ -390,7 +417,7 @@ export class AgencySettingsController {
   }
 
   @Get('finance')
-  @RequirePermission('agency.settings.billing.view.owner_only')
+  @RequirePermission('agency.finance.settings.manage.admin_or_owner')
   getFinance(@RequestContextData() ctx: RequestContext) {
     this.assertWorkspaceContext(ctx);
     return this.agencySettingsService.getFinance(ctx.tenantId, ctx.workspaceId);

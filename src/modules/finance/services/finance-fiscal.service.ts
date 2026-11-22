@@ -20,36 +20,27 @@ export class FinanceFiscalService {
     ctx: FinanceRequestContext,
     dto: UpdateFinanceFiscalProfileDto,
   ) {
-    const profile = await this.findOrCreateProfile(ctx);
-
-    Object.assign(profile, {
-      ...dto,
-      fiscalCountry: dto.fiscalCountry?.toUpperCase() ?? profile.fiscalCountry,
-      metadata: dto.metadata ?? profile.metadata,
-      providerConfig: dto.providerConfig ?? profile.providerConfig,
-    });
-
-    return this.fiscalProfilesRepo.save(profile);
+    const scope = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
+    await this.fiscalProfilesRepo.upsert(
+      {
+        ...scope,
+        ...dto,
+        fiscalCountry: dto.fiscalCountry?.toUpperCase(),
+        metadata: (dto.metadata ?? undefined) as never,
+        providerConfig: (dto.providerConfig ?? undefined) as never,
+      },
+      ['tenantId', 'workspaceId'],
+    );
+    return this.fiscalProfilesRepo.findOneByOrFail(scope);
   }
 
   private async findOrCreateProfile(ctx: FinanceRequestContext) {
-    let profile = await this.fiscalProfilesRepo.findOne({
-      where: {
-        tenantId: ctx.tenantId,
-        workspaceId: ctx.workspaceId,
-      },
-    });
+    const scope = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
+    const profile = await this.fiscalProfilesRepo.findOneBy(scope);
+    if (profile) return profile;
 
-    if (!profile) {
-      profile = await this.fiscalProfilesRepo.save(
-        this.fiscalProfilesRepo.create({
-          tenantId: ctx.tenantId,
-          workspaceId: ctx.workspaceId,
-          fiscalCountry: 'BR',
-        }),
-      );
-    }
-
-    return profile;
+    await this.fiscalProfilesRepo.createQueryBuilder().insert().values(scope)
+      .orIgnore().execute();
+    return this.fiscalProfilesRepo.findOneByOrFail(scope);
   }
 }

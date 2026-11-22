@@ -262,6 +262,16 @@ export class PatchAgencyAppsDto {
   apps!: Array<Record<string, unknown>>;
 }
 
+export class PatchAgencyAppAvailabilityDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  menuVisible?: boolean;
+}
+
 export class PatchAgencyEmailDto {
   @IsOptional()
   @IsString()
@@ -367,6 +377,15 @@ export class PatchAgencyFinanceDto {
   @IsInt()
   @Min(1)
   nextInvoiceNumber!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedNextInvoiceNumber?: number;
+
+  @IsOptional()
+  @IsInt()
+  invoiceSequenceYear?: number;
 
   @IsString()
   @MaxLength(40)

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -45,6 +46,7 @@ import {
   InviteAgencyWorkspaceUserDto,
   PatchAgencyAdvancedDto,
   PatchAgencyAppsDto,
+  PatchAgencyAppAvailabilityDto,
   PatchAgencyEmailDto,
   PatchAgencyFinanceDto,
   PatchAgencyIntegrationsDto,
@@ -71,6 +73,12 @@ import {
   ACCESS_KEYS,
   resolveModuleAccess,
 } from '../permissions/catalog/module-access.catalog';
+import {
+  FinanceDocumentSequence,
+  FinanceFiscalProfile,
+  FinanceSetting,
+} from '../finance/entities';
+import { FinanceBrazilTaxRegime, FinanceDocumentType } from '../finance/enums';
 import { PlatformRoleKey } from '../permissions/enums/permission.enums';
 import { syncAgencySelfContact } from './agency-self-contact';
 import { AgencyAuthService } from './agency-auth.service';
@@ -87,6 +95,18 @@ const AGENCY_APP_KEYS = [
   'profitability',
   'settings',
 ] as const;
+const TOGGLABLE_APPS = [
+  'messages',
+  'calendar',
+  'knowledge',
+  'contacts',
+  'clients',
+  'finance',
+  'team',
+  'contracts',
+];
+const SIDEBAR_ADDONS = ['contracts', 'clientArea', 'forms'];
+
 const AGENCY_WORKSPACE_ROLES = ['owner', 'admin', 'manager', 'member'] as const;
 type AgencyWorkspaceRoleKey = (typeof AGENCY_WORKSPACE_ROLES)[number];
 type AgencyPermissionAccessValue = 'full' | 'partial' | 'blocked';
@@ -804,12 +824,107 @@ export class AgencySettingsService {
     workspaceId: string,
     dto: PatchAgencyAppsDto,
   ) {
-    await this.appsRepo.upsert(
-      { tenantId, workspaceId, apps: dto.apps as never },
-      ['tenantId', 'workspaceId'],
-    );
+    return this.updateWorkspaceApps(tenantId, workspaceId, (current) => {
+      const incomingKeys = new Set(dto.apps.map((app) => app?.appKey));
+      const currentByKey = new Map(current.map((app) => [app?.appKey, app]));
+      return [
+        ...current.filter((app) =>
+          typeof app?.appKey === 'string' &&
+          (TOGGLABLE_APPS.includes(app.appKey) || SIDEBAR_ADDONS.includes(app.appKey)) &&
+          !incomingKeys.has(app.appKey),
+        ),
+        ...dto.apps.map((app) => ({
+          ...currentByKey.get(app?.appKey),
+          ...app,
+        })),
+      ];
+    });
+  }
 
-    return this.getApps(tenantId, workspaceId);
+  async getAppAvailability(tenantId: string, workspaceId: string) {
+    const { apps } = await this.getApps(tenantId, workspaceId);
+    return this.serializeAppAvailability(apps ?? []);
+  }
+
+  async patchAppAvailability(
+    tenantId: string,
+    workspaceId: string,
+    appKey: string,
+    dto: PatchAgencyAppAvailabilityDto,
+  ) {
+    const changes: PatchAgencyAppAvailabilityDto = {};
+    if (typeof dto.enabled === 'boolean' && TOGGLABLE_APPS.includes(appKey)) {
+      changes.enabled = dto.enabled;
+    }
+    if (
+      typeof dto.menuVisible === 'boolean' &&
+      SIDEBAR_ADDONS.includes(appKey)
+    ) {
+      changes.menuVisible = dto.menuVisible;
+    }
+    if (
+      Object.keys(changes).length === 0 ||
+      (dto.enabled !== undefined && changes.enabled === undefined) ||
+      (dto.menuVisible !== undefined && changes.menuVisible === undefined)
+    ) {
+      throw new BadRequestException('Invalid app availability change.');
+    }
+
+    const settings = await this.updateWorkspaceApps(tenantId, workspaceId, (apps) =>
+      apps.some((app) => app?.appKey === appKey)
+        ? apps.map((app) =>
+            app?.appKey === appKey ? { ...app, ...changes } : app,
+          )
+        : [...apps, { appKey, ...changes }],
+    );
+    return this.serializeAppAvailability(settings.apps);
+  }
+
+  private updateWorkspaceApps(
+    tenantId: string,
+    workspaceId: string,
+    update: (apps: Array<Record<string, unknown>>) => Array<Record<string, unknown>>,
+  ) {
+    return this.appsRepo.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(AgencyWorkspaceAppsSettingsEntity);
+      const scope = { tenantId, workspaceId };
+      await repo
+        .createQueryBuilder()
+        .insert()
+        .values({
+          ...scope,
+          apps: AGENCY_APP_KEYS.map((appKey) => ({ appKey, enabled: true })),
+        })
+        .orIgnore()
+        .execute();
+      const settings = await repo.findOneOrFail({
+        where: scope,
+        lock: { mode: 'pessimistic_write' },
+      });
+      settings.apps = update(settings.apps ?? []);
+      return repo.save(settings);
+    });
+  }
+
+  private serializeAppAvailability(apps: Array<Record<string, unknown>>) {
+    return Object.fromEntries(
+      apps
+        .filter(
+          (app) =>
+            typeof app?.appKey === 'string' &&
+            (TOGGLABLE_APPS.includes(app.appKey) ||
+              SIDEBAR_ADDONS.includes(app.appKey)),
+        )
+        .map(({ appKey, enabled, menuVisible }) => [
+          appKey,
+          {
+            enabled:
+              !TOGGLABLE_APPS.includes(String(appKey)) || enabled !== false,
+            menuVisible:
+              !SIDEBAR_ADDONS.includes(String(appKey)) || menuVisible !== false,
+          },
+        ]),
+    );
   }
 
   async getEmail(tenantId: string, workspaceId: string) {
@@ -892,11 +1007,40 @@ export class AgencySettingsService {
   }
 
   async getFinance(tenantId: string, workspaceId: string) {
-    const entity =
-      (await this.financeRepo.findOne({ where: { tenantId, workspaceId } })) ??
-      this.financeRepo.create({ tenantId, workspaceId });
-
-    return this.serializeFinanceSettings(entity);
+    const scope = { tenantId, workspaceId };
+    const manager = this.financeRepo.manager;
+    const invoiceSequenceYear = new Date().getUTCFullYear();
+    const [legacy, settings, fiscal, invoice] = await Promise.all([
+      this.financeRepo.findOneBy(scope),
+      manager.findOneBy(FinanceSetting, scope),
+      manager.findOneBy(FinanceFiscalProfile, scope),
+      manager.findOneBy(FinanceDocumentSequence, {
+        ...scope,
+        periodYear: invoiceSequenceYear,
+        documentType: FinanceDocumentType.Invoice,
+      }),
+    ]);
+    const defaults = this.serializeFinanceSettings(
+      legacy ?? this.financeRepo.create(scope),
+    );
+    const paymentDays = settings?.defaultPaymentTermsDays;
+    return {
+      ...defaults,
+      country:
+        settings?.fiscalCountry ?? fiscal?.fiscalCountry ?? defaults.country,
+      currency: settings?.baseCurrency ?? defaults.currency,
+      fiscalRegime: fiscal?.brazilTaxRegime ?? defaults.fiscalRegime,
+      invoicePrefix:
+        invoice?.prefix ?? (legacy ? defaults.invoicePrefix : 'INV'),
+      nextInvoiceNumber: invoice?.nextNumber ?? defaults.nextInvoiceNumber,
+      invoiceSequenceYear,
+      defaultPaymentTerms:
+        paymentDays == null
+          ? defaults.defaultPaymentTerms
+          : paymentDays === 0
+            ? 'À vista'
+            : `${paymentDays} dias`,
+    };
   }
 
   async patchFinance(
@@ -904,29 +1048,122 @@ export class AgencySettingsService {
     workspaceId: string,
     dto: PatchAgencyFinanceDto,
   ) {
-    const settings = {
-      taxDocumentType: dto.taxDocumentType,
-      taxDocument: dto.taxDocument ?? null,
-      fiscalRegime: dto.fiscalRegime ?? null,
-      invoicePrefix: dto.invoicePrefix,
-      nextInvoiceNumber: dto.nextInvoiceNumber,
-      defaultPaymentTerms: dto.defaultPaymentTerms,
-      defaultLateFee: dto.defaultLateFee,
-      defaultMonthlyInterest: dto.defaultMonthlyInterest,
-      billingEmail: dto.billingEmail ?? null,
-      fiscalEmail: dto.fiscalEmail ?? null,
-    };
-
-    await this.financeRepo.upsert(
-      {
-        tenantId,
-        workspaceId,
-        country: dto.country,
-        currency: dto.currency,
-        settings: settings as never,
-      },
-      ['tenantId', 'workspaceId'],
+    const scope = { tenantId, workspaceId };
+    const periodYear = new Date().getUTCFullYear();
+    if (
+      dto.invoiceSequenceYear !== undefined &&
+      dto.invoiceSequenceYear !== periodYear
+    ) {
+      throw new ConflictException(
+        'O ano da sequência mudou. Atualize a página e tente novamente.',
+      );
+    }
+    const currency = dto.currency.trim().toUpperCase();
+    const country = dto.country.trim().toUpperCase();
+    const terms = dto.defaultPaymentTerms.trim();
+    const paymentDays = /^à vista$/i.test(terms)
+      ? 0
+      : Number(/^(\d+) dias?$/i.exec(terms)?.[1]);
+    const fiscalRegime = Object.values(FinanceBrazilTaxRegime).find(
+      (value) => value === dto.fiscalRegime,
     );
+    if (
+      !/^[A-Z]{3}$/.test(currency) ||
+      !/^[A-Z]{2}$/.test(country) ||
+      !Number.isInteger(paymentDays) ||
+      paymentDays < 0 ||
+      paymentDays > 2147483647
+    ) {
+      throw new BadRequestException(
+        'Informe país, moeda e prazo de pagamento válidos.',
+      );
+    }
+
+    await this.financeRepo.manager.transaction(async (manager) => {
+      await manager.upsert(
+        FinanceSetting,
+        {
+          ...scope,
+          baseCurrency: currency,
+          fiscalCountry: country,
+          defaultPaymentTermsDays: paymentDays,
+        },
+        ['tenantId', 'workspaceId'],
+      );
+      await manager.upsert(
+        FinanceFiscalProfile,
+        {
+          ...scope,
+          fiscalCountry: country,
+          ...(fiscalRegime
+            ? {
+                brazilTaxRegime: fiscalRegime,
+                isSimplesNacional:
+                  fiscalRegime === FinanceBrazilTaxRegime.SimplesNacional ||
+                  fiscalRegime === FinanceBrazilTaxRegime.SimplesNacionalExcess,
+              }
+            : {}),
+        },
+        ['tenantId', 'workspaceId'],
+      );
+
+      const invoiceScope = {
+        ...scope,
+        periodYear,
+        documentType: FinanceDocumentType.Invoice,
+      };
+      const sequenceRepo = manager.getRepository(FinanceDocumentSequence);
+      const { expectedNextInvoiceNumber } = dto;
+      const prefix = dto.invoicePrefix.trim() || 'INV';
+      await sequenceRepo
+        .createQueryBuilder()
+        .insert()
+        .values({
+          ...invoiceScope,
+          prefix,
+          nextNumber: expectedNextInvoiceNumber ?? dto.nextInvoiceNumber,
+        })
+        .orIgnore()
+        .execute();
+      const sequence = await sequenceRepo.findOneOrFail({
+        where: invoiceScope,
+        lock: { mode: 'pessimistic_write' },
+      });
+      const changeNextNumber =
+        expectedNextInvoiceNumber === undefined ||
+        dto.nextInvoiceNumber !== expectedNextInvoiceNumber;
+      if (
+        changeNextNumber &&
+        expectedNextInvoiceNumber !== undefined &&
+        sequence.nextNumber !== expectedNextInvoiceNumber
+      ) {
+        throw new ConflictException(
+          'A sequência de faturas mudou. Atualize a página e tente novamente.',
+        );
+      }
+      const nextNumber = changeNextNumber
+        ? dto.nextInvoiceNumber
+        : sequence.nextNumber;
+      if (sequence.prefix !== prefix || sequence.nextNumber !== nextNumber) {
+        await sequenceRepo.update(sequence.id, { prefix, nextNumber });
+      }
+
+      await manager.upsert(
+        AgencyWorkspaceFinanceSettingsEntity,
+        {
+          ...scope,
+          settings: {
+            taxDocumentType: dto.taxDocumentType,
+            taxDocument: dto.taxDocument ?? null,
+            defaultLateFee: dto.defaultLateFee,
+            defaultMonthlyInterest: dto.defaultMonthlyInterest,
+            billingEmail: dto.billingEmail ?? null,
+            fiscalEmail: dto.fiscalEmail ?? null,
+          } as never,
+        },
+        ['tenantId', 'workspaceId'],
+      );
+    });
 
     return this.getFinance(tenantId, workspaceId);
   }
@@ -1071,6 +1308,7 @@ export class AgencySettingsService {
           moduleAccess: resolveModuleAccess(
             user.role as PlatformRoleKey,
             permissions,
+            { maskBlockedAgency: false },
           ),
           clientProducts: clientProducts
             .filter((grant) => grant.userId === user.userId)
@@ -1149,28 +1387,26 @@ export class AgencySettingsService {
     dto: PatchAgencyPermissionMatrixDto,
   ) {
     const normalizedMatrix = this.normalizePermissionMatrix(dto.matrix);
-    const appsSettings = await this.getApps(tenantId, workspaceId);
     const appKeys = Array.from(
       new Set([...AGENCY_APP_KEYS, ...Object.keys(normalizedMatrix)]),
     );
-    const appsByKey = new Map(
-      (appsSettings.apps ?? [])
-        .filter((item) => typeof item.appKey === 'string')
-        .map((item) => [String(item.appKey), item]),
-    );
-
-    await this.appsRepo.upsert(
-      {
-        tenantId,
-        workspaceId,
-        apps: appKeys.map((appKey) => ({
-          ...(appsByKey.get(appKey) ?? { appKey, enabled: true }),
-          appKey,
-          permissionsByRole: normalizedMatrix[appKey],
-        })) as never,
-      },
-      ['tenantId', 'workspaceId'],
-    );
+    await this.updateWorkspaceApps(tenantId, workspaceId, (apps) => {
+      const appsByKey = new Map(
+        apps
+          .filter((item) => typeof item?.appKey === 'string')
+          .map((item) => [String(item.appKey), item]),
+      );
+      return [
+          ...[...appsByKey.values()].filter(
+            (app) => !appKeys.includes(String(app.appKey)),
+          ),
+          ...appKeys.map((appKey) => ({
+            ...(appsByKey.get(appKey) ?? { appKey, enabled: true }),
+            appKey,
+            permissionsByRole: normalizedMatrix[appKey],
+          })),
+      ];
+    });
 
     const users = await this.workspaceUsersRepo.find({
       where: { tenantId, workspaceId },
@@ -1949,7 +2185,7 @@ export class AgencySettingsService {
     const events = await this.loginEventsRepo.find({
       where: { tenantId, userId },
       order: { createdAt: 'DESC' },
-      take: 5,
+      take: 100,
     });
 
     return events.map((event) => ({

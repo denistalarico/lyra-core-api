@@ -118,32 +118,22 @@ export class FinanceService {
   }
 
   async getSettings(ctx: FinanceRequestContext) {
-    let settings = await this.settingsRepo.findOne({
-      where: {
-        tenantId: ctx.tenantId,
-        workspaceId: ctx.workspaceId,
-      },
-    });
+    const scope = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
+    const settings = await this.settingsRepo.findOneBy(scope);
+    if (settings) return settings;
 
-    if (!settings) {
-      settings = this.settingsRepo.create({
-        tenantId: ctx.tenantId,
-        workspaceId: ctx.workspaceId,
-      });
-
-      settings = await this.settingsRepo.save(settings);
-    }
-
-    return settings;
+    await this.settingsRepo.createQueryBuilder().insert().values(scope)
+      .orIgnore().execute();
+    return this.settingsRepo.findOneByOrFail(scope);
   }
 
   async updateSettings(
     ctx: FinanceRequestContext,
     dto: UpdateFinanceSettingsDto,
   ) {
-    const settings = await this.getSettings(ctx);
-    Object.assign(settings, dto);
-    return this.settingsRepo.save(settings);
+    const scope = { tenantId: ctx.tenantId, workspaceId: ctx.workspaceId };
+    await this.settingsRepo.upsert({ ...scope, ...dto }, ['tenantId', 'workspaceId']);
+    return this.settingsRepo.findOneByOrFail(scope);
   }
 
   listAccounts(ctx: FinanceRequestContext) {
