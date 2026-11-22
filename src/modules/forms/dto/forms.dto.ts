@@ -170,6 +170,13 @@ export class RemoveFormQueryDto {
   withSubmissions?: 'true' | 'false';
 }
 
+export class DeleteFormSubmissionsDto {
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('all', { each: true })
+  ids!: string[];
+}
+
 export class SetFormsAddonDto {
   @IsBoolean()
   enabled!: boolean;

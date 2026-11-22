@@ -373,6 +373,19 @@ export class FormsService {
     };
   }
 
+  /** Deletes submissions of one form; CRM contacts and opportunities stay. */
+  async removeSubmissions(ctx: RequestContext, formId: string, ids: string[]) {
+    const form = await this.get(ctx, formId);
+    if (!ids.length) return { deleted: 0 };
+    const result = await this.submissions.delete({
+      tenantId: form.tenantId,
+      workspaceId: form.workspaceId,
+      formId: form.id,
+      id: In(ids),
+    });
+    return { deleted: result.affected ?? 0 };
+  }
+
   /** Tags of the leads' contacts (same `contact_tags` the Contacts screen edits). */
   private async contactTagsOf(form: FormEntity, contactIds: string[]) {
     const map = new Map<

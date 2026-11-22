@@ -26,6 +26,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard, RequirePermission } from '../permissions';
 import {
   CreateFormDto,
+  DeleteFormSubmissionsDto,
   ImportFormGoogleAdsLeadsDto,
   ListFormSubmissionsQueryDto,
   ListFormsQueryDto,
@@ -380,5 +381,15 @@ export class FormsController {
     @Query() query: ListFormSubmissionsQueryDto,
   ) {
     return this.forms.listSubmissions(ctx, id, query);
+  }
+
+  @Post(':id/submissions/delete')
+  @RequirePermission('agency.forms.forms.manage.admin')
+  removeSubmissions(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: DeleteFormSubmissionsDto,
+  ) {
+    return this.forms.removeSubmissions(ctx, id, body.ids);
   }
 }
