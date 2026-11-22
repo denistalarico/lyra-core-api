@@ -17,7 +17,7 @@ export type FormContactScope = {
   companyContextId: string | null;
 };
 
-export const FORMS_CONTACT_LIST_NAME = 'Formulários';
+export const FORMS_CONTACT_LIST_NAME = 'Forms';
 
 /**
  * Finds or creates the lead's contact in the right scope (§5.1).
@@ -142,7 +142,7 @@ export class FormLeadContactResolver {
   }
 
   /**
-   * "Formulários" system list (the separate folder in Contacts) and, for a
+   * "Forms" system list (the separate folder in Contacts) and, for a
    * client company, the LeadFlow company sublist when it already exists — the
    * LeadFlow contacts screen creates it with the company's real name, so this
    * never invents one.
@@ -220,7 +220,7 @@ export class FormLeadContactResolver {
     } catch (error) {
       const raced = await lists.findOne({ where });
       if (raced) return raced;
-      // (workspace, name) is unique: a user list may already be called "Formulários".
+      // (workspace, name) is unique: a user list may already be called "Forms".
       if (
         error instanceof QueryFailedError &&
         (error.driverError as { code?: string }).code === '23505'

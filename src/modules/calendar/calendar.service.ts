@@ -169,7 +169,7 @@ export class CalendarService implements OnModuleInit {
 
     const saved = await this.eventsRepository.save(event);
 
-    await this.createWeeklyOccurrences(saved);
+    await this.createRecurringOccurrences(saved);
     this.scheduleCalendarReminder(saved);
 
     return saved;
@@ -223,7 +223,7 @@ export class CalendarService implements OnModuleInit {
     const saved = await this.eventsRepository.save(event);
 
     await this.publishCalendarUpdateNotifications(context, saved, previous);
-    await this.createWeeklyOccurrences(saved);
+    await this.createRecurringOccurrences(saved);
     this.scheduleCalendarReminder(saved, previous);
 
     return saved;
@@ -620,12 +620,12 @@ export class CalendarService implements OnModuleInit {
     );
   }
 
-  private async createWeeklyOccurrences(event: CalendarEvent) {
+  private async createRecurringOccurrences(event: CalendarEvent) {
     const metadata = event.metadata ?? {};
     const recurrence = this.metadataRecord(metadata, 'recurrence');
 
     if (
-      recurrence.frequency !== 'weekly' ||
+      (recurrence.frequency !== 'weekly' && recurrence.frequency !== 'monthly' && recurrence.frequency !== 'yearly') ||
       metadata.recurringSeriesId ||
       metadata.recurrenceGeneratedAt
     ) {
@@ -640,7 +640,20 @@ export class CalendarService implements OnModuleInit {
 
     for (let index = 1; index <= occurrenceCount; index += 1) {
       const startsAt = new Date(event.startsAt);
-      startsAt.setDate(startsAt.getDate() + 7 * index);
+      if (recurrence.frequency === 'weekly') {
+        startsAt.setDate(startsAt.getDate() + 7 * index);
+      } else {
+        // Anchor to the original local date so January 31 and leap days do not drift.
+        const offsetMs = typeof recurrence.utcOffsetMinutes === 'number' &&
+          Number.isInteger(recurrence.utcOffsetMinutes) && Math.abs(recurrence.utcOffsetMinutes) <= 840
+          ? recurrence.utcOffsetMinutes * 60_000 : 0;
+        const local = new Date(startsAt.getTime() + offsetMs);
+        const day = local.getUTCDate();
+        const months = recurrence.frequency === 'monthly' ? index : 12 * index;
+        local.setUTCMonth(local.getUTCMonth() + months + 1, 0);
+        local.setUTCDate(Math.min(day, local.getUTCDate()));
+        startsAt.setTime(local.getTime() - offsetMs);
+      }
       const endsAt = new Date(startsAt.getTime() + durationMs);
 
       const occurrence = this.eventsRepository.create({

@@ -536,7 +536,11 @@ export class TeamChatMeetingsService {
 
     if (dto.startsAt !== undefined) {
       meeting.startsAt = dto.startsAt ? new Date(dto.startsAt) : null;
-      if (meeting.status === TeamChatMeetingStatus.CANCELED) {
+      if (
+        meeting.status === TeamChatMeetingStatus.CANCELED ||
+        (meeting.startsAt && meeting.status === TeamChatMeetingStatus.ENDED)
+      ) {
+        meeting.startedAt = null;
         meeting.status = TeamChatMeetingStatus.SCHEDULED;
         meeting.endedAt = null;
       }

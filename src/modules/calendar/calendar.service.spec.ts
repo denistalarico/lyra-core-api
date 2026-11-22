@@ -139,6 +139,24 @@ describe('CalendarService event date validation', () => {
   });
 });
 
+describe('CalendarService recurrence', () => {
+  it.each([
+    ['monthly', '2032-02-01T02:00:00Z', ['2032-03-01T02:00:00.000Z', '2032-04-01T02:00:00.000Z']],
+    ['yearly', '2032-03-01T02:00:00Z', ['2033-03-01T02:00:00.000Z', '2034-03-01T02:00:00.000Z']],
+  ] as const)('anchors %s occurrences to the original local day', async (frequency, startsAt, expected) => {
+    const { service, eventsRepository } = makeService();
+    await service.createEvent(makeContext(), {
+      title: 'Recorrente',
+      startsAt,
+      endsAt: new Date(Date.parse(startsAt) + 3_600_000).toISOString(),
+      metadata: { recurrence: { frequency, utcOffsetMinutes: -180, generatedOccurrences: 2 } },
+    });
+    const copies = eventsRepository.create.mock.calls.slice(1).map(([event]) => event);
+    expect(copies.map((event) => event.startsAt?.toISOString())).toEqual(expected);
+    expect(copies.every((event) => event.endsAt!.getTime() - event.startsAt!.getTime() === 3_600_000)).toBe(true);
+  });
+});
+
 describe('CalendarService notification triggers', () => {
   it('scopes member calendar lists to owned or created events', async () => {
     const { service, queryBuilder } = makeService();

@@ -15,6 +15,9 @@ export class CreateContactMethodDto {
     'instagram',
     'facebook',
     'tiktok',
+    'x',
+    'threads',
+    'linkedin',
     'website',
     'other',
   ])

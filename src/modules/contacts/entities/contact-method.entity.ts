@@ -14,6 +14,9 @@ export type ContactMethodType =
   | 'instagram'
   | 'facebook'
   | 'tiktok'
+  | 'x'
+  | 'threads'
+  | 'linkedin'
   | 'website'
   | 'other';
 

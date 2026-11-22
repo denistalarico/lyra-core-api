@@ -16,6 +16,9 @@ export class PatchContactMethodDto {
     'instagram',
     'facebook',
     'tiktok',
+    'x',
+    'threads',
+    'linkedin',
     'website',
     'other',
   ])

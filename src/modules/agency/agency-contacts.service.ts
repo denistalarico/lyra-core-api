@@ -237,7 +237,7 @@ export class AgencyContactsService {
       { name: 'LinkedIn', code: 'linkedin', position: 70 },
       { name: 'TikTok', code: 'tiktok', position: 80 },
       { name: 'Webchat', code: 'webchat', position: 90 },
-      { name: 'Formulário', code: 'form', position: 100 },
+      { name: 'Form', code: 'form', position: 100 },
       { name: 'Importação', code: 'import', position: 110 },
       { name: 'Indicação', code: 'referral', position: 120 },
       { name: 'E-mail', code: 'email', position: 130 },
