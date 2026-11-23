@@ -23,6 +23,14 @@ const SETTLED: readonly SocialOrganicSyncRunStatus[] = [
 ];
 export const SOCIAL_ORGANIC_SYNC_LEASE_MS = 10 * 60_000;
 export const SOCIAL_ORGANIC_MAX_ON_DEMAND_DAYS = 7;
+/** Providers with an analytics implementation that the scheduler picks up. */
+export const SCHEDULED_ORGANIC_PROVIDERS = [
+  'meta',
+  'youtube',
+  'tiktok',
+  'tiktok_business',
+  'linkedin',
+];
 
 export type SocialOrganicSyncCandidate = {
   assetId: string;
@@ -102,10 +110,10 @@ export class SocialOrganicSyncRunService {
     const assets = await this.assets.find({
       relations: { connection: true },
       where: {
-        provider: In(['meta', 'youtube', 'tiktok', 'linkedin']),
+        provider: In(SCHEDULED_ORGANIC_PROVIDERS),
         status: 'active',
         connection: {
-          provider: In(['meta', 'youtube', 'tiktok', 'linkedin']),
+          provider: In(SCHEDULED_ORGANIC_PROVIDERS),
           connectionStatus: 'connected',
           credentialRemovedAt: IsNull(),
         },

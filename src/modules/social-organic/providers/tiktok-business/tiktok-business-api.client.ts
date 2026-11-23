@@ -62,6 +62,86 @@ export type TiktokBusinessPublishStatus = {
   reason: string | null;
 };
 
+/** One UTC day of `/business/get/` `metrics[]` (T + 24–48 h, DOCUMENTED). */
+export type TiktokBusinessAccountDay = {
+  date: string;
+  videoViews: number | null;
+  uniqueVideoViews: number | null;
+  profileViews: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  followersCount: number | null;
+  newFollowers: number | null;
+  lostFollowers: number | null;
+  netFollowers: number | null;
+  engagedAudience: number | null;
+  bioLinkClicks: number | null;
+};
+
+export type TiktokBusinessAccountInsights = {
+  /** Real-time stock (`followers_count` at the top level). */
+  followersCount: number | null;
+  days: TiktokBusinessAccountDay[];
+};
+
+/** `/business/video/list/` counters are lifetime totals (DOCUMENTED). */
+export type TiktokBusinessVideo = {
+  itemId: string;
+  mediaType: string | null;
+  createTime: number | null;
+  shareUrl: string | null;
+  caption: string | null;
+  videoViews: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  favorites: number | null;
+  reach: number | null;
+  newFollowers: number | null;
+  totalTimeWatched: number | null;
+  averageTimeWatched: number | null;
+  fullVideoWatchedRate: number | null;
+};
+
+/** Daily fields of `/business/get/`; all `user.insights` (DOCUMENTED). */
+export const TIKTOK_BUSINESS_ACCOUNT_FIELDS = [
+  'followers_count',
+  'video_views',
+  'unique_video_views',
+  'profile_views',
+  'likes',
+  'comments',
+  'shares',
+  'daily_total_followers',
+  'daily_new_followers',
+  'daily_lost_followers',
+  'engaged_audience',
+  'bio_link_clicks',
+] as const;
+
+/** `video.list` + `video.insights` fields of `/business/video/list/`. */
+export const TIKTOK_BUSINESS_VIDEO_FIELDS = [
+  'item_id',
+  'media_type',
+  'create_time',
+  'share_url',
+  'caption',
+  'video_views',
+  'likes',
+  'comments',
+  'shares',
+  'favorites',
+  'reach',
+  'new_followers',
+  'total_time_watched',
+  'average_time_watched',
+  'full_video_watched_rate',
+] as const;
+
+/** `max_count` ceiling of `/business/video/list/` (DOCUMENTED). */
+export const TIKTOK_BUSINESS_VIDEO_PAGE_SIZE = 20;
+
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -215,6 +295,95 @@ export class TiktokBusinessApiClient {
       displayName: text(data.display_name),
       profileImage: text(data.profile_image),
       followersCount: count(data.followers_count),
+    };
+  }
+
+  /** Daily account metrics, UTC days, at most 60 days back (DOCUMENTED). */
+  async accountInsights(input: {
+    accessToken: string;
+    businessId: string;
+    startDate: string;
+    endDate: string;
+  }): Promise<TiktokBusinessAccountInsights> {
+    const data = await this.get('/business/get/', input.accessToken, {
+      business_id: input.businessId,
+      start_date: input.startDate,
+      end_date: input.endDate,
+      fields: JSON.stringify(TIKTOK_BUSINESS_ACCOUNT_FIELDS),
+    });
+    const days = (Array.isArray(data.metrics) ? data.metrics : [])
+      .map(record)
+      .flatMap((entry): TiktokBusinessAccountDay[] => {
+        const date = text(entry.date);
+        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return [];
+        return [
+          {
+            date,
+            videoViews: count(entry.video_views),
+            uniqueVideoViews: count(entry.unique_video_views),
+            profileViews: count(entry.profile_views),
+            likes: count(entry.likes),
+            comments: count(entry.comments),
+            shares: count(entry.shares),
+            followersCount: count(entry.followers_count),
+            newFollowers: count(entry.daily_new_followers),
+            lostFollowers: count(entry.daily_lost_followers),
+            netFollowers: count(entry.daily_total_followers),
+            engagedAudience: count(entry.engaged_audience),
+            bioLinkClicks: count(entry.bio_link_clicks),
+          },
+        ];
+      });
+    return { followersCount: count(data.followers_count), days };
+  }
+
+  /** One page of public posts, newest first; `cursor` is epoch ms. */
+  async listVideos(input: {
+    accessToken: string;
+    businessId: string;
+    cursor?: number;
+  }): Promise<{
+    videos: TiktokBusinessVideo[];
+    cursor: number | null;
+    hasMore: boolean;
+  }> {
+    const data = await this.get('/business/video/list/', input.accessToken, {
+      business_id: input.businessId,
+      fields: JSON.stringify(TIKTOK_BUSINESS_VIDEO_FIELDS),
+      max_count: String(TIKTOK_BUSINESS_VIDEO_PAGE_SIZE),
+      ...(input.cursor === undefined ? {} : { cursor: String(input.cursor) }),
+    });
+    const videos = (Array.isArray(data.videos) ? data.videos : [])
+      .map(record)
+      .flatMap((entry): TiktokBusinessVideo[] => {
+        const itemId = text(entry.item_id);
+        if (!itemId) return [];
+        const created = Number(entry.create_time);
+        return [
+          {
+            itemId,
+            mediaType: text(entry.media_type),
+            createTime:
+              Number.isFinite(created) && created > 0 ? created : null,
+            shareUrl: text(entry.share_url),
+            caption: typeof entry.caption === 'string' ? entry.caption : null,
+            videoViews: count(entry.video_views),
+            likes: count(entry.likes),
+            comments: count(entry.comments),
+            shares: count(entry.shares),
+            favorites: count(entry.favorites),
+            reach: count(entry.reach),
+            newFollowers: count(entry.new_followers),
+            totalTimeWatched: count(entry.total_time_watched),
+            averageTimeWatched: count(entry.average_time_watched),
+            fullVideoWatchedRate: count(entry.full_video_watched_rate),
+          },
+        ];
+      });
+    return {
+      videos,
+      cursor: count(data.cursor),
+      hasMore: data.has_more === true,
     };
   }
 

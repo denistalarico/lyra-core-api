@@ -2,6 +2,7 @@ import { SocialOrganicCredentialError } from '../credentials/social-organic-cred
 import { YoutubeApiError } from '../providers/youtube/youtube-api.client';
 import { LinkedInOrganicApiError } from '../providers/linkedin/linkedin-organic-api.client';
 import { TiktokApiError } from '../providers/tiktok/tiktok-api.client';
+import { TiktokBusinessApiError } from '../providers/tiktok-business/tiktok-business-api.client';
 import { MetaOrganicGraphError } from '../providers/meta/meta-organic-graph.error';
 import { MetaOrganicInsightsNormalizationError } from './meta/meta-organic-insights.normalizer';
 import { SocialOrganicSyncError } from './social-organic-sync.error';
@@ -42,6 +43,19 @@ export function classifyOrganicSyncFailure(
       retry: rateLimited || error.status >= 500,
       rateLimited,
       code: `tiktok_${error.code ?? error.status}`,
+    };
+  }
+  if (error instanceof TiktokBusinessApiError) {
+    // Return codes (DOCUMENTED): 40016/40100/40133 throttle; 0 = network.
+    const rateLimited =
+      error.status === 429 ||
+      error.code === 40016 ||
+      error.code === 40100 ||
+      error.code === 40133;
+    return {
+      retry: rateLimited || error.status === 0 || error.status >= 500,
+      rateLimited,
+      code: `tiktok_business_${error.code ?? error.status}`,
     };
   }
   if (error instanceof LinkedInOrganicApiError) {

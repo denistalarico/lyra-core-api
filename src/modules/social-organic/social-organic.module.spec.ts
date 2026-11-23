@@ -12,6 +12,7 @@ import { CompanyProductsModule } from '../../common/company-products/company-pro
 import { SettingsCryptoService } from '../../common/crypto/settings-crypto.service';
 import { FilesModule } from '../../common/files/files.module';
 import { LinkedInOrganicAnalyticsProvider } from './analytics/linkedin/linkedin-organic-analytics.provider';
+import { TiktokBusinessOrganicAnalyticsProvider } from './analytics/tiktok-business/tiktok-business-organic-analytics.provider';
 import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
@@ -293,6 +294,7 @@ describe('SocialOrganicModule', () => {
           YoutubeOrganicAnalyticsProvider,
           TiktokOrganicAnalyticsProvider,
           LinkedInOrganicAnalyticsProvider,
+          TiktokBusinessOrganicAnalyticsProvider,
         ],
       },
       YoutubeAnalyticsClient,
@@ -301,6 +303,7 @@ describe('SocialOrganicModule', () => {
       YoutubeDataRetentionScheduler,
       TiktokOrganicAnalyticsProvider,
       LinkedInOrganicAnalyticsProvider,
+      TiktokBusinessOrganicAnalyticsProvider,
       SocialOrganicAnalyticsProviderRegistry,
       SocialOrganicMetricsWriterService,
       SocialOrganicAudienceConfigService,

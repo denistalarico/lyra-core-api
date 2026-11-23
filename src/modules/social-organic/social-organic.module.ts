@@ -17,6 +17,7 @@ import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.en
 import { SocialIntegrationsModule } from '../social-integrations/social-integrations.module';
 import { LinkedInOrganicAnalyticsProvider } from './analytics/linkedin/linkedin-organic-analytics.provider';
 import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
+import { TiktokBusinessOrganicAnalyticsProvider } from './analytics/tiktok-business/tiktok-business-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
 import { YoutubeDataRetentionScheduler } from './analytics/youtube/youtube-data-retention.scheduler';
@@ -155,8 +156,9 @@ export function createOrganicAnalyticsProviders(
   youtube: YoutubeOrganicAnalyticsProvider,
   tiktok: TiktokOrganicAnalyticsProvider,
   linkedin: LinkedInOrganicAnalyticsProvider,
+  tiktokBusiness: TiktokBusinessOrganicAnalyticsProvider,
 ) {
-  return [meta, youtube, tiktok, linkedin];
+  return [meta, youtube, tiktok, linkedin, tiktokBusiness];
 }
 
 /** D-I4 (c): one health implementation per provider; YT/TT/LI plug here. */
@@ -319,6 +321,7 @@ export function createOrganicHealthProviders(
         YoutubeOrganicAnalyticsProvider,
         TiktokOrganicAnalyticsProvider,
         LinkedInOrganicAnalyticsProvider,
+        TiktokBusinessOrganicAnalyticsProvider,
       ],
     },
     YoutubeAnalyticsClient,
@@ -327,6 +330,7 @@ export function createOrganicHealthProviders(
     YoutubeDataRetentionScheduler,
     TiktokOrganicAnalyticsProvider,
     LinkedInOrganicAnalyticsProvider,
+    TiktokBusinessOrganicAnalyticsProvider,
     SocialOrganicAnalyticsProviderRegistry,
     SocialOrganicMetricsWriterService,
     // Audience snapshots: a gate that is off by default, a reader that measures

@@ -644,6 +644,8 @@ export class SocialOrganicCredentialResolver {
         return 'https://www.googleapis.com/auth/yt-analytics.readonly';
       case 'tiktok_account':
         return 'video.list';
+      case 'tiktok_business_account':
+        return 'user.insights';
       case 'linkedin_organization':
         return 'rw_organization_admin';
       default:
