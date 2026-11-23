@@ -234,6 +234,141 @@ describe('GoogleAdsManualActionAdapter (GA-WRITE)', () => {
     expect(result).toMatchObject({ verified: true });
   });
 
+  it('pauses an ad group keyword with an update on its status only', async () => {
+    const criterion = `customers/${CUSTOMER}/adGroupCriteria/55~901`;
+    const row = (status: string) => ({
+      adGroupCriterion: {
+        resourceName: criterion,
+        status,
+        keyword: { text: 'curso online', matchType: 'PHRASE' },
+      },
+    });
+    const { adapter, client } = setup([[row('ENABLED')], [row('PAUSED')]]);
+    const result = await adapter.execute({
+      ...input({
+        actionType: 'keyword',
+        target: { kind: 'ad_group', id: '55', adGroupId: null },
+        change: { op: 'pause', text: 'curso online', matchType: 'PHRASE' },
+      }),
+      expected: {
+        ...empty,
+        status: 'ENABLED',
+        criterionResourceName: criterion,
+      },
+    });
+    expect(client.mutate.mock.calls[0][1]).toBe('adGroupCriteria');
+    expect(client.mutate.mock.calls[0][2]).toEqual([
+      {
+        update: { resourceName: criterion, status: 'PAUSED' },
+        updateMask: 'status',
+      },
+    ]);
+    expect(result).toMatchObject({ verified: true });
+  });
+
+  it('refuses to pause a negative keyword', async () => {
+    const criterion = `customers/${CUSTOMER}/campaignCriteria/24460619718~5`;
+    const { adapter, client } = setup([
+      [
+        {
+          campaignCriterion: {
+            resourceName: criterion,
+            keyword: { text: 'grátis', matchType: 'PHRASE' },
+          },
+        },
+      ],
+    ]);
+    await expect(
+      adapter.execute({
+        ...input({
+          actionType: 'negative_keyword',
+          change: { op: 'pause', text: 'grátis', matchType: 'PHRASE' },
+        }),
+        expected: { ...empty, criterionResourceName: criterion },
+      }),
+    ).rejects.toBeInstanceOf(GoogleAdManualActionError);
+    expect(client.mutate).not.toHaveBeenCalled();
+  });
+
+  it('lists Search keywords with status and period metrics, zero when idle', async () => {
+    const { adapter, client } = setup([
+      [
+        {
+          adGroup: { id: '55' },
+          adGroupCriterion: {
+            criterionId: '901',
+            status: 'ENABLED',
+            keyword: { text: 'curso', matchType: 'EXACT' },
+          },
+        },
+        {
+          adGroup: { id: '55' },
+          adGroupCriterion: {
+            criterionId: '902',
+            status: 'PAUSED',
+            keyword: { text: 'aula', matchType: 'BROAD' },
+          },
+        },
+      ],
+      [
+        {
+          adGroup: { id: '55' },
+          adGroupCriterion: { criterionId: '901' },
+          metrics: {
+            impressions: '120',
+            clicks: '9',
+            interactions: '10',
+            conversions: 2.5,
+          },
+        },
+      ],
+    ]);
+    const items = await adapter.listKeywords({
+      ...scope,
+      connectionId: 'c1',
+      campaignId: '24460619718',
+      channelType: 'SEARCH',
+      groups: [{ id: '55', name: 'Grupo', kind: 'ad_group' }],
+      since: '2026-11-01',
+      until: '2026-11-20',
+    });
+    expect(client.search.mock.calls[1][1]).toContain(
+      "segments.date BETWEEN '2026-11-01' AND '2026-11-20'",
+    );
+    expect(items).toEqual([
+      expect.objectContaining({
+        text: 'curso',
+        status: 'ENABLED',
+        groupName: 'Grupo',
+        impressions: '120',
+        interactions: '10',
+        conversions: '2.5',
+      }),
+      expect.objectContaining({
+        text: 'aula',
+        status: 'PAUSED',
+        impressions: '0',
+        conversions: '0',
+      }),
+    ]);
+  });
+
+  it('refuses a malformed period before any Google request', async () => {
+    const { adapter, client } = setup([]);
+    await expect(
+      adapter.listKeywords({
+        ...scope,
+        connectionId: 'c1',
+        campaignId: '24460619718',
+        channelType: 'SEARCH',
+        groups: [],
+        since: "2026-11-01' OR 1=1",
+        until: '2026-11-20',
+      }),
+    ).rejects.toBeInstanceOf(GoogleAdManualActionError);
+    expect(client.search).not.toHaveBeenCalled();
+  });
+
   it('does not treat another match type as the same keyword', async () => {
     const { adapter } = setup([
       [

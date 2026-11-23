@@ -37,6 +37,20 @@ export type GoogleAdWritableState = {
   criterionResourceName: string | null;
 };
 
+/** One row of the campaign keyword panel; metrics are null where Google has none. */
+export type GoogleKeywordListItem = {
+  kind: 'keyword' | 'search_theme';
+  groupId: string;
+  groupName: string | null;
+  text: string;
+  matchType: string | null;
+  status: 'ENABLED' | 'PAUSED' | null;
+  impressions: string | null;
+  clicks: string | null;
+  interactions: string | null;
+  conversions: string | null;
+};
+
 export class GoogleAdManualActionError extends Error {
   constructor(readonly code: string) {
     super(code);
@@ -144,6 +158,122 @@ export class GoogleAdsManualActionAdapter {
     }
   }
 
+  /**
+   * The keyword panel of one campaign, read live when the operator opens it
+   * (the mirror holds no keyword inventory). Search: ad-group keywords with
+   * status and period metrics from `keyword_view`. Performance Max: the search
+   * themes of each asset group (Google reports no metrics or status there).
+   * Ids and dates are validated before they reach GAQL.
+   */
+  async listKeywords(
+    input: SocialCampaignsScope & {
+      connectionId: string;
+      campaignId: string;
+      channelType: string | null;
+      groups: Array<{
+        id: string;
+        name: string | null;
+        kind: 'ad_group' | 'asset_group';
+      }>;
+      since: string;
+      until: string;
+    },
+  ): Promise<GoogleKeywordListItem[]> {
+    const DAY = /^\d{4}-\d{2}-\d{2}$/;
+    if (
+      !ID.test(input.campaignId) ||
+      !DAY.test(input.since) ||
+      !DAY.test(input.until)
+    ) {
+      throw new GoogleAdManualActionError('google_object_not_found');
+    }
+    const credential = await this.credentials.resolve({
+      tenantId: input.tenantId,
+      workspaceId: input.workspaceId,
+      agencyClientId: input.agencyClientId,
+      companyContextId: input.companyContextId ?? null,
+      connectionId: input.connectionId,
+    });
+    const customer = credential.externalAccountId;
+    const names = new Map(input.groups.map((group) => [group.id, group.name]));
+
+    if (input.channelType === 'PERFORMANCE_MAX') {
+      const items: GoogleKeywordListItem[] = [];
+      for (const group of input.groups) {
+        if (group.kind !== 'asset_group' || !ID.test(group.id)) continue;
+        const rows = await this.client.search(
+          credential,
+          `SELECT asset_group_signal.resource_name, asset_group_signal.search_theme.text FROM asset_group_signal WHERE asset_group_signal.asset_group = 'customers/${customer}/assetGroups/${group.id}'`,
+        );
+        for (const row of rows) {
+          const theme = this.record(
+            this.record(row.assetGroupSignal).searchTheme,
+          );
+          if (typeof theme.text !== 'string' || !theme.text.trim()) continue;
+          items.push({
+            kind: 'search_theme',
+            groupId: group.id,
+            groupName: group.name,
+            text: normalizeGoogleKeywordText(theme.text),
+            matchType: null,
+            status: null,
+            impressions: null,
+            clicks: null,
+            interactions: null,
+            conversions: null,
+          });
+        }
+      }
+      return items;
+    }
+
+    if (input.channelType !== 'SEARCH') return [];
+
+    const [criteria, metrics] = await Promise.all([
+      this.client.search(
+        credential,
+        `SELECT ad_group.id, ad_group_criterion.criterion_id, ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE campaign.id = ${input.campaignId} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE AND ad_group_criterion.status != 'REMOVED'`,
+      ),
+      this.client.search(
+        credential,
+        `SELECT ad_group.id, ad_group_criterion.criterion_id, metrics.impressions, metrics.clicks, metrics.interactions, metrics.conversions FROM keyword_view WHERE campaign.id = ${input.campaignId} AND segments.date BETWEEN '${input.since}' AND '${input.until}'`,
+      ),
+    ]);
+    const measured = new Map<string, Record<string, unknown>>();
+    for (const row of metrics) {
+      const key = `${this.scalar(this.record(row.adGroup).id)}~${this.scalar(this.record(row.adGroupCriterion).criterionId)}`;
+      measured.set(key, this.record(row.metrics));
+    }
+    return criteria.flatMap((row): GoogleKeywordListItem[] => {
+      const groupId = this.scalar(this.record(row.adGroup).id);
+      const criterion = this.record(row.adGroupCriterion);
+      const keyword = this.record(criterion.keyword);
+      if (typeof keyword.text !== 'string') return [];
+      const values =
+        measured.get(`${groupId}~${this.scalar(criterion.criterionId)}`) ?? {};
+      // keyword_view omits keywords without activity in the period: zero.
+      const metric = (name: string) => this.scalar(values[name]) || '0';
+      return [
+        {
+          kind: 'keyword',
+          groupId,
+          groupName: names.get(groupId) ?? null,
+          text: normalizeGoogleKeywordText(keyword.text),
+          matchType:
+            typeof keyword.matchType === 'string' ? keyword.matchType : null,
+          status:
+            criterion.status === 'ENABLED' || criterion.status === 'PAUSED'
+              ? criterion.status
+              : null,
+          impressions: metric('impressions'),
+          clicks: metric('clicks'),
+          interactions: metric('interactions'),
+          conversions: metric('conversions'),
+        },
+      ];
+    });
+  }
+
   private resolve(input: GoogleAdActionInput) {
     return this.credentials.resolve({
       tenantId: input.tenantId,
@@ -206,16 +336,26 @@ export class GoogleAdsManualActionAdapter {
     if (actionType === 'keyword') {
       const rows = await this.client.search(
         credential,
-        `SELECT ad_group_criterion.resource_name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE ad_group_criterion.ad_group = 'customers/${customer}/adGroups/${target.id}' AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE AND ad_group_criterion.status != 'REMOVED'`,
+        `SELECT ad_group_criterion.resource_name, ad_group_criterion.status, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type FROM ad_group_criterion WHERE ad_group_criterion.ad_group = 'customers/${customer}/adGroups/${target.id}' AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE AND ad_group_criterion.status != 'REMOVED'`,
       );
+      const criterionResourceName = this.findKeyword(
+        rows,
+        'adGroupCriterion',
+        text,
+        matchType,
+      );
+      const match = rows.find(
+        (row) =>
+          this.record(row.adGroupCriterion).resourceName ===
+          criterionResourceName,
+      );
+      const status = this.record(match?.adGroupCriterion).status;
       return {
         ...empty,
-        criterionResourceName: this.findKeyword(
-          rows,
-          'adGroupCriterion',
-          text,
-          matchType,
-        ),
+        // The keyword's own status: `pause`/`enable` compare and verify it.
+        status:
+          criterionResourceName && typeof status === 'string' ? status : null,
+        criterionResourceName,
       };
     }
 
@@ -326,6 +466,27 @@ export class GoogleAdsManualActionAdapter {
       };
     }
 
+    if (change.op === 'pause' || change.op === 'enable') {
+      if (actionType !== 'keyword') {
+        throw new GoogleAdManualActionError('google_action_not_supported');
+      }
+      if (!state.criterionResourceName) {
+        throw new GoogleAdManualActionError('google_keyword_not_found');
+      }
+      return {
+        resource,
+        operations: [
+          {
+            update: {
+              resourceName: state.criterionResourceName,
+              status: change.op === 'pause' ? 'PAUSED' : 'ENABLED',
+            },
+            updateMask: 'status',
+          },
+        ],
+      };
+    }
+
     const text = normalizeGoogleKeywordText(this.scalar(change.text));
     const keyword = { text, matchType: this.scalar(change.matchType) };
     if (actionType === 'negative_keyword') {
@@ -387,7 +548,10 @@ export class GoogleAdsManualActionAdapter {
         current.budget.shared === false
       );
     }
-    return current.criterionResourceName === expected.criterionResourceName;
+    return (
+      current.criterionResourceName === expected.criterionResourceName &&
+      current.status === expected.status
+    );
   }
 
   private matchesChange(
@@ -402,6 +566,8 @@ export class GoogleAdsManualActionAdapter {
         state.budget?.amountMinor === String(input.change.budgetAmountMinor)
       );
     }
+    if (input.change.op === 'pause') return state.status === 'PAUSED';
+    if (input.change.op === 'enable') return state.status === 'ENABLED';
     return input.change.op === 'remove'
       ? state.criterionResourceName === null
       : state.criterionResourceName !== null;

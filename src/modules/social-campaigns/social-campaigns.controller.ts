@@ -561,6 +561,27 @@ export class SocialCampaignsController {
     return this.googleConfirm(ctx, 'keyword', actionId, dto);
   }
 
+  /**
+   * Keyword panel of one Google campaign: keywords (Search) or search themes
+   * (Performance Max) with period metrics. Read live, on demand; no write.
+   */
+  @Get('google/campaigns/:campaignId/keywords')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequireProductEntitlement('social')
+  @RequirePermission(KEYWORD_ACTION_PERMISSION)
+  googleCampaignKeywords(
+    @RequestContextData() ctx: RequestContext,
+    @Param('campaignId') campaignId: string,
+    @Query() query: GoogleCampaignDetailsQueryDto,
+  ) {
+    return this.manualActions.googleKeywords(this.requireScope(ctx), {
+      connectionId: query.connectionId,
+      campaignId,
+      since: query.since,
+      until: query.until,
+    });
+  }
+
   @Post('google/actions/search_theme/preflight')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequireProductEntitlement('social')

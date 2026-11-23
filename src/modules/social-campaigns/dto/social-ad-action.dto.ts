@@ -83,8 +83,9 @@ export class SocialAdActionHistoryQueryDto extends SocialAdActionPolicyQueryDto 
  * control characters are refused. Never interpolated into GAQL.
  */
 export class GoogleAdKeywordPayloadDto {
-  @IsIn(['add', 'remove'])
-  op!: 'add' | 'remove';
+  /** `pause`/`enable` switch an existing ad-group keyword (`keyword` only). */
+  @IsIn(['add', 'remove', 'pause', 'enable'])
+  op!: 'add' | 'remove' | 'pause' | 'enable';
 
   @IsString()
   @Matches(/^\P{Cc}{1,80}$/u)

@@ -12,6 +12,7 @@ import {
   SocialAdAccountConnectionEntity,
   SocialAdEntity,
 } from '../../social-integrations';
+import { parseAnalyticsPeriod } from '../../social-integrations/analytics/social-ad-analytics-period';
 import { GoogleAdsMutationError } from '../../social-integrations/services/google-ads-mutation.client';
 import { mapSocialAdSyncError } from '../../social-integrations/sync/social-ad-sync.http-error';
 import type {
@@ -167,6 +168,82 @@ export class SocialAdManualActionService {
     return {
       items: items.map((row) => this.actionView(row)),
       total: items.length,
+    };
+  }
+
+  /**
+   * Keyword panel of one Google campaign (keywords for Search, search themes
+   * for Performance Max). Read live on demand; nothing is written.
+   */
+  async googleKeywords(
+    scope: SocialCampaignsScope,
+    input: {
+      connectionId: string;
+      campaignId: string;
+      since: unknown;
+      until: unknown;
+    },
+  ) {
+    if (!/^\d{1,20}$/.test(input.campaignId))
+      throw new NotFoundException('Google Ads campaign not found.');
+    const period = parseAnalyticsPeriod({
+      since: input.since,
+      until: input.until,
+    });
+    await this.requireConnection(scope, input.connectionId, 'google_ads');
+    const campaign = await this.requireEntity(
+      scope,
+      {
+        connectionId: input.connectionId,
+        entityLevel: 'campaign',
+        entityExternalId: input.campaignId,
+      },
+      'google_ads',
+    );
+    const rawChannelType = campaign.metadata?.channelType;
+    const channelType =
+      typeof rawChannelType === 'string' ? rawChannelType : null;
+    const groupScope = {
+      ...this.scopeWhere(scope),
+      connectionId: input.connectionId,
+      provider: 'google_ads',
+      entityLevel: 'adset' as const,
+    };
+    const groups = await this.entities.find({
+      where: [
+        { ...groupScope, campaignExternalId: input.campaignId },
+        { ...groupScope, parentExternalId: input.campaignId },
+      ],
+    });
+    const items = await this.callGoogle(() =>
+      this.google.listKeywords({
+        ...scope,
+        connectionId: input.connectionId,
+        campaignId: input.campaignId,
+        channelType,
+        groups: groups
+          .filter((group) => !group.archivedAt)
+          .map((group) => ({
+            id: group.externalId,
+            name: group.name,
+            kind:
+              group.metadata?.googleKind === 'asset_group'
+                ? ('asset_group' as const)
+                : ('ad_group' as const),
+          })),
+        since: period.since,
+        until: period.until,
+      }),
+    );
+    return {
+      campaignId: input.campaignId,
+      channelType,
+      kind: channelType === 'PERFORMANCE_MAX' ? 'search_theme' : 'keyword',
+      period: { since: period.since, until: period.until },
+      groups: groups
+        .filter((group) => !group.archivedAt)
+        .map((group) => ({ id: group.externalId, name: group.name })),
+      items,
     };
   }
 
@@ -561,6 +638,13 @@ export class SocialAdManualActionService {
       throw new BadRequestException('A keyword payload is required.');
     const text = normalizeGoogleKeywordText(payload.text);
     if (!text) throw new BadRequestException('Keyword text is required.');
+    if (
+      (payload.op === 'pause' || payload.op === 'enable') &&
+      actionType !== 'keyword'
+    )
+      throw new BadRequestException(
+        'Only ad group keywords can be paused or enabled.',
+      );
 
     if (actionType === 'search_theme') {
       if (target.kind !== 'asset_group')
@@ -637,7 +721,7 @@ export class SocialAdManualActionService {
         code: 'google_keyword_exists',
         message: 'This keyword is already there.',
       });
-    if (change.op === 'remove' && !state.criterionResourceName)
+    if (change.op !== 'add' && !state.criterionResourceName)
       throw new UnprocessableEntityException({
         code: 'google_keyword_not_found',
         message: 'This keyword was not found.',
