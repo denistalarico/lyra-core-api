@@ -36,6 +36,7 @@ import {
   ListSocialApprovalsDto,
 } from './dto/social-approval.dto';
 import {
+  ApprovalTableEditDto,
   ApprovalWorkTasksQueryDto,
   CreateStandalonePieceDto,
   FinishSocialApprovalPieceDto,
@@ -49,6 +50,7 @@ import { SocialApprovalMediaService } from './social-approval-media.service';
 import { SocialApprovalPieceActionsService } from './social-approval-piece-actions.service';
 import { SocialApprovalPieceSourcesService } from './social-approval-piece-sources.service';
 import { SocialApprovalSettingsService } from './social-approval-settings.service';
+import { SocialApprovalTableEditService } from './social-approval-table-edit.service';
 import { SocialApprovalBoardPreferencesService } from './social-approval-board-preferences.service';
 import { SocialApprovalInboxService } from './social-approval-inbox.service';
 import { SocialApprovalsService } from './social-approvals.service';
@@ -86,6 +88,7 @@ export class SocialApprovalsController {
     private readonly boardPreferences: SocialApprovalBoardPreferencesService,
     private readonly pieceSources: SocialApprovalPieceSourcesService,
     private readonly feedback: SocialApprovalFeedbackService,
+    private readonly tableEdit: SocialApprovalTableEditService,
   ) {}
 
   private actorUserId(ctx: RequestContext): string {
@@ -491,6 +494,19 @@ export class SocialApprovalsController {
       ctx.userId,
       ctx.role,
     );
+  }
+  /** The internal approver edits the table inline; it becomes a new version. */
+  @Post(':id/edit-table')
+  @RequirePermission('social.approvals.review.approve_internal.manager')
+  editTable(
+    @RequestContextData() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApprovalTableEditDto,
+  ) {
+    return this.tableEdit.edit(resolveCompanyAwareScope(ctx), id, dto, {
+      userId: this.actorUserId(ctx),
+      role: ctx.role,
+    });
   }
   @Post(':id/agency-override')
   @RequirePermission('social.approvals.review.agency_override.owner')

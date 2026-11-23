@@ -40,6 +40,7 @@ describe('SocialApprovalsController AP1 Agency boundary', () => {
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   beforeEach(() => jest.clearAllMocks());

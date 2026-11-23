@@ -56,6 +56,8 @@ const eligible = {
 export async function buildTablePayloads(
   manager: EntityManager,
   sources: readonly ApprovalTableSource[],
+  /** Filled with the item id behind each row, in row order (table edits). */
+  rowItemIds?: Map<string, string[]>,
 ): Promise<Map<string, ApprovalTableSnapshotPayload>> {
   const planIds = sources
     .filter((source) => source.kind === 'plan_table')
@@ -124,6 +126,14 @@ export async function buildTablePayloads(
       [...(channelsByItem.get(item.id) ?? [])].sort().join(', ') || null,
   });
 
+  const rowsOf = (key: string, kept: SocialContentItemEntity[]) => {
+    rowItemIds?.set(
+      key,
+      kept.map((item) => item.id),
+    );
+    return kept.map(rowOf);
+  };
+
   return new Map(
     sources.map((source) => {
       if (source.kind === 'plan_table')
@@ -131,9 +141,10 @@ export async function buildTablePayloads(
           source.key,
           {
             columns: TABLE_COLUMNS,
-            rows: items
-              .filter((item) => item.planId === source.sourceId)
-              .map(rowOf),
+            rows: rowsOf(
+              source.key,
+              items.filter((item) => item.planId === source.sourceId),
+            ),
           },
         ];
       const campaign = campaignById.get(source.sourceId);
@@ -144,13 +155,14 @@ export async function buildTablePayloads(
         source.key,
         {
           columns: TABLE_COLUMNS,
-          rows: items
-            .filter(
+          rows: rowsOf(
+            source.key,
+            items.filter(
               (item) =>
                 item.campaignInstanceId === source.sourceId &&
                 liveCampaignPlans.has(item.planId),
-            )
-            .map(rowOf),
+            ),
+          ),
           summary: [
             { label: 'Campanha', value: text(campaign?.name) },
             { label: 'Objetivo', value: text(campaign?.objective) },
@@ -237,6 +249,15 @@ export async function destinationMediaPlacements(
   }
   return result;
 }
+
+/** The table columns the internal approver may edit inline (Planner fields). */
+export const EDITABLE_TABLE_COLUMNS = [
+  'title',
+  'objective',
+  'theme',
+  'keyMessage',
+] as const;
+export type EditableTableColumn = (typeof EDITABLE_TABLE_COLUMNS)[number];
 
 /** Only free text is client-editable (D-02); tables, links and files are not. */
 export function isTextEditableApproval(

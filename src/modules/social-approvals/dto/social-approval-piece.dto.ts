@@ -152,3 +152,21 @@ export class UpdateSocialApprovalSettingsDto {
   @IsOptional() @IsUUID() teamChatChannelId?: string | null;
   @IsOptional() @IsObject() notificationEvents?: Record<string, unknown>;
 }
+
+/** One edited row of a plan or campaign table; omitted fields stay as they are. */
+export class ApprovalTableRowEditDto {
+  @IsInt() @Min(0) @Max(999) index!: number;
+  @IsOptional() @IsString() @MaxLength(240) title?: string;
+  @IsOptional() @IsString() @MaxLength(120) objective?: string;
+  @IsOptional() @IsString() @MaxLength(4000) theme?: string;
+  @IsOptional() @IsString() @MaxLength(4000) keyMessage?: string;
+}
+
+export class ApprovalTableEditDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => ApprovalTableRowEditDto)
+  rows!: ApprovalTableRowEditDto[];
+}
