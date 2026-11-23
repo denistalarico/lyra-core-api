@@ -103,9 +103,8 @@ const TOGGLABLE_APPS = [
   'clients',
   'finance',
   'team',
-  'contracts',
 ];
-const SIDEBAR_ADDONS = ['contracts', 'clientArea', 'forms'];
+const SIDEBAR_ADDONS = ['clientArea', 'forms'];
 
 const AGENCY_WORKSPACE_ROLES = ['owner', 'admin', 'manager', 'member'] as const;
 type AgencyWorkspaceRoleKey = (typeof AGENCY_WORKSPACE_ROLES)[number];
@@ -921,7 +920,7 @@ export class AgencySettingsService {
             enabled:
               !TOGGLABLE_APPS.includes(String(appKey)) || enabled !== false,
             menuVisible:
-              !SIDEBAR_ADDONS.includes(String(appKey)) || menuVisible !== false,
+              !SIDEBAR_ADDONS.includes(String(appKey)) || menuVisible === true,
           },
         ]),
     );
