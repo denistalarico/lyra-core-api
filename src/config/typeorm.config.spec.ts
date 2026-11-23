@@ -14,7 +14,12 @@ import * as socialApprovalEntities from '../modules/social-approvals/entities';
 import * as socialProjectWorkEntities from '../modules/social-project-work/entities';
 import { agencyEntities, getAgencyTypeOrmConfig } from './typeorm.config';
 
+import { SocialChannelPreferenceEntity } from '../modules/social-channel-preferences/social-channel-preference.entity';
 describe('Agency TypeORM configuration', () => {
+  it('registers the Social channel preferences entity', () => {
+    expect(agencyEntities).toContain(SocialChannelPreferenceEntity);
+  });
+
   it('registers the canonical user profile used by the Client Area', () => {
     expect(agencyEntities).toContain(UserProfileEntity);
   });

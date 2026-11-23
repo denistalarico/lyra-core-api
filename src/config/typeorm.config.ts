@@ -474,8 +474,10 @@ import {
   SocialGa4DimensionDailyEntity,
   SocialGa4SyncRunEntity,
 } from '../modules/social-ga4/entities';
+import { SocialChannelPreferenceEntity } from '../modules/social-channel-preferences/social-channel-preference.entity';
 
 export const agencyEntities = [
+  SocialChannelPreferenceEntity,
   SocialGa4DailyMetricEntity,
   SocialGa4DimensionDailyEntity,
   SocialGa4SyncRunEntity,

@@ -315,6 +315,7 @@ import { AddGoogleAdsConversionUploads1805200000000 } from './migrations/1805200
 import { AddFormsMetaLeads1805300000000 } from './migrations/1805300000000-add-forms-meta-leads';
 import { AddSocialContentItemThumbnail1805500000000 } from './migrations/1805500000000-add-social-content-item-thumbnail';
 import { AddAgencySalesOpportunityEvents1805600000000 } from './migrations/1805600000000-add-agency-sales-opportunity-events';
+import { CreateSocialChannelPreferences1805700000000 } from './migrations/1805700000000-create-social-channel-preferences';
 import { CreateSocialTrendSnapshots1803600000000 } from './migrations/1803600000000-create-social-trend-snapshots';
 import { AddSocialApprovalCardCustomization1803300000000 } from './migrations/1803300000000-add-social-approval-card-customization';
 import { CreateSocialAnalyticsDashboards1794600000000 } from './migrations/1794600000000-create-social-analytics-dashboards';
@@ -660,5 +661,6 @@ export const AgencyDataSource = new DataSource({
     AddFormsMetaLeads1805300000000,
     AddSocialContentItemThumbnail1805500000000,
     AddAgencySalesOpportunityEvents1805600000000,
+    CreateSocialChannelPreferences1805700000000,
   ],
 });

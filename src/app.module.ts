@@ -58,6 +58,7 @@ import { LeadFlowAgendaModule } from './modules/leadflow-agenda/leadflow-agenda.
 import { AdminModule } from './modules/admin';
 import { IntelligenceAnalyticsModule } from './modules/intelligence-analytics/intelligence-analytics.module';
 import { SocialIntegrationsModule } from './modules/social-integrations';
+import { SocialChannelPreferencesModule } from './modules/social-channel-preferences/social-channel-preferences.module';
 import { InboxSocialAdLookupModule } from './modules/social-integrations/inbox-social-ad-lookup.module';
 import { SocialGoogleModule } from './modules/social-google';
 import { SocialGa4Module } from './modules/social-ga4/social-ga4.module';
@@ -142,6 +143,7 @@ import { ClientAreaAgencyModule } from './modules/client-area/agency/client-area
     BrandKitModule,
     LeadFlowAgendaModule,
     SocialIntegrationsModule,
+    SocialChannelPreferencesModule,
     InboxSocialAdLookupModule,
     IntelligenceAnalyticsModule,
     AdminModule,
