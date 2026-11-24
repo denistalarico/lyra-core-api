@@ -24,3 +24,21 @@ export function resolveUserWhatsAppPhone(
 
   return trimmed ? trimmed : null;
 }
+
+/**
+ * Link `https://wa.me/<dígitos>` para um número livre. Mesma regra do botão do
+ * drawer no web (`whatsappHref`): só dígitos, `00` de discagem internacional
+ * removido, 10–11 dígitos sem `+` são brasileiros (DDI 55), e fora de 10–15
+ * dígitos não há link.
+ */
+export function whatsappLink(phone: string | null | undefined): string | null {
+  const raw = phone?.trim();
+  if (!raw) return null;
+  let digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (!raw.startsWith('+') && (digits.length === 10 || digits.length === 11)) {
+    digits = `55${digits}`;
+  }
+  if (digits.length < 10 || digits.length > 15) return null;
+  return `https://wa.me/${digits}`;
+}

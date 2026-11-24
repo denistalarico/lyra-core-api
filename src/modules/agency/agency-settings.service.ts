@@ -19,6 +19,13 @@ import {
 } from '../email/email.service';
 import { renderTransactionalEmail } from '../email/templates/transactional-email.template';
 import {
+  emailHtmlToText,
+  renderLeadEmail,
+  sanitizeEmailHtml,
+} from '../email/templates/lead-email.template';
+import { publicAssetUrl } from '../email/public-asset-url';
+import { resolveUserWhatsAppPhone, whatsappLink } from './user-whatsapp-phone';
+import {
   AgencyEmailTwoFactorCodeEntity,
   AgencyPasswordResetEntity,
   AgencyUserLoginEventEntity,
@@ -204,21 +211,53 @@ export class AgencySettingsService {
     userId: string,
     dto: PatchAgencyUserProfileDto,
   ) {
+    const { emailSignatureHtml, ...profileDto } = dto;
     await this.profileRepo.upsert(
       {
         tenantId,
         userId,
-        ...dto,
+        ...profileDto,
         phone: dto.phone ?? null,
         whatsappPhone: dto.whatsappPhone ?? null,
         // Omitir o campo mantém o padrão histórico: o telefone é o WhatsApp.
         whatsappSameAsPhone: dto.whatsappSameAsPhone ?? true,
         jobTitle: dto.jobTitle ?? null,
+        // Omitida, a assinatura fica como está (clientes antigos do PATCH).
+        ...(emailSignatureHtml !== undefined
+          ? {
+              emailSignatureHtml: sanitizeEmailHtml(emailSignatureHtml) || null,
+            }
+          : {}),
       },
       ['tenantId', 'userId'],
     );
 
     return this.getProfile(tenantId, userId);
+  }
+
+  /**
+   * Imagem colada no editor de e-mail (assinatura ou mensagem ao lead). Fica
+   * pública e absoluta: quem a abre é o cliente de e-mail do lead, sem sessão.
+   */
+  async uploadEmailImage(
+    tenantId: string,
+    userId: string,
+    file: Express.Multer.File,
+  ) {
+    const stored = await this.filesService.uploadEmailImageAsset({
+      file,
+      basePath: `agency/tenants/${tenantId}/users/${userId}/email-images/${Date.now()}-${randomUUID().slice(0, 8)}`,
+      maxDimension: 1200,
+    });
+    const url = publicAssetUrl(stored.url);
+
+    if (!url) {
+      throw new ServiceUnavailableException(
+        'O endereço público da API não está configurado; imagens em e-mail não abririam para o destinatário.',
+      );
+    }
+
+    return { url };
   }
 
   async uploadProfileAvatar(
@@ -1983,14 +2022,26 @@ export class AgencySettingsService {
   }
 
   /**
-   * A plain message to a lead, from the agency's own mailbox (/settings/email).
-   * Without that mailbox it refuses instead of falling back to the Lyra sender.
+   * A message to a lead, from the agency's own mailbox (/settings/email), in
+   * the agency's frame (logo, primary color, site). Without that mailbox it
+   * refuses instead of falling back to the Lyra sender.
    */
   async sendWorkspaceEmail(
     tenantId: string,
     workspaceId: string,
-    message: { to: string; subject: string; text: string },
+    message: {
+      to: string;
+      subject: string;
+      html: string;
+      senderUserId: string;
+      includeWhatsapp: boolean;
+    },
   ): Promise<{ fromEmail: string }> {
+    const bodyHtml = sanitizeEmailHtml(message.html);
+    if (!emailHtmlToText(bodyHtml) && !/<img\s/i.test(bodyHtml)) {
+      throw new BadRequestException('Escreva a mensagem do e-mail.');
+    }
+
     const override = await this.getEmailTransportOverride(
       tenantId,
       workspaceId,
@@ -2002,18 +2053,41 @@ export class AgencySettingsService {
       );
     }
 
-    const escaped = message.text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    const [company, profile] = await Promise.all([
+      this.getCompany(tenantId, workspaceId),
+      message.includeWhatsapp
+        ? this.profileRepo.findOne({
+            where: { tenantId, userId: message.senderUserId },
+          })
+        : Promise.resolve(null),
+    ]);
+    const whatsappUrl = whatsappLink(resolveUserWhatsAppPhone(profile));
+    const rendered = renderLeadEmail({
+      subject: message.subject,
+      bodyHtml,
+      brand: {
+        name:
+          company.tradeName ||
+          company.workspaceName ||
+          company.legalName ||
+          override.fromName ||
+          '',
+        logoUrl: publicAssetUrl(company.logoUrl),
+        primaryColor: company.primaryColor,
+        website: company.website,
+        phone: company.phone,
+      },
+      whatsapp: whatsappUrl
+        ? { url: whatsappUrl, label: 'Falar no WhatsApp' }
+        : null,
+    });
 
     try {
       await this.emailService.sendEmail({
         to: message.to,
         subject: message.subject,
-        text: message.text,
-        html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111827;white-space:pre-wrap;">${escaped}</div>`,
+        text: rendered.text,
+        html: rendered.html,
         override,
       });
     } catch {

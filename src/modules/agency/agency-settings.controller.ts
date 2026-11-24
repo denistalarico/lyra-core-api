@@ -132,6 +132,22 @@ export class AgencySettingsController {
     );
   }
 
+  @Post('profile/email-image')
+  @RequirePermission('agency.settings.account.update.self')
+  @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
+  uploadProfileEmailImage(
+    @RequestContextData() ctx: RequestContext,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    this.assertUserContext(ctx);
+    this.assertFile(file);
+    return this.agencySettingsService.uploadEmailImage(
+      ctx.tenantId,
+      ctx.userId,
+      file,
+    );
+  }
+
   @Get('company')
   @RequirePermission('agency.settings.company.view.admin')
   getCompany(@RequestContextData() ctx: RequestContext) {

@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEmail,
   IsIn,
   IsInt,
@@ -500,8 +501,14 @@ export class SendAgencySalesOpportunityEmailDto {
   @MaxLength(200)
   subject!: string;
 
+  /** HTML do editor rico; sanitizado no servidor antes de sair. */
   @IsString()
   @MinLength(1)
-  @MaxLength(20000)
-  message!: string;
+  @MaxLength(200000)
+  html!: string;
+
+  /** Acrescenta o botão "Falar no WhatsApp" com o número do perfil de quem envia. */
+  @IsOptional()
+  @IsBoolean()
+  includeWhatsapp?: boolean;
 }

@@ -101,6 +101,10 @@ export class AgencyUserProfileEntity {
   @Column({ name: 'job_title', type: 'varchar', length: 80, nullable: true })
   jobTitle!: string | null;
 
+  /** HTML sanitizado por `sanitizeEmailHtml` antes de gravar. */
+  @Column({ name: 'email_signature_html', type: 'text', nullable: true })
+  emailSignatureHtml!: string | null;
+
   @Column({ name: 'avatar_url', type: 'text', nullable: true })
   avatarUrl!: string | null;
 

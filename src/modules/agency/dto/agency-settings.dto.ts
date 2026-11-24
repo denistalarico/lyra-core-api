@@ -53,6 +53,12 @@ export class PatchAgencyUserProfileDto {
   @IsString()
   @MaxLength(80)
   jobTitle?: string | null;
+
+  /** HTML do editor; sanitizado antes de gravar. Omitido, não muda. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(50000)
+  emailSignatureHtml?: string | null;
 }
 
 export class PatchAgencyUserPreferencesDto {

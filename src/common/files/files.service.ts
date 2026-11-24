@@ -172,6 +172,58 @@ export class FilesService {
     };
   }
 
+  /**
+   * Imagem para corpo de e-mail: PNG quando há transparência (logos de
+   * assinatura), JPEG nos demais. WebP fica de fora porque o Outlook desktop
+   * não o exibe. A extensão é decidida aqui e anexada a `basePath`.
+   */
+  async uploadEmailImageAsset({
+    file,
+    basePath,
+    maxDimension,
+  }: {
+    file: Express.Multer.File;
+    basePath: string;
+    maxDimension: number;
+  }): Promise<StoredFile> {
+    this.assertValidImage(file);
+
+    let body: Buffer;
+    let extension: 'png' | 'jpg';
+    try {
+      const image = sharp(file.buffer, { failOn: 'error' }).rotate().resize({
+        width: maxDimension,
+        height: maxDimension,
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+      const { hasAlpha } = await image.metadata();
+      extension = hasAlpha ? 'png' : 'jpg';
+      body = hasAlpha
+        ? await image.png({ compressionLevel: 9 }).toBuffer()
+        : await image
+            .flatten({ background: '#ffffff' })
+            .jpeg({ quality: 85, mozjpeg: true })
+            .toBuffer();
+    } catch {
+      throw new BadRequestException('Invalid or corrupted image file.');
+    }
+
+    const path = `${basePath}.${extension}`;
+    await this.ensureBucket();
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: path,
+        Body: body,
+        ContentType: extension === 'png' ? 'image/png' : 'image/jpeg',
+        CacheControl: 'public, max-age=31536000, immutable',
+      }),
+    );
+
+    return { path, url: this.buildProxiedUrl(path) };
+  }
+
   async uploadRawFile({
     file,
     path,

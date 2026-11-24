@@ -454,7 +454,13 @@ export class AgencySalesController {
     return this.settingsService.sendWorkspaceEmail(
       context.tenantId,
       context.workspaceId,
-      { to: dto.to.trim(), subject: dto.subject.trim(), text: dto.message },
+      {
+        to: dto.to.trim(),
+        subject: dto.subject.trim(),
+        html: dto.html,
+        senderUserId: user.sub,
+        includeWhatsapp: dto.includeWhatsapp ?? false,
+      },
     );
   }
 
