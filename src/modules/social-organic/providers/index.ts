@@ -4,6 +4,7 @@ export * from './youtube';
 export * from './tiktok';
 export * from './tiktok-business';
 export * from './linkedin';
+export * from './threads';
 export * from './social-publisher-adapter.conformance';
 export * from './social-publisher.adapter';
 export * from './social-publisher.registry';

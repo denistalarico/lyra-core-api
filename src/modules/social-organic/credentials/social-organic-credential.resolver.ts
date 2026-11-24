@@ -646,6 +646,8 @@ export class SocialOrganicCredentialResolver {
         return 'video.list';
       case 'tiktok_business_account':
         return 'user.insights';
+      case 'threads_account':
+        return 'threads_manage_insights';
       case 'linkedin_organization':
         return 'rw_organization_admin';
       default:

@@ -61,6 +61,7 @@ export const SEEDED_CHANNEL_DASHBOARDS: ReadonlyArray<{
   { channel: 'youtube', name: 'YouTube' },
   { channel: 'tiktok', name: 'TikTok' },
   { channel: 'linkedin', name: 'LinkedIn' },
+  { channel: 'threads', name: 'Threads' },
 ];
 
 export type SocialAnalyticsDashboardView = {

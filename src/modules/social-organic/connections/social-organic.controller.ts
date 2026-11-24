@@ -66,6 +66,8 @@ export const CONNECTION_MODES: Record<
     provider: 'linkedin',
     allowedAssetTypes: ['linkedin_organization'],
   },
+  // Threads use case of the Meta app: its own app ID/secret and host.
+  threads: { provider: 'threads', allowedAssetTypes: ['threads_account'] },
 };
 
 @Controller('social/organic')

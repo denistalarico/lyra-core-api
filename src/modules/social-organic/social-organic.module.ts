@@ -18,6 +18,7 @@ import { SocialIntegrationsModule } from '../social-integrations/social-integrat
 import { LinkedInOrganicAnalyticsProvider } from './analytics/linkedin/linkedin-organic-analytics.provider';
 import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
 import { TiktokBusinessOrganicAnalyticsProvider } from './analytics/tiktok-business/tiktok-business-organic-analytics.provider';
+import { ThreadsOrganicAnalyticsProvider } from './analytics/threads/threads-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
 import { YoutubeDataRetentionScheduler } from './analytics/youtube/youtube-data-retention.scheduler';
@@ -123,6 +124,12 @@ import {
   TiktokBusinessOAuthProvider,
   TiktokBusinessPublisherAdapter,
   TiktokBusinessPublisherRegistration,
+  ThreadsApiClient,
+  ThreadsDeauthorizationController,
+  ThreadsDeauthorizationService,
+  ThreadsOAuthProvider,
+  ThreadsPublisherAdapter,
+  ThreadsPublisherRegistration,
   YoutubeApiClient,
   YoutubePublisherAdapter,
   YoutubePublisherRegistration,
@@ -146,8 +153,9 @@ export function createMetaOrganicOAuthProviders(
   tiktok: TiktokOrganicOAuthProvider,
   linkedin: LinkedInOrganicOAuthProvider,
   tiktokBusiness: TiktokBusinessOAuthProvider,
+  threads: ThreadsOAuthProvider,
 ) {
-  return [meta, instagram, tiktok, linkedin, tiktokBusiness];
+  return [meta, instagram, tiktok, linkedin, tiktokBusiness, threads];
 }
 
 /** D-I4 (b): one analytics implementation per provider; YT/TT/LI plug here. */
@@ -157,8 +165,9 @@ export function createOrganicAnalyticsProviders(
   tiktok: TiktokOrganicAnalyticsProvider,
   linkedin: LinkedInOrganicAnalyticsProvider,
   tiktokBusiness: TiktokBusinessOrganicAnalyticsProvider,
+  threads: ThreadsOrganicAnalyticsProvider,
 ) {
-  return [meta, youtube, tiktok, linkedin, tiktokBusiness];
+  return [meta, youtube, tiktok, linkedin, tiktokBusiness, threads];
 }
 
 /** D-I4 (c): one health implementation per provider; YT/TT/LI plug here. */
@@ -236,6 +245,7 @@ export function createOrganicHealthProviders(
     // shared boundary must not force it on every importer.
     MediaAssetController,
     MetaOrganicWebhookController,
+    ThreadsDeauthorizationController,
     SocialOrganicAnalyticsController,
   ],
   providers: [
@@ -254,6 +264,7 @@ export function createOrganicHealthProviders(
         TiktokOrganicOAuthProvider,
         LinkedInOrganicOAuthProvider,
         TiktokBusinessOAuthProvider,
+        ThreadsOAuthProvider,
       ],
     },
     SocialOrganicCredentialResolver,
@@ -297,6 +308,14 @@ export function createOrganicHealthProviders(
     TiktokBusinessOAuthProvider,
     TiktokBusinessPublisherAdapter,
     TiktokBusinessPublisherRegistration,
+    // Threads profiles (Threads use case of the Meta app): OAuth with a 60-day
+    // token renewed ahead of expiry, container publishing and insights.
+    // Publishing stays behind `SOCIAL_PUBLICATION_THREADS_ENABLED`.
+    ThreadsApiClient,
+    ThreadsOAuthProvider,
+    ThreadsPublisherAdapter,
+    ThreadsPublisherRegistration,
+    ThreadsDeauthorizationService,
     // LI-ORG-BE: LinkedIn Pages (`oauth_user`, 500 calls/day while Development).
     LinkedInCallBudget,
     LinkedInOrganicApiClient,
@@ -322,6 +341,7 @@ export function createOrganicHealthProviders(
         TiktokOrganicAnalyticsProvider,
         LinkedInOrganicAnalyticsProvider,
         TiktokBusinessOrganicAnalyticsProvider,
+        ThreadsOrganicAnalyticsProvider,
       ],
     },
     YoutubeAnalyticsClient,
@@ -331,6 +351,7 @@ export function createOrganicHealthProviders(
     TiktokOrganicAnalyticsProvider,
     LinkedInOrganicAnalyticsProvider,
     TiktokBusinessOrganicAnalyticsProvider,
+    ThreadsOrganicAnalyticsProvider,
     SocialOrganicAnalyticsProviderRegistry,
     SocialOrganicMetricsWriterService,
     // Audience snapshots: a gate that is off by default, a reader that measures

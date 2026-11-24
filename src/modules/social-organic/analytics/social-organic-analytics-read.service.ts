@@ -605,7 +605,7 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.views_paid)', 'views_paid')
       .addSelect('SUM(fact.new_conversations)', 'new_conversations')
       .addSelect(
-        `SUM(fact.views_total) FILTER (WHERE fact.provider IN ('youtube', 'tiktok_business'))`,
+        `SUM(fact.views_total) FILTER (WHERE fact.provider IN ('youtube', 'tiktok_business', 'threads'))`,
         'channel_views',
       )
       .addSelect('SUM(fact.watch_time_seconds)', 'channel_watch_time_seconds')
@@ -1297,7 +1297,7 @@ export class SocialOrganicAnalyticsReadService {
       .addSelect('SUM(fact.accounts_engaged)', 'accounts_engaged')
       .addSelect('COUNT(fact.accounts_engaged)', 'accounts_engaged_days')
       .addSelect(
-        `SUM(fact.views_total) FILTER (WHERE fact.provider IN ('youtube', 'tiktok_business'))`,
+        `SUM(fact.views_total) FILTER (WHERE fact.provider IN ('youtube', 'tiktok_business', 'threads'))`,
         'channel_views',
       )
       .addSelect('SUM(fact.watch_time_seconds)', 'channel_watch_time_seconds')

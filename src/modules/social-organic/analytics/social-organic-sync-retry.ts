@@ -3,6 +3,7 @@ import { YoutubeApiError } from '../providers/youtube/youtube-api.client';
 import { LinkedInOrganicApiError } from '../providers/linkedin/linkedin-organic-api.client';
 import { TiktokApiError } from '../providers/tiktok/tiktok-api.client';
 import { TiktokBusinessApiError } from '../providers/tiktok-business/tiktok-business-api.client';
+import { ThreadsApiError } from '../providers/threads/threads-api.client';
 import { MetaOrganicGraphError } from '../providers/meta/meta-organic-graph.error';
 import { MetaOrganicInsightsNormalizationError } from './meta/meta-organic-insights.normalizer';
 import { SocialOrganicSyncError } from './social-organic-sync.error';
@@ -56,6 +57,20 @@ export function classifyOrganicSyncFailure(
       retry: rateLimited || error.status === 0 || error.status >= 500,
       rateLimited,
       code: `tiktok_business_${error.code ?? error.status}`,
+    };
+  }
+  if (error instanceof ThreadsApiError) {
+    // Graph throttling codes (4/17/32/613) or HTTP 429; 0 = network.
+    const rateLimited =
+      error.status === 429 ||
+      error.code === 4 ||
+      error.code === 17 ||
+      error.code === 32 ||
+      error.code === 613;
+    return {
+      retry: rateLimited || error.status === 0 || error.status >= 500,
+      rateLimited,
+      code: `threads_${error.code ?? error.status}`,
     };
   }
   if (error instanceof LinkedInOrganicApiError) {

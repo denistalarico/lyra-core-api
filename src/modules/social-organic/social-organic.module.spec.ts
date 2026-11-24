@@ -13,6 +13,7 @@ import { SettingsCryptoService } from '../../common/crypto/settings-crypto.servi
 import { FilesModule } from '../../common/files/files.module';
 import { LinkedInOrganicAnalyticsProvider } from './analytics/linkedin/linkedin-organic-analytics.provider';
 import { TiktokBusinessOrganicAnalyticsProvider } from './analytics/tiktok-business/tiktok-business-organic-analytics.provider';
+import { ThreadsOrganicAnalyticsProvider } from './analytics/threads/threads-organic-analytics.provider';
 import { TiktokOrganicAnalyticsProvider } from './analytics/tiktok/tiktok-organic-analytics.provider';
 import { YoutubeAnalyticsClient } from './analytics/youtube/youtube-analytics.client';
 import { YoutubeOrganicAnalyticsProvider } from './analytics/youtube/youtube-organic-analytics.provider';
@@ -129,6 +130,12 @@ import {
   TiktokBusinessOAuthProvider,
   TiktokBusinessPublisherAdapter,
   TiktokBusinessPublisherRegistration,
+  ThreadsApiClient,
+  ThreadsDeauthorizationController,
+  ThreadsDeauthorizationService,
+  ThreadsOAuthProvider,
+  ThreadsPublisherAdapter,
+  ThreadsPublisherRegistration,
   YoutubeApiClient,
   YoutubePublisherAdapter,
   YoutubePublisherRegistration,
@@ -218,6 +225,7 @@ describe('SocialOrganicModule', () => {
       DestinationCreativeController,
       MediaAssetController,
       MetaOrganicWebhookController,
+      ThreadsDeauthorizationController,
       SocialOrganicAnalyticsController,
     ]);
     expect(
@@ -238,6 +246,7 @@ describe('SocialOrganicModule', () => {
           TiktokOrganicOAuthProvider,
           LinkedInOrganicOAuthProvider,
           TiktokBusinessOAuthProvider,
+          ThreadsOAuthProvider,
         ],
       },
       SocialOrganicCredentialResolver,
@@ -271,6 +280,11 @@ describe('SocialOrganicModule', () => {
       TiktokBusinessOAuthProvider,
       TiktokBusinessPublisherAdapter,
       TiktokBusinessPublisherRegistration,
+      ThreadsApiClient,
+      ThreadsOAuthProvider,
+      ThreadsPublisherAdapter,
+      ThreadsPublisherRegistration,
+      ThreadsDeauthorizationService,
       LinkedInCallBudget,
       LinkedInOrganicApiClient,
       LinkedInOrganicOAuthProvider,
@@ -295,6 +309,7 @@ describe('SocialOrganicModule', () => {
           TiktokOrganicAnalyticsProvider,
           LinkedInOrganicAnalyticsProvider,
           TiktokBusinessOrganicAnalyticsProvider,
+          ThreadsOrganicAnalyticsProvider,
         ],
       },
       YoutubeAnalyticsClient,
@@ -304,6 +319,7 @@ describe('SocialOrganicModule', () => {
       TiktokOrganicAnalyticsProvider,
       LinkedInOrganicAnalyticsProvider,
       TiktokBusinessOrganicAnalyticsProvider,
+      ThreadsOrganicAnalyticsProvider,
       SocialOrganicAnalyticsProviderRegistry,
       SocialOrganicMetricsWriterService,
       SocialOrganicAudienceConfigService,

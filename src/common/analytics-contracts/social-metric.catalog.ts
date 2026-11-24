@@ -128,6 +128,8 @@ export const METRIC_IDS = [
   "yt_avg_view_duration",
   // TikTok Business: daily views (organic + paid), same column as `yt_views`.
   "tt_views",
+  // Threads: daily profile views, same column as `yt_views`.
+  "threads_views",
   // Breakdowns. The paid three are ingesting today; the organic three were
   // gated off by a variable that was never set, and are on as of 2026-09-23.
   "audience_age_gender",
@@ -481,6 +483,19 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     description:
       "Quantas vezes os vídeos da conta foram vistos no período, orgânico e anúncios juntos. O TikTok informa por dia (UTC), com 24 a 48 horas de atraso. Só contas conectadas pelo TikTok Business.",
     channels: ["tiktok"],
+    format: "integer",
+    polarity: "higher_is_better",
+    additive: true,
+    source: "organic",
+    availability: "available",
+    grain: "organic_period",
+  },
+  {
+    id: "threads_views",
+    label: "Visualizações",
+    description:
+      "Quantas vezes as publicações do perfil foram vistas no período. O Threads informa por dia.",
+    channels: ["threads"],
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1309,7 +1324,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "followers_count",
     label: "Seguidores",
     description: "Total de seguidores no fim do período.",
-    channels: [...ORGANIC_FOLLOWER_CHANNELS, "tiktok", "linkedin"],
+    channels: [...ORGANIC_FOLLOWER_CHANNELS, "tiktok", "linkedin", "threads"],
     format: "integer",
     polarity: "higher_is_better",
     additive: false,
@@ -1761,7 +1776,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "organic_likes",
     label: "Curtidas",
     description: "Curtidas recebidas no período, somando todas as publicações.",
-    channels: ["instagram", "youtube", "tiktok", "linkedin"],
+    channels: ["instagram", "youtube", "tiktok", "linkedin", "threads"],
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1773,7 +1788,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "organic_comments",
     label: "Comentários",
     description: "Comentários recebidos no período.",
-    channels: ["instagram", "youtube", "tiktok", "linkedin"],
+    channels: ["instagram", "youtube", "tiktok", "linkedin", "threads"],
     format: "integer",
     polarity: "higher_is_better",
     additive: true,
@@ -1785,7 +1800,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
     id: "organic_shares",
     label: "Compartilhamentos",
     description: "Compartilhamentos das publicações no período.",
-    channels: ["instagram", "youtube", "tiktok", "linkedin"],
+    channels: ["instagram", "youtube", "tiktok", "linkedin", "threads"],
     format: "integer",
     polarity: "higher_is_better",
     additive: true,

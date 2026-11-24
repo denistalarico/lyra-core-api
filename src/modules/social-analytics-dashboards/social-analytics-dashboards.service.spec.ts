@@ -301,6 +301,7 @@ describe('SocialAnalyticsDashboardsService', () => {
         'youtube',
         'tiktok',
         'linkedin',
+        'threads',
       ]);
     });
 

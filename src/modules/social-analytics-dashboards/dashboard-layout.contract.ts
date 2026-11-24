@@ -31,6 +31,7 @@ export const DASHBOARD_CHANNEL_IDS = [
   'youtube',
   'tiktok',
   'linkedin',
+  'threads',
 ] as const;
 
 export type DashboardChannelId = (typeof DASHBOARD_CHANNEL_IDS)[number];
@@ -145,6 +146,7 @@ const DEFAULT_SECTION_TITLES: Record<DashboardChannelId, string> = {
   youtube: 'YouTube',
   tiktok: 'TikTok',
   linkedin: 'LinkedIn',
+  threads: 'Threads',
 };
 
 export class DashboardLayoutError extends Error {}

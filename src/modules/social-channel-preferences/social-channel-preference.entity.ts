@@ -18,6 +18,7 @@ export const SOCIAL_TOGGLEABLE_CHANNELS = [
   'youtube',
   'tiktok',
   'tiktok-ads',
+  'threads',
 ] as const;
 export type SocialToggleableChannel =
   (typeof SOCIAL_TOGGLEABLE_CHANNELS)[number];

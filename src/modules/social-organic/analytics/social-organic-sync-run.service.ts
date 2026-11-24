@@ -30,6 +30,7 @@ export const SCHEDULED_ORGANIC_PROVIDERS = [
   'tiktok',
   'tiktok_business',
   'linkedin',
+  'threads',
 ];
 
 export type SocialOrganicSyncCandidate = {

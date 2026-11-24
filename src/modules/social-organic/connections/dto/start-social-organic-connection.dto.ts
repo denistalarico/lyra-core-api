@@ -7,6 +7,7 @@ export const SOCIAL_ORGANIC_CONNECTION_MODES = [
   'tiktok',
   'tiktok_business',
   'linkedin',
+  'threads',
 ] as const;
 
 export type SocialOrganicConnectionMode =
