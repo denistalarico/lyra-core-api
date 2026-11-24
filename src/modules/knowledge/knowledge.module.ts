@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FilesModule } from '../../common/files/files.module';
+import { ClientAreaModule } from '../client-area/client-area.module';
 import { AgencyUserSecuritySettingsEntity } from '../agency/entities/agency-auth.entities';
 import { AgencyWorkspaceUserEntity } from '../agency/entities/agency-settings.entities';
 import { TeamMember } from '../team/entities/team-member.entity';
@@ -28,6 +29,7 @@ import {
   AgencyKnowledgeVaultPermission,
 } from './entities';
 import {
+  ClientAreaHelpCenterController,
   HelpArticle,
   HelpCategory,
   HelpCenterController,
@@ -50,6 +52,7 @@ import {
 
 @Module({
   imports: [
+    ClientAreaModule,
     FilesModule,
     NotificationsModule,
     PermissionsModule,
@@ -85,6 +88,7 @@ import {
     KnowledgeReactionsController,
     KnowledgeVaultController,
     HelpCenterController,
+    ClientAreaHelpCenterController,
   ],
   providers: [
     KnowledgeArticlesService,
