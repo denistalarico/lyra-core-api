@@ -1878,14 +1878,14 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
 
   // ── Resumo: uma pergunta, todos os canais ───────────────────────────────
   //
-  // Every metric here adds an ad-account figure to the pages' own. They are
+  // Each metric here sums the channels that report it. They are
   // `summary`-only: placing one on a channel dashboard would be a number that
   // spans networks the tab does not claim to show.
   {
     id: "summary_spend",
     label: "Valor investido",
     description:
-      "Total investido em anúncios no período. Só o Meta Ads gera investimento hoje, então este número é o da conta de anúncios.",
+      "Total investido em anúncios no período, somando Meta Ads e Google Ads quando as contas usam a mesma moeda.",
     channels: SUMMARY_ONLY,
     format: "currency",
     polarity: "neutral",
@@ -1927,7 +1927,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
   {
     id: "summary_clicks",
     label: "Cliques",
-    description: "Todos os cliques registrados no período, em todos os canais.",
+    description: "Cliques em anúncios no período, somando Meta Ads e Google Ads.",
     channels: SUMMARY_ONLY,
     format: "integer",
     polarity: "higher_is_better",
@@ -1952,7 +1952,7 @@ export const SOCIAL_METRIC_CATALOG: MetricDefinition[] = [
   {
     id: "summary_publications",
     label: "Número de postagens",
-    description: "Publicações feitas no período, somando Instagram e Facebook.",
+    description: "Publicações feitas no período, somando os canais orgânicos.",
     channels: SUMMARY_ONLY,
     format: "integer",
     polarity: "neutral",
