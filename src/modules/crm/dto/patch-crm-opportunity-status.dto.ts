@@ -8,6 +8,12 @@ export class PatchCrmOpportunityStatusDto {
   @IsString()
   lostReason?: string | null;
 
+  /** Detalhes livres da perda; fica em `metadata.lossNote` e no histórico. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  lostNote?: string | null;
+
   @IsOptional()
   @IsInt()
   expectedVersion?: number;

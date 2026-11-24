@@ -707,6 +707,10 @@ export class CrmService {
         sortOrder: dto.sortOrder,
         beforeOpportunityId: dto.beforeOpportunityId,
         reason: dto.reasonCode,
+        loss:
+          dto.lostReason !== undefined || dto.lostNote !== undefined
+            ? { reason: dto.lostReason, note: dto.lostNote }
+            : undefined,
       },
     );
     if (
@@ -821,6 +825,7 @@ export class CrmService {
         expectedVersion: dto.expectedVersion ?? options.expectedVersion,
         reason: dto.reasonCode,
       },
+      dto.lostNote,
     );
   }
 

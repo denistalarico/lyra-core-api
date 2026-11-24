@@ -2,7 +2,11 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { agencyEntities } from '../../config/typeorm.config';
 import { AgencySalesService } from './agency-sales.service';
-import { opportunityEventTypes, snapshotOf } from './agency-sales-events.rules';
+import {
+  opportunityEventTypes,
+  snapshotOf,
+  withLossNote,
+} from './agency-sales-events.rules';
 import {
   AgencySalesOpportunityEntity,
   AgencySalesOpportunityEventEntity,
@@ -252,6 +256,34 @@ describe('AgencySalesService events (AG-EVT)', () => {
     ]);
   });
 
+  it('carries the loss reason and note on opportunity_lost only, and drops the note on reopen', async () => {
+    const lost = setup();
+    await lost.service.loseOpportunity(context, OPP, {
+      lostReason: 'Preço',
+      lostNote: '  Fechou com outra agência pela metade do preço.  ',
+    } as never);
+    const lostEvent = lost.events.find(
+      (event) => event.eventType === 'opportunity_lost',
+    );
+    expect(lostEvent?.afterData).toMatchObject({
+      status: 'lost',
+      lostReason: 'Preço',
+      lostNote: 'Fechou com outra agência pela metade do preço.',
+    });
+    for (const event of lost.events.filter((e) => e !== lostEvent))
+      expect(event.afterData).not.toHaveProperty('lostNote');
+
+    lost.events.length = 0;
+    await lost.service.reopenOpportunity(context, OPP, {
+      stageId: 'st-qual',
+    } as never);
+    const reopenedNote = (
+      lost.events.find((event) => event.eventType === 'opportunity_reopened')
+        ?.afterData as Record<string, unknown>
+    )?.lostNote;
+    expect(reopenedNote).toBeUndefined();
+  });
+
   it('archives, and records value or owner changes but not title edits', async () => {
     const archived = setup();
     await archived.service.updateOpportunity(context, OPP, {
@@ -351,6 +383,21 @@ describe('AgencySalesService events (AG-EVT)', () => {
     expect(json).not.toContain(FICTITIOUS_TITLE);
     expect(json).not.toContain(FICTITIOUS_DESCRIPTION);
     expect(json).not.toContain('0000000000e1');
+  });
+});
+
+describe('withLossNote', () => {
+  it('stores a trimmed note on loss, clears it on an empty note or any other status', () => {
+    expect(withLossNote({ a: 1 }, 'lost', ' detalhe ')).toEqual({
+      a: 1,
+      lossNote: 'detalhe',
+    });
+    expect(withLossNote({ a: 1, lossNote: 'x' }, 'lost', '')).toEqual({ a: 1 });
+    expect(withLossNote({ a: 1, lossNote: 'x' }, 'lost')).toEqual({
+      a: 1,
+      lossNote: 'x',
+    });
+    expect(withLossNote({ a: 1, lossNote: 'x' }, 'open')).toEqual({ a: 1 });
   });
 });
 

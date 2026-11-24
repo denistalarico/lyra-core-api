@@ -238,6 +238,8 @@ export class CrmOpportunityCommandService {
     options: CrmCommandOptions & {
       sortOrder?: number;
       beforeOpportunityId?: string | null;
+      /** What the human wrote when the move loses the opportunity. */
+      loss?: { reason?: string | null; note?: string | null };
     } = {},
   ): Promise<{
     opportunity: CrmOpportunityEntity;
@@ -988,6 +990,8 @@ export class CrmOpportunityCommandService {
     options: CrmCommandOptions & {
       sortOrder?: number;
       beforeOpportunityId?: string | null;
+      /** What the human wrote when the move loses the opportunity. */
+      loss?: { reason?: string | null; note?: string | null };
     } = {},
   ): Promise<{
     opportunity: CrmOpportunityEntity;
@@ -1112,6 +1116,8 @@ export class CrmOpportunityCommandService {
         stage.id,
         options.beforeOpportunityId,
       ));
+    if (nextStatus === 'lost' && statusChanged && options.loss)
+      this.applyLoss(opportunity, options.loss.reason, options.loss.note);
     this.applyTerminalTimestamps(opportunity, nextStatus, previousStatus);
     if (flipToManual) opportunity.autonomyMode = 'manual';
     opportunity.rowVersion += 1;
@@ -1170,6 +1176,7 @@ export class CrmOpportunityCommandService {
     status: string,
     lostReason: string | null | undefined,
     options: CrmCommandOptions = {},
+    lostNote?: string | null,
   ): Promise<CrmOpportunityEntity> {
     const saved = await this.dataSource.transaction((manager) =>
       this.changeStatusWithinTransaction(
@@ -1179,6 +1186,7 @@ export class CrmOpportunityCommandService {
         status,
         lostReason,
         options,
+        lostNote,
       ),
     );
     await this.scoreAfterCommand(ctx, opportunityId, 'lifecycle_changed');
@@ -1192,6 +1200,7 @@ export class CrmOpportunityCommandService {
     status: string,
     lostReason: string | null | undefined,
     options: CrmCommandOptions = {},
+    lostNote?: string | null,
   ): Promise<CrmOpportunityEntity> {
     const replay = await this.findReplay(manager, ctx, options.idempotencyKey);
     if (replay) return replay;
@@ -1254,7 +1263,8 @@ export class CrmOpportunityCommandService {
         targetStage.id,
       );
     }
-    if (lostReason !== undefined) opportunity.lostReason = lostReason;
+    if (status === 'lost') this.applyLoss(opportunity, lostReason, lostNote);
+    else if (lostReason !== undefined) opportunity.lostReason = lostReason;
     this.applyTerminalTimestamps(opportunity, status, previousStatus);
     opportunity.rowVersion += 1;
     const saved = await manager
@@ -1455,19 +1465,31 @@ export class CrmOpportunityCommandService {
     previousStatus: string,
     options: CrmCommandOptions,
   ): Promise<void> {
+    const note = opportunity.metadata?.lossNote;
+    // A loss carries what the team wrote about it, so the history keeps the
+    // reason and note of each loss even after the opportunity changes again.
+    const lossDetail =
+      opportunity.status === 'lost'
+        ? {
+            lostReason: opportunity.lostReason ?? null,
+            lostNote: typeof note === 'string' && note.trim() ? note : null,
+          }
+        : {};
+    const afterData = {
+      status: opportunity.status,
+      pipelineId: opportunity.pipelineId,
+      stageId: opportunity.stageId,
+      valueAmount: opportunity.valueAmount,
+      currency: opportunity.currency,
+      ...lossDetail,
+    };
     await this.appendHistory(manager, ctx, {
       ...options,
       opportunity,
       eventType: 'status_changed',
       title: 'Status alterado',
       beforeData: { status: previousStatus },
-      afterData: {
-        status: opportunity.status,
-        pipelineId: opportunity.pipelineId,
-        stageId: opportunity.stageId,
-        valueAmount: opportunity.valueAmount,
-        currency: opportunity.currency,
-      },
+      afterData,
     });
     if (opportunity.status === 'won' || opportunity.status === 'lost') {
       await this.appendHistory(manager, ctx, {
@@ -1479,13 +1501,7 @@ export class CrmOpportunityCommandService {
             ? 'Oportunidade ganha'
             : 'Oportunidade perdida',
         beforeData: { status: previousStatus },
-        afterData: {
-          status: opportunity.status,
-          pipelineId: opportunity.pipelineId,
-          stageId: opportunity.stageId,
-          valueAmount: opportunity.valueAmount,
-          currency: opportunity.currency,
-        },
+        afterData,
       });
     }
   }
@@ -1699,6 +1715,25 @@ export class CrmOpportunityCommandService {
       ],
     );
     return targetSortOrder;
+  }
+
+  /**
+   * The reason and note of a loss. The note belongs to this loss only: it is
+   * stored in `metadata.lossNote` (an empty note clears it) and the status
+   * events carry both, so the history keeps each loss's own.
+   */
+  private applyLoss(
+    opportunity: CrmOpportunityEntity,
+    reason: string | null | undefined,
+    note: string | null | undefined,
+  ): void {
+    if (reason !== undefined) opportunity.lostReason = reason?.trim() || null;
+    if (note === undefined) return;
+    const metadata = { ...(opportunity.metadata ?? {}) };
+    const trimmed = note?.trim();
+    if (trimmed) metadata.lossNote = trimmed;
+    else delete metadata.lossNote;
+    opportunity.metadata = metadata;
   }
 
   private statusForStage(stage: CrmStageEntity): string {

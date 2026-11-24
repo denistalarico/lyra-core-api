@@ -10,7 +10,9 @@ export const AGENCY_SALES_CRM = 'agency_sales' as const;
 /**
  * The only fields an event carries: ids, stage, status, value and owner. The
  * contact is only a flag (`hasContact`): the opportunity history shows "contato
- * vinculado" without the event ever carrying who the lead is.
+ * vinculado" without the event ever carrying who the lead is. The one
+ * exception is `opportunity_lost`, which also carries what the team wrote about
+ * the loss (`lostReason`, `lostNote`) so the history keeps each loss's own.
  */
 export type AgencySalesOpportunitySnapshot = {
   pipelineId: string;
@@ -82,12 +84,49 @@ export function opportunityEventTypes(
   return types;
 }
 
+export type AgencySalesLossDetail = {
+  lostReason: string | null;
+  lostNote: string | null;
+};
+
+/** Key of the free-text loss note inside the opportunity metadata. */
+export const LOSS_NOTE_METADATA_KEY = 'lossNote';
+
+/**
+ * The metadata after a status change: entering "lost" with a note stores it
+ * (an empty note clears it), and any other status drops it, since the note
+ * belongs to that loss only.
+ */
+export function withLossNote(
+  metadata: Record<string, unknown> | null | undefined,
+  status: string,
+  note?: string | null,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...(metadata ?? {}) };
+  const trimmed = note?.trim();
+  if (status === 'lost' && trimmed) next[LOSS_NOTE_METADATA_KEY] = trimmed;
+  else if (status !== 'lost' || note !== undefined)
+    delete next[LOSS_NOTE_METADATA_KEY];
+  return next;
+}
+
+export function lossDetailOf(
+  opportunity: Pick<AgencySalesOpportunityEntity, 'lostReason' | 'metadata'>,
+): AgencySalesLossDetail {
+  const note = opportunity.metadata?.[LOSS_NOTE_METADATA_KEY];
+  return {
+    lostReason: opportunity.lostReason ?? null,
+    lostNote: typeof note === 'string' && note.trim() ? note : null,
+  };
+}
+
 export function opportunityEventRows(
   context: { tenantId: string; workspaceId: string; userId?: string },
   opportunityId: string,
   before: AgencySalesOpportunitySnapshot | null,
   after: AgencySalesOpportunitySnapshot,
   occurredAt: Date,
+  lossDetail?: AgencySalesLossDetail,
 ): Array<Partial<AgencySalesOpportunityEventEntity>> {
   return opportunityEventTypes(before, after).map((eventType) => ({
     tenantId: context.tenantId,
@@ -95,7 +134,10 @@ export function opportunityEventRows(
     opportunityId,
     eventType,
     beforeData: before,
-    afterData: after,
+    afterData:
+      eventType === 'opportunity_lost' && lossDetail
+        ? { ...after, ...lossDetail }
+        : after,
     actorType: context.userId ? 'user' : 'system',
     actorUserId: context.userId ?? null,
     idempotencyKey:

@@ -252,6 +252,12 @@ export class CreateAgencySalesOpportunityDto {
   @MaxLength(160)
   lostReason?: string;
 
+  /** Detalhes livres da perda; fica em `metadata.lossNote` e no histórico. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  lostNote?: string;
+
   @IsOptional()
   @IsObject()
   metadata?: Record<string, unknown>;
@@ -403,6 +409,12 @@ export class MoveAgencySalesOpportunityDto {
   @IsString()
   @MaxLength(160)
   lostReason?: string;
+
+  /** Detalhes livres da perda; fica em `metadata.lossNote` e no histórico. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  lostNote?: string;
 }
 
 export class CreateAgencySalesActivityDto {
@@ -469,6 +481,12 @@ export class LoseAgencySalesOpportunityDto {
   @IsString()
   @MaxLength(160)
   lostReason?: string;
+
+  /** Detalhes livres da perda; fica em `metadata.lossNote` e no histórico. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  lostNote?: string;
 
   @IsOptional()
   @IsString()

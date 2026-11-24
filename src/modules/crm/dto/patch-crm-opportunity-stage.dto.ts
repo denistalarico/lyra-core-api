@@ -34,4 +34,15 @@ export class PatchCrmOpportunityStageDto {
   @IsString()
   @MaxLength(80)
   reasonCode!: string;
+
+  /** Applied only when the move loses the opportunity (lost stage). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  lostReason?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  lostNote?: string | null;
 }

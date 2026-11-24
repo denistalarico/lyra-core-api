@@ -2,7 +2,12 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, ILike, In, Repository } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
-import { opportunityEventRows, snapshotOf } from './agency-sales-events.rules';
+import {
+  lossDetailOf,
+  opportunityEventRows,
+  snapshotOf,
+  withLossNote,
+} from './agency-sales-events.rules';
 import type {
   CompleteAgencySalesActivityDto,
   CreateAgencySalesActivityDto,
@@ -131,6 +136,7 @@ export class AgencySalesService {
       before ? snapshotOf(before) : null,
       snapshotOf(after),
       new Date(),
+      lossDetailOf(after),
     );
     if (rows.length)
       await manager
@@ -704,12 +710,15 @@ export class AgencySalesService {
       status: 'won',
       closedAt,
       lostReason: null,
-      metadata: {
-        ...(opportunity.metadata ?? {}),
-        outcome: dto.outcome ?? undefined,
-        closedByUserId: context.userId ?? undefined,
-        closedAs: 'won',
-      },
+      metadata: withLossNote(
+        {
+          ...(opportunity.metadata ?? {}),
+          outcome: dto.outcome ?? undefined,
+          closedByUserId: context.userId ?? undefined,
+          closedAs: 'won',
+        },
+        'won',
+      ) as never,
     });
 
     return this.getOpportunityDetail(context, opportunity.id);
@@ -744,12 +753,16 @@ export class AgencySalesService {
       status: 'lost',
       closedAt,
       lostReason,
-      metadata: {
-        ...(opportunity.metadata ?? {}),
-        outcome: dto.outcome ?? undefined,
-        closedByUserId: context.userId ?? undefined,
-        closedAs: 'lost',
-      },
+      metadata: withLossNote(
+        {
+          ...(opportunity.metadata ?? {}),
+          outcome: dto.outcome ?? undefined,
+          closedByUserId: context.userId ?? undefined,
+          closedAs: 'lost',
+        },
+        'lost',
+        dto.lostNote,
+      ) as never,
     });
 
     return this.getOpportunityDetail(context, opportunity.id);
@@ -807,11 +820,14 @@ export class AgencySalesService {
       status: 'open',
       closedAt: null,
       lostReason: null,
-      metadata: {
-        ...(opportunity.metadata ?? {}),
-        reopenedByUserId: context.userId ?? undefined,
-        reopenedAt: new Date().toISOString(),
-      },
+      metadata: withLossNote(
+        {
+          ...(opportunity.metadata ?? {}),
+          reopenedByUserId: context.userId ?? undefined,
+          reopenedAt: new Date().toISOString(),
+        },
+        'open',
+      ) as never,
     });
 
     return this.getOpportunityDetail(context, opportunity.id);
@@ -1223,6 +1239,17 @@ export class AgencySalesService {
       closedAt: targetStage.isClosed ? new Date() : null,
       lostReason:
         status === 'lost' ? (lostReason ?? opportunity.lostReason) : null,
+      // Mover entre etapas abertas mantém a nota; entrar em "perdida" com
+      // motivo novo troca a nota, e sair de "perdida" a descarta.
+      ...(status !== opportunity.status || (status === 'lost' && lostReason)
+        ? {
+            metadata: withLossNote(
+              opportunity.metadata,
+              status,
+              dto.lostNote,
+            ) as never,
+          }
+        : {}),
     });
 
     return this.opportunitiesRepo.findOne({
@@ -1493,12 +1520,31 @@ export class AgencySalesService {
     id: string,
     dto: UpdateAgencySalesOpportunityDto,
   ) {
-    const { metadata, ...opportunityPatch } = dto;
+    const { metadata, lostNote, ...opportunityPatch } = dto;
     const lostReason = dto.lostReason?.trim();
 
     if (dto.status === 'lost' && !lostReason) {
       throw new BadRequestException('Loss reason is required.');
     }
+
+    // A nota da perda vive no metadata: sem metadata no corpo, parte do atual
+    // para não sobrescrever o resto.
+    const baseMetadata =
+      dto.status && metadata === undefined
+        ? (
+            await this.opportunitiesRepo.findOne({
+              where: {
+                id,
+                tenantId: context.tenantId,
+                workspaceId: context.workspaceId,
+              },
+            })
+          )?.metadata
+        : metadata;
+    const touchesLossNote =
+      dto.status === 'lost'
+        ? lostNote !== undefined
+        : Boolean(dto.status) && Boolean(baseMetadata?.lossNote);
 
     await this.changeOpportunity(context, id, {
       ...opportunityPatch,
@@ -1511,7 +1557,9 @@ export class AgencySalesService {
         dto.status === 'open' || dto.status === 'won'
           ? null
           : (lostReason ?? undefined),
-      metadata: metadata as never,
+      metadata: (touchesLossNote
+        ? withLossNote(baseMetadata, dto.status!, lostNote)
+        : metadata) as never,
     });
 
     return this.opportunitiesRepo.findOne({
