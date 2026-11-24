@@ -30,6 +30,7 @@ import {
   CreateAgencySalesStageDto,
   MoveAgencySalesOpportunityDto,
   ReorderAgencySalesStagesDto,
+  SendAgencySalesOpportunityEmailDto,
   UpdateAgencySalesItemDto,
   UpdateAgencySalesActivityDto,
   UpdateAgencySalesOpportunityDto,
@@ -39,6 +40,7 @@ import {
   UpdateAgencySalesStageDto,
 } from './dto/agency-sales.dto';
 import { AgencySalesService } from './agency-sales.service';
+import { AgencySettingsService } from './agency-settings.service';
 
 type AgencyContext = {
   tenantId: string;
@@ -49,7 +51,10 @@ type AgencyContext = {
 @Controller('agency/sales')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class AgencySalesController {
-  constructor(private readonly salesService: AgencySalesService) {}
+  constructor(
+    private readonly salesService: AgencySalesService,
+    private readonly settingsService: AgencySettingsService,
+  ) {}
 
   @Get('health')
   health() {
@@ -420,6 +425,37 @@ export class AgencySalesController {
     @Param('id') id: string,
   ) {
     return this.salesService.deleteOpportunity(this.getContext(user), id);
+  }
+
+  @Get('opportunities/:id/history')
+  @RequireAnyPermission(
+    'agency.sales.crm.view.assigned',
+    'agency.sales.crm.view.department',
+  )
+  getOpportunityHistory(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('id') id: string,
+  ) {
+    return this.salesService.getOpportunityHistory(this.getContext(user), id);
+  }
+
+  @Post('opportunities/:id/email')
+  @RequireAnyPermission(
+    'agency.sales.crm.manage.department',
+    'agency.sales.crm.manage.own',
+  )
+  async sendOpportunityEmail(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('id') id: string,
+    @Body() dto: SendAgencySalesOpportunityEmailDto,
+  ) {
+    const context = this.getContext(user);
+    await this.salesService.assertOpportunity(context, id);
+    return this.settingsService.sendWorkspaceEmail(
+      context.tenantId,
+      context.workspaceId,
+      { to: dto.to.trim(), subject: dto.subject.trim(), text: dto.message },
+    );
   }
 
   @Get('opportunities/:id')

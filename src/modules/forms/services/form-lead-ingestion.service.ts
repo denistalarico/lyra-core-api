@@ -11,10 +11,11 @@ import { SocialAdEntity } from '../../social-integrations/entities/social-ad-ent
 import { FormEntity } from '../entities/form.entity';
 import { FormSubmissionEntity } from '../entities/form-submission.entity';
 import { hasLeadIdentity } from '../form-capture.mapper';
-import type {
-  FormSubmissionOutcome,
-  NormalizedLead,
-  NormalizedSubmission,
+import {
+  FORM_CARD_COLORS,
+  type FormSubmissionOutcome,
+  type NormalizedLead,
+  type NormalizedSubmission,
 } from '../forms.types';
 import {
   FormLeadContactResolver,
@@ -377,6 +378,9 @@ export class FormLeadIngestionService {
               : normalized.opportunity.valueAmount.toFixed(2),
           source: adSource?.leadflowSource ?? 'form',
           assignedUserId: destination.ownerUserId ?? undefined,
+          ...(destination.cardColor
+            ? { cardColor: FORM_CARD_COLORS[destination.cardColor] }
+            : {}),
           metadata: this.metadata(form, submission, campaignName),
         },
         {
@@ -407,6 +411,10 @@ export class FormLeadIngestionService {
           // The Agency card and drawer read the contact from these keys; without
           // them the card falls back to the contact UUID.
           ...agencyContactMetadata(normalized.lead),
+          // The Agency kanban reads the card color from `metadata.crm.cardColor`.
+          ...(destination.cardColor
+            ? { crm: { cardColor: destination.cardColor } }
+            : {}),
         },
       },
     );

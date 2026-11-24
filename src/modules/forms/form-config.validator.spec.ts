@@ -179,6 +179,18 @@ describe('form-config.validator', () => {
     );
   });
 
+  it('validateDestination keeps a known card color and refuses others', () => {
+    expect(validateDestination(undefined).cardColor).toBeNull();
+    expect(validateDestination({ cardColor: 'amber' }).cardColor).toBe('amber');
+    expect(validateDestination({ cardColor: '' }).cardColor).toBeNull();
+    expect(() => validateDestination({ cardColor: '#ff0000' })).toThrow(
+      /cardColor/,
+    );
+    expect(() => validateDestination({ cardColor: 'toString' })).toThrow(
+      /cardColor/,
+    );
+  });
+
   it('validateSecurity normalizes domains and refuses URLs', () => {
     expect(
       validateSecurity({

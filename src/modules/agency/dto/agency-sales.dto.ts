@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsEmail,
   IsIn,
   IsInt,
   IsObject,
@@ -7,6 +8,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  MinLength,
   Min,
 } from 'class-validator';
 import type {
@@ -485,4 +487,21 @@ export class ReopenAgencySalesOpportunityDto {
   @IsOptional()
   @IsUUID()
   pipelineId?: string;
+}
+
+/** "Enviar e-mail" in the opportunity drawer: a plain message to the lead. */
+export class SendAgencySalesOpportunityEmailDto {
+  @IsEmail()
+  @MaxLength(320)
+  to!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(200)
+  subject!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(20000)
+  message!: string;
 }

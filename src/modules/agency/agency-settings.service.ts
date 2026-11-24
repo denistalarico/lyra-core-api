@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomInt, randomUUID } from 'crypto';
@@ -1979,6 +1980,49 @@ export class AgencySettingsService {
     }
 
     return normalized;
+  }
+
+  /**
+   * A plain message to a lead, from the agency's own mailbox (/settings/email).
+   * Without that mailbox it refuses instead of falling back to the Lyra sender.
+   */
+  async sendWorkspaceEmail(
+    tenantId: string,
+    workspaceId: string,
+    message: { to: string; subject: string; text: string },
+  ): Promise<{ fromEmail: string }> {
+    const override = await this.getEmailTransportOverride(
+      tenantId,
+      workspaceId,
+    );
+
+    if (!override) {
+      throw new BadRequestException(
+        'Configure o e-mail da agência em Configurações > E-mail para enviar mensagens.',
+      );
+    }
+
+    const escaped = message.text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+    try {
+      await this.emailService.sendEmail({
+        to: message.to,
+        subject: message.subject,
+        text: message.text,
+        html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111827;white-space:pre-wrap;">${escaped}</div>`,
+        override,
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'O servidor de e-mail da agência recusou o envio. Confira as configurações em Configurações > E-mail.',
+      );
+    }
+
+    return { fromEmail: override.fromEmail };
   }
 
   private async getEmailTransportOverride(

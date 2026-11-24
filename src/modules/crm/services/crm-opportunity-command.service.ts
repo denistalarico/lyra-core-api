@@ -2052,6 +2052,9 @@ export class CrmOpportunityCommandService {
       stageId: opportunity.stageId,
       status: opportunity.status,
       assignedUserId: opportunity.assignedUserId,
+      // The drawer history shows "Valor: antes → depois" from these two.
+      valueAmount: opportunity.valueAmount,
+      currency: opportunity.currency,
       sortOrder: opportunity.sortOrder,
       rowVersion: opportunity.rowVersion,
     };

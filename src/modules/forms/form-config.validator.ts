@@ -8,6 +8,7 @@ import {
   DEFAULT_FORM_TRACKING,
   FORM_BACKGROUNDS,
   FORM_CAPTURE_TARGETS,
+  FORM_CARD_COLORS,
   FORM_CONTAINERS,
   FORM_DESTINATION_TARGETS,
   FORM_FIELD_TARGETS,
@@ -19,6 +20,7 @@ import {
   type FormAfterSubmit,
   type FormCapture,
   type FormCaptureTarget,
+  type FormCardColor,
   type FormDestination,
   type FormField,
   type FormFieldsConfig,
@@ -212,7 +214,15 @@ export function validateDestination(input: unknown): FormDestination {
     duplicateWindowDays: window,
     createContact:
       input.createContact === undefined ? true : input.createContact === true,
+    cardColor: cardColorOrNull(input.cardColor),
   };
+}
+
+function cardColorOrNull(value: unknown): FormCardColor | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !Object.hasOwn(FORM_CARD_COLORS, value))
+    fail('destination.cardColor is invalid.');
+  return value as FormCardColor;
 }
 
 export function validateSecurity(input: unknown): FormSecurity {

@@ -80,7 +80,31 @@ export type FormDestination = {
   /** 0 disables the rule. Default 30 (D-F10). */
   duplicateWindowDays: number;
   createContact: boolean;
+  /**
+   * Color of the cards this form opens (e.g. Google Ads → amber). A key of
+   * {@link FORM_CARD_COLORS}: the Agency CRM stores the key, LeadFlow the hex.
+   * Only new opportunities get it; one that receives a repeat submission keeps its own.
+   */
+  cardColor?: FormCardColor | null;
 };
+
+/** Keys of the Agency card palette, with the LeadFlow preset hex for each. */
+export const FORM_CARD_COLORS = {
+  blue: '#2563EB',
+  cyan: '#0EA5E9',
+  teal: '#14B8A6',
+  green: '#22C55E',
+  lime: '#84CC16',
+  amber: '#F59E0B',
+  orange: '#FB923C',
+  red: '#EF4444',
+  rose: '#E11D48',
+  pink: '#EC4899',
+  violet: '#8B5CF6',
+  indigo: '#6366F1',
+  slate: '#475569',
+} as const;
+export type FormCardColor = keyof typeof FORM_CARD_COLORS;
 
 export type FormSecurity = {
   /** Empty = any domain (F3 enforces it for the capture script). */
@@ -424,6 +448,7 @@ export const DEFAULT_FORM_DESTINATION: FormDestination = {
   ownerUserId: null,
   duplicateWindowDays: 30,
   createContact: true,
+  cardColor: null,
 };
 
 export const DEFAULT_FORM_SECURITY: FormSecurity = {

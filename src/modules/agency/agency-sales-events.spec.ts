@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { agencyEntities } from '../../config/typeorm.config';
 import { AgencySalesService } from './agency-sales.service';
+import { opportunityEventTypes, snapshotOf } from './agency-sales-events.rules';
 import {
   AgencySalesOpportunityEntity,
   AgencySalesOpportunityEventEntity,
@@ -183,8 +184,10 @@ describe('AgencySalesService events (AG-EVT)', () => {
     expect(Object.keys(events[0].afterData as object).sort()).toEqual([
       'amountCents',
       'currency',
+      'hasContact',
       'ownerUserId',
       'pipelineId',
+      'recurringAmountCents',
       'stageId',
       'status',
     ]);
@@ -272,6 +275,41 @@ describe('AgencySalesService events (AG-EVT)', () => {
       description: 'outro texto',
     } as never);
     expect(title.types()).toEqual([]);
+  });
+
+  it('records the contact link and the recurring value, the contact as a flag only', () => {
+    const base = {
+      pipelineId: 'p1',
+      stageId: 'st-new',
+      status: 'open',
+      amountCents: 0,
+      recurringAmountCents: 0,
+      currency: 'BRL',
+      ownerUserId: USER,
+      contactId: null,
+    };
+    const before = snapshotOf(base as never);
+    const linked = snapshotOf({
+      ...base,
+      contactId: '00000000-0000-4000-8000-0000000000e2',
+    } as never);
+    expect(opportunityEventTypes(before, linked)).toEqual([
+      'opportunity_updated',
+    ]);
+    expect(linked).toMatchObject({ hasContact: true });
+    expect(JSON.stringify(linked)).not.toContain('0000000000e2');
+    const recurring = snapshotOf({
+      ...base,
+      recurringAmountCents: 5000,
+    } as never);
+    expect(opportunityEventTypes(before, recurring)).toEqual([
+      'opportunity_updated',
+    ]);
+    // Rows written before the flag existed are not a change.
+    const legacy = { ...before } as Record<string, unknown>;
+    delete legacy.hasContact;
+    delete legacy.recurringAmountCents;
+    expect(opportunityEventTypes(legacy as never, before)).toEqual([]);
   });
 
   it('records the new value when items change the totals', async () => {

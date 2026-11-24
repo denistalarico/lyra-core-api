@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, ILike, Repository } from 'typeorm';
+import { DataSource, EntityManager, ILike, In, Repository } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { opportunityEventRows, snapshotOf } from './agency-sales-events.rules';
 import type {
@@ -1378,6 +1378,68 @@ export class AgencySalesService {
     await this.recalculateOpportunityTotals(context, opportunityId);
 
     return { success: true };
+  }
+
+  /**
+   * The drawer's "Histórico" tab: the AG-EVT rows of one opportunity, newest
+   * first, with the names of the stages and pipelines they mention (the rows
+   * only carry ids, and a stage may belong to another pipeline by now).
+   */
+  async getOpportunityHistory(context: AgencyContext, opportunityId: string) {
+    const opportunity = await this.ensureOpportunity(context, opportunityId);
+    const scope = {
+      tenantId: context.tenantId,
+      workspaceId: context.workspaceId,
+    };
+    const rows = await this.dataSource
+      .getRepository(AgencySalesOpportunityEventEntity)
+      .find({
+        where: { ...scope, opportunityId: opportunity.id },
+        order: { occurredAt: 'DESC', id: 'DESC' },
+        take: 300,
+      });
+    const stageIds = new Set<string>();
+    const pipelineIds = new Set<string>();
+    for (const row of rows) {
+      for (const data of [row.beforeData, row.afterData]) {
+        if (typeof data?.stageId === 'string') stageIds.add(data.stageId);
+        if (typeof data?.pipelineId === 'string')
+          pipelineIds.add(data.pipelineId);
+      }
+    }
+    const [stages, pipelines] = await Promise.all([
+      stageIds.size
+        ? this.stagesRepo.find({ where: { ...scope, id: In([...stageIds]) } })
+        : Promise.resolve([]),
+      pipelineIds.size
+        ? this.pipelinesRepo.find({
+            where: { ...scope, id: In([...pipelineIds]) },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    return {
+      events: rows.map((row) => ({
+        id: row.id,
+        eventType: row.eventType,
+        before: row.beforeData,
+        after: row.afterData,
+        actorType: row.actorType,
+        actorUserId: row.actorUserId,
+        occurredAt: row.occurredAt,
+      })),
+      stageNames: Object.fromEntries(
+        stages.map((stage) => [stage.id, stage.name]),
+      ),
+      pipelineNames: Object.fromEntries(
+        pipelines.map((pipeline) => [pipeline.id, pipeline.name]),
+      ),
+    };
+  }
+
+  /** Only checks that the opportunity is in this workspace. */
+  async assertOpportunity(context: AgencyContext, opportunityId: string) {
+    await this.ensureOpportunity(context, opportunityId);
   }
 
   private async ensureOpportunity(
