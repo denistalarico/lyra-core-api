@@ -21,7 +21,7 @@ export class SocialCampaignRecommendationConfigService implements OnModuleInit {
   readonly model =
     process.env.SOCIAL_CAMPAIGN_RECOMMENDATION_MODEL ??
     process.env.SOCIAL_COPY_GENERATION_MODEL ??
-    'gpt-5.6-terra';
+    'gpt-6.1-terra';
 
   readonly timeoutMs = boundedNumber(
     'SOCIAL_CAMPAIGN_RECOMMENDATION_TIMEOUT_MS',

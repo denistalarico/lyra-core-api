@@ -13,7 +13,7 @@ export class ContractAiAssistConfigService implements OnModuleInit {
     .replace(/\/+$/, '');
   readonly apiKey = resolveApiKey(this.endpoint);
   readonly model = (
-    process.env.CONTRACT_AI_ASSIST_MODEL ?? 'gpt-6.1-sol'
+    process.env.CONTRACT_AI_ASSIST_MODEL ?? 'gpt-6.2-sol'
   ).trim();
   readonly timeoutMs = boundedNumber(
     'CONTRACT_AI_ASSIST_TIMEOUT_MS',

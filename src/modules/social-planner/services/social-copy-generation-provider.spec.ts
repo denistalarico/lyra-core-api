@@ -1,9 +1,3 @@
-/* eslint-disable @typescript-eslint/require-await --
- * The fetch stubs below are `async` purely to match the shape `fetch` returns;
- * they resolve a literal and have nothing to await. Writing them as
- * `() => Promise.resolve(...)` would satisfy the rule while making the nested
- * response fixtures markedly harder to read.
- */
 import type { SocialCopyGenerationConfigService } from './social-copy-generation-config.service';
 import {
   SOCIAL_COPY_PROMPT_VERSION,
@@ -458,6 +452,13 @@ describe('SocialCopyGenerationProvider', () => {
     expect(await capture('gpt-5.6-terra')).toMatchObject({
       reasoning_effort: 'none',
     });
+    expect(await capture('gpt-6.1-terra')).toMatchObject({
+      reasoning_effort: 'none',
+    });
+    // Sol/Astra reject `none`; `low` is their floor.
+    const sol = await capture('gpt-6.1-sol');
+    expect(sol).toMatchObject({ reasoning_effort: 'low' });
+    expect(sol).not.toHaveProperty('temperature');
     expect(await capture('gpt-4.1')).toMatchObject({ temperature: 0.7 });
   });
 });

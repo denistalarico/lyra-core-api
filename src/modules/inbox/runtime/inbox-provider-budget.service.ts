@@ -275,6 +275,20 @@ export function assertBudgetAvailable(
     throw new InboxProviderError('provider_budget_exhausted', false);
 }
 
+/** Published USD per million tokens, used only when no env rate is set. */
+const KNOWN_DECISION_PRICES: Record<
+  string,
+  { input: number; cached: number; output: number }
+> = {
+  'gpt-5.6-terra': { input: 2.5, cached: 0.25, output: 15 },
+  'gpt-5.6-luna': { input: 1, cached: 0.1, output: 6 },
+  'gpt-6.2-astra': { input: 8, cached: 0.4, output: 40 },
+  'gpt-6.2-sol': { input: 2, cached: 0.1, output: 10 },
+  'gpt-6.1-sol': { input: 2, cached: 0.1, output: 10 },
+  'gpt-6.1-terra': { input: 1, cached: 0.05, output: 5 },
+  'gpt-6-luna': { input: 0.1, cached: 0.01, output: 0.5 },
+};
+
 export function estimateProviderCost(
   operation: InboxProviderOperation,
   model: string,
@@ -296,12 +310,7 @@ export function estimateProviderCost(
       return roundUsd((usage.audioSeconds / 60) * perMinute);
     return fallbackUsd;
   }
-  const known =
-    model === 'gpt-5.6-terra'
-      ? { input: 2.5, cached: 0.25, output: 15 }
-      : model === 'gpt-5.6-luna'
-        ? { input: 1, cached: 0.1, output: 6 }
-        : null;
+  const known = KNOWN_DECISION_PRICES[model] ?? null;
   const inputRate = config.decisionInputUsdPerMillion ?? known?.input;
   const cachedRate =
     config.decisionCachedInputUsdPerMillion ?? known?.cached ?? inputRate;

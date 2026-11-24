@@ -1,4 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import {
+  openAiGenerationControls,
+  type OpenAiGenerationControls,
+} from '../../../common/openai/generation-controls';
 import { LeadFlowBriefingExtractionConfigService } from './leadflow-briefing-extraction-config.service';
 import { LeadFlowBriefingExtractionError } from './leadflow-briefing-extraction.errors';
 
@@ -57,7 +61,9 @@ export interface ExtractionResult {
  */
 @Injectable()
 export class LeadFlowBriefingExtractionProvider {
-  constructor(private readonly config: LeadFlowBriefingExtractionConfigService) {}
+  constructor(
+    private readonly config: LeadFlowBriefingExtractionConfigService,
+  ) {}
 
   async extract(input: ExtractionInput): Promise<ExtractionResult> {
     if (this.config.mode === 'disabled')
@@ -197,7 +203,10 @@ export class LeadFlowBriefingExtractionProvider {
           setTimeout(resolve, 100 * attempt + Math.floor(Math.random() * 80)),
         );
     }
-    throw new LeadFlowBriefingExtractionError(lastCode, this.config.maxAttempts);
+    throw new LeadFlowBriefingExtractionError(
+      lastCode,
+      this.config.maxAttempts,
+    );
   }
 }
 
@@ -272,7 +281,8 @@ function normalizeSuggestions(parsed: unknown): ExtractionSuggestion[] {
   return suggestions
     .filter(
       (item): item is Record<string, unknown> =>
-        !!item && typeof item === 'object' &&
+        !!item &&
+        typeof item === 'object' &&
         typeof (item as Record<string, unknown>).field_path === 'string',
     )
     .map((item) => ({
@@ -283,14 +293,10 @@ function normalizeSuggestions(parsed: unknown): ExtractionSuggestion[] {
     }));
 }
 
-function chatGenerationControls(
-  model: string,
-): { reasoning_effort: 'none' } | { temperature: 0 } {
-  // GPT-5 reasoning models reject sampling controls such as temperature —
-  // same rule as InboxProviderService.
-  return /^gpt-5(?:[.-]|$)/.test(model)
-    ? { reasoning_effort: 'none' }
-    : { temperature: 0 };
+function chatGenerationControls(model: string): OpenAiGenerationControls {
+  // Reasoning models reject sampling controls such as temperature — same rule
+  // as InboxProviderService.
+  return openAiGenerationControls(model, 0);
 }
 
 function firstChoice(body: Record<string, unknown>): Record<string, unknown> {
@@ -317,7 +323,8 @@ function providerUsage(
       ? (body.usage as Record<string, unknown>)
       : {};
   const promptDetails =
-    usage.prompt_tokens_details && typeof usage.prompt_tokens_details === 'object'
+    usage.prompt_tokens_details &&
+    typeof usage.prompt_tokens_details === 'object'
       ? (usage.prompt_tokens_details as Record<string, unknown>)
       : {};
   return {

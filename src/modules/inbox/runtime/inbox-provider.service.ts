@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import {
+  openAiGenerationControls,
+  type OpenAiGenerationControls,
+} from '../../../common/openai/generation-controls';
+import {
   AgentDecisionInput,
   AgentDecisionProvider,
   AgentDecisionResult,
@@ -688,14 +692,10 @@ function transcriptionResponseFormat(model: string): 'json' | 'verbose_json' {
   return model === 'whisper-1' ? 'verbose_json' : 'json';
 }
 
-function chatGenerationControls(
-  model: string,
-): { reasoning_effort: 'none' } | { temperature: 0 } {
-  // GPT-5 reasoning models reject sampling controls such as temperature.
-  // Preserve temperature=0 for older/OpenAI-compatible chat models.
-  return /^gpt-5(?:[.-]|$)/.test(model)
-    ? { reasoning_effort: 'none' }
-    : { temperature: 0 };
+function chatGenerationControls(model: string): OpenAiGenerationControls {
+  // Reasoning models reject sampling controls; older/OpenAI-compatible chat
+  // models keep temperature=0.
+  return openAiGenerationControls(model, 0);
 }
 
 function firstChoice(body: Record<string, unknown>): Record<string, unknown> {

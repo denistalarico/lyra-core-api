@@ -12,7 +12,7 @@ describe('ContractAiAssistConfigService', () => {
   it('defaults to disabled with the agreed model and bounds', () => {
     const config = new ContractAiAssistConfigService();
     expect(config.mode).toBe('disabled');
-    expect(config.model).toBe('gpt-6.1-sol');
+    expect(config.model).toBe('gpt-6.2-sol');
     expect(config.timeoutMs).toBe(60000);
     expect(config.maxInputChars).toBe(80000);
     expect(config.dailyLimitPerWorkspace).toBe(30);

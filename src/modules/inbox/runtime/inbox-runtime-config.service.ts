@@ -27,7 +27,7 @@ export class InboxRuntimeConfigService implements OnModuleInit {
   readonly apiKey = providerApiKey(this.endpoint);
   readonly transcriptionModel =
     process.env.INBOX_TRANSCRIPTION_MODEL ?? 'gpt-4o-mini-transcribe';
-  readonly decisionModel = process.env.INBOX_DECISION_MODEL ?? 'gpt-5.6-terra';
+  readonly decisionModel = process.env.INBOX_DECISION_MODEL ?? 'gpt-6.1-terra';
   readonly visionModel = process.env.INBOX_VISION_MODEL ?? '';
   readonly activationSessionId = process.env.INBOX_LIVE_SESSION_ID ?? '';
   readonly transcriptionProcessorVersion =

@@ -259,6 +259,11 @@ describe('InboxProviderService', () => {
   it.each([
     ['gpt-5.6-terra', { reasoning_effort: 'none' }, 'temperature'],
     ['gpt-5.6-luna', { reasoning_effort: 'none' }, 'temperature'],
+    ['gpt-6.1-terra', { reasoning_effort: 'none' }, 'temperature'],
+    ['gpt-6-luna', { reasoning_effort: 'none' }, 'temperature'],
+    ['gpt-6.2-sol', { reasoning_effort: 'low' }, 'temperature'],
+    ['gpt-6.1-sol', { reasoning_effort: 'low' }, 'temperature'],
+    ['gpt-6.2-astra', { reasoning_effort: 'low' }, 'temperature'],
     ['gpt-4o', { temperature: 0 }, 'reasoning_effort'],
   ] as const)(
     'serializes strict Chat Completions Structured Outputs for %s without leaking the key into the body',

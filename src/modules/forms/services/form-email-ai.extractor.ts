@@ -50,7 +50,7 @@ export class FormEmailAiExtractor {
       'live' && Boolean(this.apiKey)
       ? 'live'
       : 'disabled';
-  readonly model = (process.env.FORMS_EMAIL_AI_MODEL ?? 'gpt-5.6-terra').trim();
+  readonly model = (process.env.FORMS_EMAIL_AI_MODEL ?? 'gpt-6.1-terra').trim();
   readonly dailyLimit = Math.max(
     0,
     Number(process.env.FORMS_EMAIL_AI_DAILY_LIMIT ?? 200) || 0,

@@ -17,10 +17,9 @@ export class LeadFlowBriefingExtractionConfigService implements OnModuleInit {
     'https://api.openai.com/v1'
   ).replace(/\/$/, '');
   readonly apiKey = providerApiKey(this.endpoint);
-  // Same model the Inbox decision provider runs live with in production —
-  // the only one this deployment has actually exercised against the provider.
+  // Same default model as the Inbox decision provider.
   readonly model =
-    process.env.LEADFLOW_BRIEFING_EXTRACTION_MODEL ?? 'gpt-5.6-terra';
+    process.env.LEADFLOW_BRIEFING_EXTRACTION_MODEL ?? 'gpt-6.1-terra';
   readonly timeoutMs = boundedNumber(
     'LEADFLOW_BRIEFING_EXTRACTION_TIMEOUT_MS',
     20_000,

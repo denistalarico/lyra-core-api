@@ -1,4 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import {
+  openAiGenerationControls,
+  type OpenAiGenerationControls,
+} from '../../../common/openai/generation-controls';
 import { SocialCopyGenerationConfigService } from './social-copy-generation-config.service';
 import { SocialCopyGenerationError } from './social-copy-generation.errors';
 import type { CopyGenerationUsage } from './social-copy-generation-provider';
@@ -466,14 +470,10 @@ function mockItems(input: PlanGenerationInput): PlanGenerationItem[] {
   }));
 }
 
-function generationControls(
-  model: string,
-): { reasoning_effort: 'none' } | { temperature: number } {
-  // GPT-5 reasoning models reject sampling controls — same rule as the copy
+function generationControls(model: string): OpenAiGenerationControls {
+  // Reasoning models reject sampling controls — same rule as the copy
   // provider, the briefing extractor and InboxProviderService.
-  return /^gpt-5(?:[.-]|$)/.test(model)
-    ? { reasoning_effort: 'none' }
-    : { temperature: 0.8 };
+  return openAiGenerationControls(model, 0.8);
 }
 
 function firstChoice(body: Record<string, unknown>): Record<string, unknown> {

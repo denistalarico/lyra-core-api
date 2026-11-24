@@ -1,4 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import {
+  openAiGenerationControls,
+  type OpenAiGenerationControls,
+} from '../../../common/openai/generation-controls';
 import type {
   SocialCampaignRecommendationConfidence,
   SocialCampaignRecommendationItem,
@@ -193,12 +197,8 @@ function systemPrompt(
   ].join('\n');
 }
 
-function generationControls(
-  model: string,
-): { reasoning_effort: 'none' } | { temperature: number } {
-  return /^gpt-5(?:[.-]|$)/.test(model)
-    ? { reasoning_effort: 'none' }
-    : { temperature: 0 };
+function generationControls(model: string): OpenAiGenerationControls {
+  return openAiGenerationControls(model, 0);
 }
 
 function recommendationSchema(evidenceKeys: string[]) {

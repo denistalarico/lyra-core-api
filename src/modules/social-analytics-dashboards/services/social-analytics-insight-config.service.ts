@@ -40,7 +40,7 @@ export class SocialAnalyticsInsightConfigService implements OnModuleInit {
   readonly apiKey = resolveApiKey(this.endpoint);
 
   readonly model =
-    process.env.SOCIAL_ANALYTICS_INSIGHT_MODEL ?? 'gpt-5.6-terra';
+    process.env.SOCIAL_ANALYTICS_INSIGHT_MODEL ?? 'gpt-6.1-terra';
 
   readonly timeoutMs = boundedNumber(
     'SOCIAL_ANALYTICS_INSIGHT_TIMEOUT_MS',

@@ -52,7 +52,7 @@ describe('InboxRuntimeConfigService activation safety', () => {
       transcriptionMode: 'disabled',
       decisionMode: 'disabled',
       transcriptionModel: 'gpt-4o-mini-transcribe',
-      decisionModel: 'gpt-5.6-terra',
+      decisionModel: 'gpt-6.1-terra',
       autoReplyEnabled: false,
       autoCrmEnabled: false,
       autoHandoffEnabled: false,

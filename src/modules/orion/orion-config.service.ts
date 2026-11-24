@@ -9,6 +9,11 @@ const KNOWN_PRICES: Record<
 > = {
   'gpt-5.6-terra': { input: 2.5, cached: 0.25, output: 15 },
   'gpt-5.6-luna': { input: 1, cached: 0.1, output: 6 },
+  'gpt-6.2-astra': { input: 8, cached: 0.4, output: 40 },
+  'gpt-6.2-sol': { input: 2, cached: 0.1, output: 10 },
+  'gpt-6.1-sol': { input: 2, cached: 0.1, output: 10 },
+  'gpt-6.1-terra': { input: 1, cached: 0.05, output: 5 },
+  'gpt-6-luna': { input: 0.1, cached: 0.01, output: 0.5 },
 };
 
 /**
@@ -45,7 +50,7 @@ export class OrionConfigService implements OnModuleInit {
 
   readonly apiKey = resolveApiKey(this.endpoint);
 
-  readonly model = process.env.ORION_MODEL?.trim() || 'gpt-5.6-terra';
+  readonly model = process.env.ORION_MODEL?.trim() || 'gpt-6.2-sol';
 
   readonly timeoutMs = boundedInteger(
     'ORION_TIMEOUT_MS',

@@ -30,7 +30,7 @@ export class SocialCopyGenerationConfigService implements OnModuleInit {
 
   readonly apiKey = resolveApiKey(this.endpoint);
 
-  readonly model = process.env.SOCIAL_COPY_GENERATION_MODEL ?? 'gpt-5.6-terra';
+  readonly model = process.env.SOCIAL_COPY_GENERATION_MODEL ?? 'gpt-6.1-terra';
 
   readonly timeoutMs = boundedNumber(
     'SOCIAL_COPY_GENERATION_TIMEOUT_MS',

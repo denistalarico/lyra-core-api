@@ -14,11 +14,11 @@ describe('OrionConfigService', () => {
     const config = new OrionConfigService();
     expect(config.mode).toBe('disabled');
     expect(config.available).toBe(false);
-    expect(config.model).toBe('gpt-5.6-terra');
+    expect(config.model).toBe('gpt-6.2-sol');
     expect(config.tenantMonthlyBudgetUsd).toBe(5);
     expect(config.userHourlyLimit).toBe(30);
     expect(config.teamChatEnabled).toBe(false);
-    expect(config.prices()).toEqual({ input: 2.5, cached: 0.25, output: 15 });
+    expect(config.prices()).toEqual({ input: 2, cached: 0.1, output: 10 });
   });
 
   it('enables Team Chat mentions only with the explicit flag', () => {
@@ -62,7 +62,7 @@ describe('OrionConfigService', () => {
     process.env.ORION_OUTPUT_USD_PER_MILLION = '12';
     expect(new OrionConfigService().prices()).toEqual({
       input: 3,
-      cached: 0.25,
+      cached: 0.1,
       output: 12,
     });
     delete process.env.ORION_INPUT_USD_PER_MILLION;
