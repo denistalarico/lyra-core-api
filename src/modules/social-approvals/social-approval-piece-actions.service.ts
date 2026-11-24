@@ -49,6 +49,11 @@ const OPEN_STATUSES = new Set([
   'awaiting_client',
   'changes_requested',
 ]);
+/** Someone other than the sender still has to answer. */
+const AWAITING_DECISION = new Set([
+  'awaiting_internal_review',
+  'awaiting_client',
+]);
 
 /** AR4: how an avulsa sent from Projects differs from one sent here. */
 export type StandalonePieceOptions = {
@@ -336,7 +341,7 @@ export class SocialApprovalPieceActionsService {
       const probe = await pieces.findOne({
         where: { ...approvalScopeWhere(scope), id: pieceId },
       });
-      if (!probe)
+      if (!probe || probe.deletedAt)
         throw new NotFoundException('Peça não encontrada no contexto atual.');
       if (probe.finishedAt)
         throw new ConflictException('Esta peça já foi finalizada.');
@@ -524,7 +529,99 @@ export class SocialApprovalPieceActionsService {
     return result;
   }
 
-  /** A removed avulsa answers like one that never existed. */
+  /**
+   * Archiving only greys the card out. No request is cancelled and no
+   * observer runs, so the Planner, Projects and the client see nothing new.
+   * `updated_at` is kept, like any presentation change.
+   */
+  async setArchived(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    actorUserId: string,
+    archived: boolean,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const piece = await this.pieceInScope(scope, pieceId, manager);
+      if (Boolean(piece.archivedAt) === archived)
+        return {
+          id: piece.id,
+          archivedAt: piece.archivedAt?.toISOString() ?? null,
+        };
+      const archivedAt = archived ? new Date() : null;
+      await manager
+        .getRepository(SocialApprovalPieceEntity)
+        .createQueryBuilder()
+        .update()
+        .set({ archivedAt, updatedAt: () => '"updated_at"' })
+        .where('id = :id', { id: piece.id })
+        .execute();
+      await this.pieces.recordEvent(
+        manager,
+        { ...scope, pieceId: piece.id, stepId: null, requestId: null },
+        archived ? 'archived' : 'unarchived',
+        { type: 'user', userId: actorUserId },
+        'agency',
+      );
+      return { id: piece.id, archivedAt: archivedAt?.toISOString() ?? null };
+    });
+  }
+
+  /**
+   * Takes the card off every surface for good, as a tombstone (D-31 would
+   * recreate a missing Planner piece). Unlike `withdraw` it cancels nothing,
+   * so a piece still waiting for someone's decision must be withdrawn first;
+   * a finished one can always go. A later send from the Planner brings it back.
+   */
+  async remove(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    actorUserId: string,
+    canOverride: boolean,
+  ) {
+    return this.dataSource.transaction(async (manager) => {
+      const piece = await this.pieceInScope(scope, pieceId, manager);
+      const steps = await manager
+        .getRepository(SocialApprovalStepEntity)
+        .find({ where: { pieceId } });
+      const requestIds = steps
+        .map((step) => step.currentRequestId)
+        .filter((id): id is string => Boolean(id));
+      const requests = requestIds.length
+        ? await manager
+            .getRepository(SocialApprovalRequestEntity)
+            .find({ where: { id: In(requestIds) } })
+        : [];
+      if (
+        !canOverride &&
+        !requests.some((item) => item.requestedByUserId === actorUserId)
+      )
+        throw new ForbiddenException(
+          'Só quem enviou, um Admin ou o Owner pode excluir esta peça.',
+        );
+      const finished =
+        Boolean(piece.finishedAt) || piece.sourceState === 'posted';
+      if (
+        !finished &&
+        requests.some((item) => AWAITING_DECISION.has(item.status))
+      )
+        throw new ConflictException(
+          'Esta peça aguarda uma decisão. Cancele o envio antes de excluir.',
+        );
+      await manager
+        .getRepository(SocialApprovalPieceEntity)
+        .update({ id: piece.id }, { deletedAt: new Date() });
+      await this.pieces.recordEvent(
+        manager,
+        { ...scope, pieceId: piece.id, stepId: null, requestId: null },
+        'deleted',
+        { type: 'user', userId: actorUserId },
+        'agency',
+      );
+      return { id: piece.id, removed: true };
+    });
+  }
+
+  /** A removed avulsa or a deleted card answers like one that never existed. */
   private async pieceInScope(
     scope: CompanyAwareScope,
     pieceId: string,
@@ -535,6 +632,7 @@ export class SocialApprovalPieceActionsService {
       .findOne({ where: { ...approvalScopeWhere(scope), id: pieceId } });
     if (
       !piece ||
+      piece.deletedAt ||
       (piece.kind === 'standalone' && piece.sourceState === 'hidden')
     )
       throw new NotFoundException('Peça não encontrada no contexto atual.');

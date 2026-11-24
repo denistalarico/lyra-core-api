@@ -38,6 +38,7 @@ import {
 import {
   ApprovalTableEditDto,
   ApprovalWorkTasksQueryDto,
+  ArchiveApprovalBoardColumnDto,
   CreateStandalonePieceDto,
   FinishSocialApprovalPieceDto,
   SocialApprovalBoardQueryDto,
@@ -151,7 +152,23 @@ export class SocialApprovalsController {
       ...board,
       preferences,
       canCustomize: permissions.has('social.approvals.settings.manage'),
+      canArchive: permissions.has('social.approvals.review.comment.assigned'),
     };
+  }
+  /** Archives a whole column; only marks the cards (nothing else changes). */
+  @Post('board/archive-column')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  archiveColumn(
+    @RequestContextData() ctx: RequestContext,
+    @Body() dto: ArchiveApprovalBoardColumnDto,
+  ) {
+    return this.board.archiveColumn(ctx, dto, this.actorUserId(ctx));
+  }
+  /** The settings page reads the agency-wide switches without loading a board. */
+  @Get('board/preferences')
+  @RequirePermission('social.approvals.settings.manage')
+  boardPreferencesGet(@RequestContextData() ctx: RequestContext) {
+    return this.boardPreferences.get(resolveCompanyAwareScope(ctx));
   }
   @Patch('board/preferences')
   @RequirePermission('social.approvals.settings.manage')
@@ -260,6 +277,51 @@ export class SocialApprovalsController {
       this.permissionContext(ctx),
     );
     return this.pieceActions.withdraw(
+      resolveCompanyAwareScope(ctx),
+      pieceId,
+      this.actorUserId(ctx),
+      permissions.has(
+        'social.approvals.review.override.owner_or_admin_explicit',
+      ),
+    );
+  }
+  @Post('pieces/:pieceId/archive')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  archivePiece(
+    @RequestContextData() ctx: RequestContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+  ) {
+    return this.pieceActions.setArchived(
+      resolveCompanyAwareScope(ctx),
+      pieceId,
+      this.actorUserId(ctx),
+      true,
+    );
+  }
+  @Post('pieces/:pieceId/unarchive')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  unarchivePiece(
+    @RequestContextData() ctx: RequestContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+  ) {
+    return this.pieceActions.setArchived(
+      resolveCompanyAwareScope(ctx),
+      pieceId,
+      this.actorUserId(ctx),
+      false,
+    );
+  }
+  /** Deletes the card for good without cancelling anything; the service checks the sender. */
+  @Post('pieces/:pieceId/remove')
+  @RequirePermission('social.approvals.review.comment.assigned')
+  async removePiece(
+    @RequestContextData() ctx: RequestContext,
+    @Param('pieceId', ParseUUIDPipe) pieceId: string,
+  ) {
+    const permissions = await this.permissions.getEffectivePermissions(
+      this.permissionContext(ctx),
+    );
+    return this.pieceActions.remove(
       resolveCompanyAwareScope(ctx),
       pieceId,
       this.actorUserId(ctx),

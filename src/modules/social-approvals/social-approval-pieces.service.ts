@@ -305,6 +305,12 @@ export class SocialApprovalPiecesService {
       currentRequestId: request.id,
       isStale: false,
     });
+    // A new send brings an archived or deleted card back: there is work again.
+    await manager.query(
+      `UPDATE "social_approval_pieces" SET "archived_at" = NULL, "deleted_at" = NULL
+        WHERE "id" = $1 AND ("archived_at" IS NOT NULL OR "deleted_at" IS NOT NULL)`,
+      [step.pieceId],
+    );
     await this.recompute(manager, step.pieceId);
   }
 

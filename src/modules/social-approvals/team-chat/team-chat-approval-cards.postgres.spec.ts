@@ -1,4 +1,6 @@
 import { AddSocialApprovalCommentRichContent1803500000000 } from '../../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
+import { CreateSocialApprovalBoardPreferences1803200000000 } from '../../../database/migrations/1803200000000-create-social-approval-board-preferences';
+import { AddSocialApprovalPieceLifecycle1805800000000 } from '../../../database/migrations/1805800000000-add-social-approval-piece-lifecycle';
 import { randomUUID } from 'node:crypto';
 import {
   ConflictException,
@@ -210,6 +212,8 @@ run('AR5 conversations and Team Chat (real PostgreSQL)', () => {
     await new AddSocialApprovalCardCustomization1803300000000().up(runner);
     await new AddSocialApprovalPieceDescription1803400000000().up(runner);
     await new AddSocialApprovalCommentRichContent1803500000000().up(runner);
+    await new CreateSocialApprovalBoardPreferences1803200000000().up(runner);
+    await new AddSocialApprovalPieceLifecycle1805800000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 
@@ -375,7 +379,7 @@ run('AR5 conversations and Team Chat (real PostgreSQL)', () => {
       ...scope,
       title: 'Plano',
       periodStart: '2026-11-01',
-      periodEnd: '2026-11-30',
+      periodEnd: '2099-12-31',
       status: 'draft',
       deletedAt: null,
     } as never)) as unknown as SocialPlanEntity;

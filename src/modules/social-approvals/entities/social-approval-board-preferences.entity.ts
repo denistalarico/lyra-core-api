@@ -52,6 +52,9 @@ export class SocialApprovalBoardPreferencesEntity {
   stages!: Partial<
     Record<SocialApprovalBoardColumn, SocialApprovalStagePreference>
   >;
+  /** Deletes finished cards 60 days after finishing (archiving at 30 is always on). */
+  @Column({ name: 'auto_delete_finished', type: 'boolean', default: false })
+  autoDeleteFinished!: boolean;
   @Column({ name: 'updated_by_user_id', type: 'uuid', nullable: true })
   updatedByUserId!: string | null;
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })

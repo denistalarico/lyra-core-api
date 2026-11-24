@@ -15,6 +15,7 @@ export type ApprovalBoardPreferences = {
   stages: Partial<
     Record<SocialApprovalBoardColumn, SocialApprovalStagePreference>
   >;
+  autoDeleteFinished: boolean;
 };
 
 /** Saved columns first, in their saved order; any column not saved keeps its default place. */
@@ -45,6 +46,7 @@ export class SocialApprovalBoardPreferencesService {
     return {
       order: normalizeStageOrder(row?.stageOrder ?? []),
       stages: row?.stages ?? {},
+      autoDeleteFinished: row?.autoDeleteFinished ?? false,
     };
   }
 
@@ -65,11 +67,12 @@ export class SocialApprovalBoardPreferencesService {
       : {};
     await this.preferences.query(
       `INSERT INTO "social_approval_board_preferences"
-         ("tenant_id", "workspace_id", "stage_order", "stages", "updated_by_user_id")
-       VALUES ($1, $2, COALESCE($3::jsonb, '[]'::jsonb), $4::jsonb, $5)
+         ("tenant_id", "workspace_id", "stage_order", "stages", "auto_delete_finished", "updated_by_user_id")
+       VALUES ($1, $2, COALESCE($3::jsonb, '[]'::jsonb), $4::jsonb, COALESCE($6::boolean, false), $5)
        ON CONFLICT ("tenant_id", "workspace_id") DO UPDATE SET
          "stage_order" = COALESCE($3::jsonb, "social_approval_board_preferences"."stage_order"),
          "stages" = "social_approval_board_preferences"."stages" || $4::jsonb,
+         "auto_delete_finished" = COALESCE($6::boolean, "social_approval_board_preferences"."auto_delete_finished"),
          "updated_by_user_id" = $5,
          "updated_at" = now()`,
       [
@@ -78,6 +81,7 @@ export class SocialApprovalBoardPreferencesService {
         order ? JSON.stringify(order) : null,
         JSON.stringify(stage),
         actorUserId,
+        dto.autoDeleteFinished ?? null,
       ],
     );
     return this.get(scope);

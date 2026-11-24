@@ -104,6 +104,12 @@ export class SocialApprovalPieceEntity {
   finishedByUserId!: string | null;
   @Column({ name: 'finish_reason', type: 'text', nullable: true })
   finishReason!: string | null;
+  /** Greyed out on the board; touches nothing else (manual, or 30 days after finishing). */
+  @Column({ name: 'archived_at', type: 'timestamptz', nullable: true })
+  archivedAt!: Date | null;
+  /** Tombstone: off every surface, kept so the sync (D-31) never recreates it. */
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt!: Date | null;
   @Column({ name: 'card_color', type: 'varchar', length: 16, default: 'none' })
   cardColor!: SocialApprovalStageColor;
   @Column({ type: 'jsonb', default: () => `'[]'` }) tags!: string[];

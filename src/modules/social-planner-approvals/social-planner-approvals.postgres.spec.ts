@@ -1,4 +1,6 @@
 import { AddSocialApprovalCommentRichContent1803500000000 } from '../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
+import { CreateSocialApprovalBoardPreferences1803200000000 } from '../../database/migrations/1803200000000-create-social-approval-board-preferences';
+import { AddSocialApprovalPieceLifecycle1805800000000 } from '../../database/migrations/1805800000000-add-social-approval-piece-lifecycle';
 import { randomUUID } from 'node:crypto';
 import { DataSource, type DataSourceOptions } from 'typeorm';
 import type { CompanyAwareScope } from '../../common/context/company-aware-scope';
@@ -168,6 +170,8 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
     await new AddSocialApprovalCardCustomization1803300000000().up(runner);
     await new AddSocialApprovalPieceDescription1803400000000().up(runner);
     await new AddSocialApprovalCommentRichContent1803500000000().up(runner);
+    await new CreateSocialApprovalBoardPreferences1803200000000().up(runner);
+    await new AddSocialApprovalPieceLifecycle1805800000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 
@@ -339,7 +343,7 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
       ...scope,
       title: 'Plano Dezembro',
       periodStart: '2026-12-01',
-      periodEnd: '2026-12-31',
+      periodEnd: '2099-12-31',
       status: 'draft',
       deletedAt: null,
     } as never)) as unknown as SocialPlanEntity;
@@ -526,7 +530,7 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
           name: 'Natal',
           objective: 'Vendas',
           startsOn: '2026-12-01',
-          endsOn: '2026-12-25',
+          endsOn: '2099-12-25',
           status: 'planned',
         } as never)) as unknown as SocialCampaignInstanceEntity;
       await item(id, scopeA, {
@@ -547,7 +551,7 @@ run('AR3 Planner send and client text edit (real PostgreSQL)', () => {
       expect(payload.summary).toEqual(
         expect.arrayContaining([
           { label: 'Campanha', value: 'Natal' },
-          { label: 'Período', value: '01/12/2026 a 25/12/2026' },
+          { label: 'Período', value: '01/12/2026 a 25/12/2099' },
         ]),
       );
     });

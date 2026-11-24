@@ -46,6 +46,10 @@ import { SocialApprovalsService } from './social-approvals.service';
 import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
 
 const DEFAULT_LIMIT = 30;
+const AWAITING_DECISION = new Set([
+  'awaiting_internal_review',
+  'awaiting_client',
+]);
 const ACTIVE_STATUSES = new Set([
   'draft',
   'awaiting_internal_review',
@@ -175,12 +179,14 @@ export class SocialApprovalBoardService {
         const qb = base
           .clone()
           .andWhere('piece.boardColumn = :column', { column });
+        // Archived cards sink to the end of their column, greyed out.
+        qb.orderBy('piece.archivedAt', 'ASC', 'NULLS FIRST');
         if (column === 'preparation')
-          qb.orderBy('item.plannedDate', 'ASC', 'NULLS LAST').addOrderBy(
+          qb.addOrderBy('item.plannedDate', 'ASC', 'NULLS LAST').addOrderBy(
             'piece.updatedAt',
             'DESC',
           );
-        else qb.orderBy('piece.updatedAt', 'DESC');
+        else qb.addOrderBy('piece.updatedAt', 'DESC');
         const { entities, raw } = await qb
           .addOrderBy('piece.id', 'DESC')
           .limit(limit)
@@ -204,6 +210,62 @@ export class SocialApprovalBoardService {
       }),
     );
     return { columns: result };
+  }
+
+  /**
+   * Archives every card a column shows under the same filters, loaded or
+   * not. Like a single archive it only marks the cards (nothing in the
+   * Planner, Projects or the client changes) and keeps `updated_at`.
+   */
+  async archiveColumn(
+    ctx: RequestContext,
+    query: SocialApprovalBoardQueryDto & { column: SocialApprovalBoardColumn },
+    actorUserId: string,
+  ) {
+    const scope = resolveCompanyAwareScope(ctx);
+    const { includeOwn, companies } = await this.contexts(ctx, scope, query);
+    if (!includeOwn && companies.length === 0) return { archived: 0 };
+    const targets = await this.baseQuery(scope, includeOwn, companies, query)
+      .andWhere('piece.boardColumn = :column', { column: query.column })
+      .andWhere('piece.archivedAt IS NULL')
+      .select([
+        'piece.id',
+        'piece.tenantId',
+        'piece.workspaceId',
+        'piece.agencyClientId',
+        'piece.companyContextId',
+      ])
+      .getMany();
+    if (targets.length === 0) return { archived: 0 };
+    await this.pieces.manager.transaction(async (manager) => {
+      await manager
+        .getRepository(SocialApprovalPieceEntity)
+        .createQueryBuilder()
+        .update()
+        .set({ archivedAt: () => 'now()', updatedAt: () => '"updated_at"' })
+        .where('id IN (:...ids) AND archived_at IS NULL', {
+          ids: targets.map((piece) => piece.id),
+        })
+        .execute();
+      for (const piece of targets)
+        await this.domain.recordEvent(
+          manager,
+          {
+            tenantId: piece.tenantId,
+            workspaceId: piece.workspaceId,
+            agencyClientId: piece.agencyClientId,
+            companyContextId: piece.companyContextId,
+            pieceId: piece.id,
+            stepId: null,
+            requestId: null,
+          },
+          'archived',
+          { type: 'user', userId: actorUserId },
+          'agency',
+          { column: query.column },
+        );
+    });
+    return { archived: targets.length };
   }
 
   /** `source_state = 'hidden'` is what makes archiving take a card away. */
@@ -248,6 +310,7 @@ export class SocialApprovalBoardService {
         },
       )
       .andWhere(`piece.sourceState <> 'hidden'`)
+      .andWhere('piece.deletedAt IS NULL')
       .andWhere(
         new Brackets((where) => {
           if (includeOwn)
@@ -343,6 +406,17 @@ export class SocialApprovalBoardService {
         const standalone = piece.kind === 'standalone';
         const closedSource =
           !standalone && (piece.finishedAt || piece.sourceState === 'posted');
+        const finished =
+          Boolean(piece.finishedAt) || piece.sourceState === 'posted';
+        const sender =
+          has('social.approvals.review.override.owner_or_admin_explicit') ||
+          current.some((item) => item.requestedByUserId === reader?.userId);
+        const anyPending = pieceSteps.some((step) => {
+          const request = step.currentRequestId
+            ? requestById.get(step.currentRequestId)
+            : undefined;
+          return !(request?.status === 'approved' && !step.isStale);
+        });
         const withThumbnail = pieceSteps.find(
           (step) =>
             step.currentRequestId && thumbnails.has(step.currentRequestId),
@@ -407,6 +481,21 @@ export class SocialApprovalBoardService {
                 )) &&
               (standalone || current.length > 0) &&
               !closedSource,
+            canArchive: has('social.approvals.review.comment.assigned'),
+            // Deleting cancels nothing: a card waiting for a decision is withdrawn first.
+            canRemove:
+              has('social.approvals.review.comment.assigned') &&
+              sender &&
+              (finished ||
+                !current.some((item) => AWAITING_DECISION.has(item.status))),
+            canFinish:
+              !finished &&
+              has(
+                anyPending
+                  ? 'social.approvals.review.agency_override.owner'
+                  : 'social.approvals.review.approve_internal.manager',
+              ),
+            finishRequiresOverride: anyPending,
           },
           contentType: raw[index]?.content_type ?? null,
           creativeFormat: raw[index]?.creative_format ?? null,
@@ -415,6 +504,7 @@ export class SocialApprovalBoardService {
           planTitle: raw[index]?.plan_title ?? null,
           campaignName: raw[index]?.campaign_name ?? null,
           finishedAt: piece.finishedAt?.toISOString() ?? null,
+          archivedAt: piece.archivedAt?.toISOString() ?? null,
           lastActivityAt: piece.updatedAt.toISOString(),
           context:
             piece.agencyClientId === null
@@ -438,6 +528,7 @@ export class SocialApprovalBoardService {
     });
     if (
       !piece ||
+      piece.deletedAt ||
       (piece.kind === 'standalone' && piece.sourceState === 'hidden')
     )
       throw new NotFoundException('Peça não encontrada no contexto atual.');
@@ -563,6 +654,7 @@ export class SocialApprovalBoardService {
       sourceState: piece.sourceState,
       finishedAt: piece.finishedAt?.toISOString() ?? null,
       finishReason: piece.finishReason,
+      archivedAt: piece.archivedAt?.toISOString() ?? null,
       post: await approvalPiecePost(this.pieces.manager, piece),
       steps: detailed,
       versions: approvalPieceVersions(history),
@@ -602,6 +694,7 @@ export class SocialApprovalBoardService {
     });
     if (
       !piece ||
+      piece.deletedAt ||
       (piece.kind === 'standalone' && piece.sourceState === 'hidden')
     )
       throw new NotFoundException('Peça não encontrada no contexto atual.');

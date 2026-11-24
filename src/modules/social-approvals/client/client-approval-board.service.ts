@@ -103,6 +103,7 @@ export class ClientApprovalBoardService {
       .createQueryBuilder('piece')
       .where(approvalScopeWhere(source.scope))
       .andWhere(`piece.sourceState <> 'hidden'`)
+      .andWhere('piece.deletedAt IS NULL')
       .andWhere(source.visibleSql);
   }
 

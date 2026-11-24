@@ -156,6 +156,59 @@ const APPROVED_SNAPSHOT_STEPS = `
      AND request.status = 'approved' AND request.subject_type = 'approval_snapshot'
      AND snapshot.kind IN ('table','media_set')`;
 
+/** Days after finishing: archived always, deleted only when the agency opts in. */
+export const ARCHIVE_FINISHED_AFTER_DAYS = 30;
+export const DELETE_FINISHED_AFTER_DAYS = 60;
+export const PLAN_PERIOD_ENDED_REASON = 'Prazo do planejamento encerrado';
+
+const LIFECYCLE_RETURNING = `RETURNING piece.id, piece.tenant_id, piece.workspace_id, piece.agency_client_id, piece.company_context_id`;
+
+/**
+ * A Planner piece is finished once its plan (or campaign) period is over,
+ * e.g. when the month turns. Only the card: requests and decisions stay as
+ * they are, and no observer runs, so nothing changes in the Planner.
+ */
+const FINISH_EXPIRED = `UPDATE "social_approval_pieces" piece
+    SET "finished_at" = now(), "finish_reason" = '${PLAN_PERIOD_ENDED_REASON}', "updated_at" = now()
+   FROM (${PIECES_IN_CONTEXT}) scoped
+   LEFT JOIN "social_content_items" i ON scoped.kind = 'content_item' AND i.id = scoped.source_id
+   LEFT JOIN "social_plans" p
+     ON p.id = CASE WHEN scoped.kind = 'plan_table' THEN scoped.source_id ELSE i.plan_id END
+   LEFT JOIN "social_campaign_instances" c ON scoped.kind = 'campaign_table' AND c.id = scoped.source_id
+  WHERE piece.id = scoped.id AND piece.source_id IS NOT NULL
+    AND piece.finished_at IS NULL AND piece.deleted_at IS NULL AND piece.source_state = 'active'
+    AND COALESCE(c.ends_on, p.period_end) < (now() AT TIME ZONE 'America/Sao_Paulo')::date
+  ${LIFECYCLE_RETURNING}`;
+
+/** A posted piece has no finish date: its last change stands in for it. */
+const FINISHED_FOR = (days: number) =>
+  `piece.board_column = 'finished' AND piece.deleted_at IS NULL
+   AND COALESCE(piece.finished_at, piece.updated_at) < now() - interval '${days} days'`;
+
+const ARCHIVE_AGED = `UPDATE "social_approval_pieces" piece
+    SET "archived_at" = now()
+   FROM (${PIECES_IN_CONTEXT}) scoped
+  WHERE piece.id = scoped.id AND piece.archived_at IS NULL
+    AND ${FINISHED_FOR(ARCHIVE_FINISHED_AFTER_DAYS)}
+  ${LIFECYCLE_RETURNING}`;
+
+const DELETE_AGED = `UPDATE "social_approval_pieces" piece
+    SET "deleted_at" = now()
+   FROM (${PIECES_IN_CONTEXT}) scoped
+   JOIN "social_approval_board_preferences" preference
+     ON preference.tenant_id = scoped.tenant_id AND preference.workspace_id = scoped.workspace_id
+    AND preference.auto_delete_finished = true
+  WHERE piece.id = scoped.id AND ${FINISHED_FOR(DELETE_FINISHED_AFTER_DAYS)}
+  ${LIFECYCLE_RETURNING}`;
+
+type LifecycleRow = {
+  id: string;
+  tenant_id: string;
+  workspace_id: string;
+  agency_client_id: string | null;
+  company_context_id: string | null;
+};
+
 type ApprovedSnapshotRow = {
   step_id: string;
   is_stale: boolean;
@@ -206,13 +259,62 @@ export class SocialApprovalPieceSyncService {
       UNPROJECTED,
       parameters,
     );
+    const expired = await this.lifecycle(
+      FINISH_EXPIRED,
+      parameters,
+      'finished',
+      {
+        reason: PLAN_PERIOD_ENDED_REASON,
+      },
+    );
+    await this.lifecycle(ARCHIVE_AGED, parameters, 'archived', {
+      afterDays: ARCHIVE_FINISHED_AFTER_DAYS,
+    });
+    await this.lifecycle(DELETE_AGED, parameters, 'deleted', {
+      afterDays: DELETE_FINISHED_AFTER_DAYS,
+    });
     await this.pieces.recomputeMany([
       ...new Set([
         ...changed.map((row) => row.id),
         ...unprojected.map((row) => row.id),
+        ...expired,
         ...(await this.refreshSnapshotStaleness(parameters)),
       ]),
     ]);
+  }
+
+  /**
+   * One idempotent statement per rule, then the trail. The UPDATE only
+   * matches rows not yet marked, so a repeated read records nothing twice.
+   */
+  private async lifecycle(
+    statement: string,
+    parameters: unknown[],
+    type: 'finished' | 'archived' | 'deleted',
+    metadata: Record<string, unknown>,
+  ): Promise<string[]> {
+    const [rows] = await this.dataSource.query<[LifecycleRow[], number]>(
+      statement,
+      parameters,
+    );
+    for (const row of rows)
+      await this.pieces.recordEvent(
+        this.dataSource.manager,
+        {
+          tenantId: row.tenant_id,
+          workspaceId: row.workspace_id,
+          agencyClientId: row.agency_client_id,
+          companyContextId: row.company_context_id,
+          pieceId: row.id,
+          stepId: null,
+          requestId: null,
+        },
+        type,
+        undefined,
+        'system',
+        { automatic: true, ...metadata },
+      );
+    return rows.map((row) => row.id);
   }
 
   /** D-20 for one context, without the rest of the sync (the send screens). */

@@ -40,6 +40,20 @@ export class SocialApprovalBoardQueryDto {
   @IsOptional() @IsString() @MaxLength(120) search?: string;
 }
 
+/** The column to archive, under the same filters the board is showing. */
+export class ArchiveApprovalBoardColumnDto {
+  @IsIn(SOCIAL_APPROVAL_BOARD_COLUMNS) column!: SocialApprovalBoardColumn;
+  @IsOptional() @IsIn(['all', 'own', 'managed']) scope?:
+    | 'all'
+    | 'own'
+    | 'managed';
+  @IsOptional() @IsUUID() clientId?: string;
+  @IsOptional() @IsUUID() planId?: string;
+  @IsOptional() @IsUUID() campaignId?: string;
+  @IsOptional() @IsIn(SOCIAL_APPROVAL_PIECE_KINDS) kind?: string;
+  @IsOptional() @IsString() @MaxLength(120) search?: string;
+}
+
 export class UpdateApprovalBoardStageDto {
   @IsIn(SOCIAL_APPROVAL_BOARD_COLUMNS) column!: SocialApprovalBoardColumn;
   @IsIn(SOCIAL_APPROVAL_STAGE_COLORS) color!: SocialApprovalStageColor;
@@ -56,6 +70,7 @@ export class UpdateApprovalBoardPreferencesDto {
   @ValidateNested()
   @Type(() => UpdateApprovalBoardStageDto)
   stage?: UpdateApprovalBoardStageDto;
+  @IsOptional() @IsBoolean() autoDeleteFinished?: boolean;
 }
 
 export class ApprovalCardDisplayDto {

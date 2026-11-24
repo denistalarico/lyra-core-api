@@ -1,6 +1,8 @@
 import { SocialApprovalFeedbackService } from './social-approval-feedback.service';
 import { buildClientApprovalHistory } from './client/client-approval.view';
 import { AddSocialApprovalCommentRichContent1803500000000 } from '../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
+import { CreateSocialApprovalBoardPreferences1803200000000 } from '../../database/migrations/1803200000000-create-social-approval-board-preferences';
+import { AddSocialApprovalPieceLifecycle1805800000000 } from '../../database/migrations/1805800000000-add-social-approval-piece-lifecycle';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { DataSource, type DataSourceOptions } from 'typeorm';
@@ -196,6 +198,8 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
     await new AddSocialApprovalCardCustomization1803300000000().up(runner);
     await new AddSocialApprovalPieceDescription1803400000000().up(runner);
     await new AddSocialApprovalCommentRichContent1803500000000().up(runner);
+    await new CreateSocialApprovalBoardPreferences1803200000000().up(runner);
+    await new AddSocialApprovalPieceLifecycle1805800000000().up(runner);
     await runner.release();
     await bootstrap.destroy();
 
@@ -347,7 +351,7 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       ...scope,
       title,
       periodStart: '2026-11-01',
-      periodEnd: '2026-11-30',
+      periodEnd: '2099-12-31',
       status: 'draft',
       deletedAt: null,
     } as never);
@@ -1297,6 +1301,160 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
         expect(after.cardColor).toBe('rose');
         expect(after.tags).toEqual(['Urgente', 'Natal']);
         expect(after.cardDisplay).toEqual({ thumbnail: false });
+      });
+
+      it('archiving only greys the card: requests and the item stay as they are', async () => {
+        const { item, request } = await awaitingClient(scopeA);
+        const before = await pieceOf(item.id);
+        await actions.setArchived(scopeA, before.id, operator, true);
+        const after = await pieceOf(item.id);
+        expect(after.archivedAt).not.toBeNull();
+        expect(after.updatedAt).toEqual(before.updatedAt);
+        expect(after.boardColumn).toBe(before.boardColumn);
+        expect(
+          (
+            await db
+              .getRepository(SocialApprovalRequestEntity)
+              .findOneByOrFail({ id: request.id })
+          ).status,
+        ).toBe('awaiting_client');
+        expect(
+          await db
+            .getRepository(SocialContentItemEntity)
+            .findOneByOrFail({ id: item.id }),
+        ).toMatchObject({ archivedAt: null, deletedAt: null });
+        await actions.setArchived(scopeA, before.id, operator, false);
+        expect((await pieceOf(item.id)).archivedAt).toBeNull();
+      });
+
+      it('deleting cancels nothing, so a card awaiting a decision is refused', async () => {
+        const { item } = await awaitingClient(scopeA);
+        const piece = await pieceOf(item.id);
+        await expect(
+          actions.remove(scopeA, piece.id, operator, false),
+        ).rejects.toMatchObject({ status: 409 });
+      });
+
+      it('a finished card is deleted for good: off both boards, 404, never recreated', async () => {
+        const { item, request } = await awaitingClient(scopeA);
+        await approvals.clientApprove(
+          scopeA,
+          request.id,
+          clientUser(clientOwner),
+        );
+        const piece = await pieceOf(item.id);
+        await actions.finish(scopeA, piece.id, ownerUser, undefined, () =>
+          Promise.resolve(),
+        );
+        await actions.remove(scopeA, piece.id, ownerUser, true);
+        await sync.syncContexts(scopeA, [
+          { clientId: clientA, companyContextId: companyA },
+        ]);
+        expect(await boardIds()).not.toContain(piece.id);
+        expect(
+          await db
+            .getRepository(SocialApprovalPieceEntity)
+            .countBy({ kind: 'content_item', sourceId: item.id }),
+        ).toBe(1);
+        expect((await pieceOf(item.id)).deletedAt).not.toBeNull();
+        await expect(
+          board.pieceDetail(scopeA, piece.id, {
+            userId: ownerUser,
+            role: 'owner',
+            permissions: new Set(),
+          }),
+        ).rejects.toMatchObject({ status: 404 });
+        expect(
+          (
+            await db
+              .getRepository(SocialApprovalRequestEntity)
+              .findOneByOrFail({ id: request.id })
+          ).status,
+        ).toBe('approved');
+      });
+
+      it('a new send brings an archived card back', async () => {
+        const { item, revision, request } = await awaitingClient(scopeA);
+        const piece = await pieceOf(item.id);
+        await actions.setArchived(scopeA, piece.id, operator, true);
+        await actions.withdraw(scopeA, piece.id, operator, false);
+        const again = await approvals.create(scopeA, operator, {
+          subjectType: 'planner_content_revision',
+          subjectId: item.id,
+          subjectRevisionId: revision.id,
+        });
+        expect(again.id).not.toBe(request.id);
+        expect((await pieceOf(item.id)).archivedAt).toBeNull();
+      });
+
+      it('an ended plan finishes its cards without touching the requests', async () => {
+        const { item, request } = await awaitingClient(scopeA);
+        await db.getRepository(SocialPlanEntity).update(item.planId, {
+          periodStart: '2020-01-01',
+          periodEnd: '2020-01-31',
+        });
+        await sync.syncContexts(scopeA, [
+          { clientId: clientA, companyContextId: companyA },
+        ]);
+        const piece = await pieceOf(item.id);
+        expect(piece).toMatchObject({
+          boardColumn: 'finished',
+          finishReason: 'Prazo do planejamento encerrado',
+          finishedByUserId: null,
+        });
+        expect(
+          (
+            await db
+              .getRepository(SocialApprovalRequestEntity)
+              .findOneByOrFail({ id: request.id })
+          ).status,
+        ).toBe('awaiting_client');
+      });
+
+      it('finished cards archive after 30 days and delete after 60 only when opted in', async () => {
+        const { item } = await contentRevision(scopeA);
+        await sync.syncContexts(scopeA, [
+          { clientId: clientA, companyContextId: companyA },
+        ]);
+        const piece = await pieceOf(item.id);
+        const daysAgo = (days: number) =>
+          new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        const age = (days: number) =>
+          db.getRepository(SocialApprovalPieceEntity).update(piece.id, {
+            finishedAt: daysAgo(days),
+            boardColumn: 'finished',
+          });
+        const read = () =>
+          sync.syncContexts(scopeA, [
+            { clientId: clientA, companyContextId: companyA },
+          ]);
+
+        await age(10);
+        await read();
+        expect((await pieceOf(item.id)).archivedAt).toBeNull();
+
+        await age(31);
+        await read();
+        expect((await pieceOf(item.id)).archivedAt).not.toBeNull();
+
+        await age(61);
+        await read();
+        expect((await pieceOf(item.id)).deletedAt).toBeNull();
+
+        await db.query(
+          `INSERT INTO social_approval_board_preferences (tenant_id, workspace_id, auto_delete_finished)
+           VALUES ($1, $2, true)
+           ON CONFLICT (tenant_id, workspace_id) DO UPDATE SET auto_delete_finished = true`,
+          [tenantId, workspaceId],
+        );
+        try {
+          await read();
+          expect((await pieceOf(item.id)).deletedAt).not.toBeNull();
+        } finally {
+          await db.query(
+            `UPDATE social_approval_board_preferences SET auto_delete_finished = false`,
+          );
+        }
       });
 
       it('marks a rejection without a new status (D-12)', async () => {
