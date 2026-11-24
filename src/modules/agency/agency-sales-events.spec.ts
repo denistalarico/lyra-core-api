@@ -284,6 +284,32 @@ describe('AgencySalesService events (AG-EVT)', () => {
     expect(reopenedNote).toBeUndefined();
   });
 
+  it('edits a lost card (color, owner) resending its status without the reason, and still requires it to enter lost', async () => {
+    const lost = setup();
+    await lost.service.loseOpportunity(context, OPP, {
+      lostReason: 'Preço',
+    } as never);
+    const saved = await lost.service.updateOpportunity(context, OPP, {
+      title: FICTITIOUS_TITLE,
+      pipelineId: 'p1',
+      stageId: 'st-lost',
+      status: 'lost',
+      metadata: { crm: { cardColor: 'blue' } },
+    } as never);
+    expect(saved).toMatchObject({
+      status: 'lost',
+      lostReason: 'Preço',
+      metadata: { crm: { cardColor: 'blue' } },
+    });
+
+    const open = setup();
+    await expect(
+      open.service.updateOpportunity(context, OPP, {
+        status: 'lost',
+      } as never),
+    ).rejects.toThrow('Loss reason is required.');
+  });
+
   it('archives, and records value or owner changes but not title edits', async () => {
     const archived = setup();
     await archived.service.updateOpportunity(context, OPP, {

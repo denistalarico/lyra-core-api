@@ -1523,24 +1523,27 @@ export class AgencySalesService {
     const { metadata, lostNote, ...opportunityPatch } = dto;
     const lostReason = dto.lostReason?.trim();
 
-    if (dto.status === 'lost' && !lostReason) {
+    const current =
+      dto.status && (metadata === undefined || !lostReason)
+        ? await this.opportunitiesRepo.findOne({
+            where: {
+              id,
+              tenantId: context.tenantId,
+              workspaceId: context.workspaceId,
+            },
+          })
+        : null;
+
+    // O motivo é exigido só ao entrar em "perdida". Uma edição que só reenvia
+    // o status atual (cor, responsável) mantém o motivo já gravado.
+    if (dto.status === 'lost' && !lostReason && current?.status !== 'lost') {
       throw new BadRequestException('Loss reason is required.');
     }
 
     // A nota da perda vive no metadata: sem metadata no corpo, parte do atual
     // para não sobrescrever o resto.
     const baseMetadata =
-      dto.status && metadata === undefined
-        ? (
-            await this.opportunitiesRepo.findOne({
-              where: {
-                id,
-                tenantId: context.tenantId,
-                workspaceId: context.workspaceId,
-              },
-            })
-          )?.metadata
-        : metadata;
+      dto.status && metadata === undefined ? current?.metadata : metadata;
     const touchesLossNote =
       dto.status === 'lost'
         ? lostNote !== undefined
