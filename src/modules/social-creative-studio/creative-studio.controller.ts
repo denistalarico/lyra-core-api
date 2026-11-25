@@ -325,11 +325,17 @@ export class CreativeStudioController {
   ) {
     return this.assets.restore(creativeStudioScope(ctx), id);
   }
+  // F3 (2026-11-24): Settings › Armazenamento in the Client Area. The row is
+  // keyed by (tenant, workspace, agencyClient, companyContext), so the Bridge's
+  // forced company writes only that company's retention. PUT carries the
+  // dangerous DELETE key, projected to the company's Owner only.
+  @ClientAreaExposed('social_creative_studio')
   @Get('retention')
   @RequirePermission(VIEW)
   retention(@RequestContextData() ctx: RequestContext) {
     return this.settings.retention(creativeStudioScope(ctx));
   }
+  @ClientAreaExposed('social_creative_studio')
   @Put('retention')
   @RequirePermission(DELETE)
   updateRetention(

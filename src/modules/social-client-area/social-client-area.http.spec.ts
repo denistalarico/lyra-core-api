@@ -353,7 +353,8 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
     // +2 (2026-11-17): calendar/content list + create (view.client / create.manager, like plans/:id/content).
     // +1 (2026-11-20, GA-DET): Google campaign details (view.client, read-only).
     // +7 (2026-11-24, F2): Planner deletes (Owner only) and Studio archive/delete/restore.
-    expect(exposed).toHaveLength(138);
+    // +2 (2026-11-24, F3): Studio retention GET/PUT (Settings › Armazenamento, level manager).
+    expect(exposed).toHaveLength(140);
     levels('viewer');
     for (const route of exposed) {
       const at = `${route.verb} ${route.path}`;

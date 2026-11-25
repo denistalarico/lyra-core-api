@@ -22,7 +22,8 @@ describe('CA10 Social routes on the Surface Bridge', () => {
   it('keeps the decorator opt-ins and the adapter table identical, module by module', () => {
     // +1 (2026-11-20, GA-DET): GET social/campaigns/google/campaigns/:campaignId/details.
     // +7 (2026-11-24, F2): Planner deletes (4) and Studio archive/delete/restore (3).
-    expect(ca10).toHaveLength(138);
+    // +2 (2026-11-24, F3): Studio retention GET/PUT (Settings › Armazenamento, level manager).
+    expect(ca10).toHaveLength(140);
     // +1 (2026-11-20, AN-CRM): GET social/analytics/crm-leads (Owner only).
     expect(analytics).toHaveLength(36);
     expect(

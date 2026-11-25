@@ -382,6 +382,11 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
   [`POST ${C}/assets/:id/archive`]: studio({ subject: asset, manager: true }),
   [`DELETE ${C}/assets/:id`]: studio({ subject: asset, manager: true }),
   [`POST ${C}/assets/:id/restore`]: studio({ subject: asset, manager: true }),
+  // F3 (2026-11-24): Settings › Armazenamento. The settings row is keyed by
+  // the forced company; Owner and Studio Manager read it, the projection gives
+  // the PUT key (`…delete.owner_or_admin_explicit`) to the Owner only.
+  [`GET ${C}/retention`]: studio({ manager: true }),
+  [`PUT ${C}/retention`]: studio({ manager: true }),
   [`GET ${C}/folders`]: studio(),
   [`POST ${C}/folders`]: studio({ body: { parentId: 'folder' } }),
   [`PATCH ${C}/folders/:id`]: studio({

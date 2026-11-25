@@ -200,10 +200,12 @@ function projectSocialPermissions(
         : []),
       // F2: POST archive/restore, DELETE to the trash or permanently. A
       // dangerous key in the catalog, so the Owner only (CA7 boundary).
+      // F3 (2026-11-24): PUT = the company's upload retention (Armazenamento).
       ...(level === 'manager' && accountRole === 'client_owner'
         ? [
             grant('social.creative.content.delete.owner_or_admin_explicit', [
               'POST',
+              'PUT',
               'DELETE',
             ]),
           ]
