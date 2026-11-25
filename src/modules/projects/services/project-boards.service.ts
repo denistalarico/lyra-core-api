@@ -1,5 +1,5 @@
 import {
-  CLIENT_AREA_CLIENT_SQL,
+  clientAreaClientFilter,
   clientProjectWhere,
   type ProjectRequestContext,
 } from '../client-area/projects-client-area.context';
@@ -318,9 +318,11 @@ export class ProjectBoardsService {
         workspaceId: context.workspaceId,
       })
       .andWhere('task.archived_at IS NULL')
-      .andWhere(context.clientArea ? CLIENT_AREA_CLIENT_SQL('task.client_id') : '1=1', {
-        clientAreaId: context.clientArea?.agencyClientId,
-      })
+      .andWhere(
+        ...(context.clientArea
+          ? clientAreaClientFilter('task.client_id', context)
+          : (['1=1', {}] as [string, Record<string, unknown>])),
+      )
       .andWhere(
         context.clientArea
           ? "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)"
@@ -367,9 +369,11 @@ export class ProjectBoardsService {
         workspaceId: context.workspaceId,
       })
       .andWhere('task.archived_at IS NULL')
-      .andWhere(context.clientArea ? CLIENT_AREA_CLIENT_SQL('task.client_id') : '1=1', {
-        clientAreaId: context.clientArea?.agencyClientId,
-      })
+      .andWhere(
+        ...(context.clientArea
+          ? clientAreaClientFilter('task.client_id', context)
+          : (['1=1', {}] as [string, Record<string, unknown>])),
+      )
       .andWhere(
         context.clientArea
           ? "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)"

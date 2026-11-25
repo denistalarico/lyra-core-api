@@ -1,5 +1,7 @@
-import { IsNull } from 'typeorm';
-import { clientProjectWhere } from '../projects/client-area/projects-client-area.context';
+import {
+  clientAreaClientFilter,
+  clientProjectWhere,
+} from '../projects/client-area/projects-client-area.context';
 import { clientAreaUiPermissions } from './client-area-agency-permission-projection';
 import { clientAreaSelfSettingsUiPermissions } from './client-area-settings-ui-permissions';
 import {
@@ -39,11 +41,7 @@ describe('CA15 self modules', () => {
       'social_planner',
     ]);
     const all = resolveSelfMemberAccess(true, new Set(['social', 'leadflow']));
-    for (const key of [
-      'conversations',
-      'agency_billing',
-      'analytics',
-    ] as const)
+    for (const key of ['conversations', 'agency_billing', 'analytics'] as const)
       expect(all[key]).toMatchObject({
         available: false,
         reason: 'company_bound',
@@ -86,14 +84,41 @@ describe('CA15 self modules', () => {
   });
 
   it('confines the self Projects scope to internal projects (D-CA15-2)', () => {
+    const self = {
+      tenantId: 't',
+      workspaceId: 'w',
+      userId: 'u',
+      clientArea: { agencyClientId: null },
+    };
+    // 2026-11-25: internal = no client or the agency's own contact.
+    const where = clientProjectWhere(self) as {
+      clientId: {
+        type: string;
+        getSql?: (alias: string) => string;
+        objectLiteralParameters?: Record<string, unknown>;
+      };
+    };
+    expect(where.clientId.type).toBe('raw');
+    expect(where.clientId.getSql?.('p.client_id')).toContain(
+      'p.client_id IS NULL OR p.client_id IN (SELECT own_contact.id FROM contacts own_contact',
+    );
+    expect(where.clientId.objectLiteralParameters).toEqual({
+      clientAreaTenantId: 't',
+      clientAreaWorkspaceId: 'w',
+      clientAreaSelfSource: 'agency_self',
+    });
+    expect(clientAreaClientFilter('task.client_id', self)[1]).toEqual(
+      where.clientId.objectLiteralParameters,
+    );
     expect(
-      clientProjectWhere({
-        tenantId: 't',
-        workspaceId: 'w',
-        userId: 'u',
-        clientArea: { agencyClientId: null },
+      clientAreaClientFilter('task.client_id', {
+        ...self,
+        clientArea: { agencyClientId: 'c' },
       }),
-    ).toEqual({ clientId: IsNull() });
+    ).toEqual([
+      'task.client_id = CAST(:clientAreaId AS uuid)',
+      { clientAreaId: 'c' },
+    ]);
     expect(
       clientProjectWhere({
         tenantId: 't',

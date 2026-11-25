@@ -1,6 +1,6 @@
 import { hasModuleWideAccess } from '../../../common/context/module-access';
 import {
-  CLIENT_AREA_CLIENT_SQL,
+  clientAreaClientFilter,
   clientProjectWhere,
   type ProjectRequestContext,
 } from '../client-area/projects-client-area.context';
@@ -118,9 +118,7 @@ export class ProjectsCrudService {
     context: RequestContext,
   ) {
     if (context.clientArea) {
-      qb.andWhere(CLIENT_AREA_CLIENT_SQL('project.client_id'), {
-        clientAreaId: context.clientArea.agencyClientId,
-      });
+      qb.andWhere(...clientAreaClientFilter('project.client_id', context));
       return;
     }
     if (hasModuleWideAccess(context, 'projects')) {

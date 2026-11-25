@@ -1,6 +1,6 @@
 import { hasModuleWideAccess } from '../../../common/context/module-access';
 import {
-  CLIENT_AREA_CLIENT_SQL,
+  clientAreaClientFilter,
   clientProjectWhere,
   isNarrowedProjectsMember,
   type ProjectRequestContext,
@@ -309,9 +309,9 @@ export class TasksCrudService {
     }
 
     if (context.clientArea)
-      qb.andWhere(CLIENT_AREA_CLIENT_SQL('task.client_id'), {
-        clientAreaId: context.clientArea.agencyClientId,
-      }).andWhere(
+      qb.andWhere(
+        ...clientAreaClientFilter('task.client_id', context),
+      ).andWhere(
         "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)",
         { clientAreaUser: context.userId },
       );
@@ -753,9 +753,9 @@ export class TasksCrudService {
     context: RequestContext,
   ) {
     if (context.clientArea) {
-      qb.andWhere(CLIENT_AREA_CLIENT_SQL('task.client_id'), {
-        clientAreaId: context.clientArea.agencyClientId,
-      }).andWhere(
+      qb.andWhere(
+        ...clientAreaClientFilter('task.client_id', context),
+      ).andWhere(
         "(task.visibility = 'workspace' OR task.created_by_id = :clientAreaUser)",
         { clientAreaUser: context.userId },
       );
