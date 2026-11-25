@@ -8,7 +8,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
-export type CreativeAssetType = 'image' | 'video';
+export type CreativeAssetType = 'image' | 'video' | 'document';
 export type CreativeAssetStatus = 'ready' | 'archived';
 
 @Entity('social_creative_assets')
@@ -21,7 +21,10 @@ export type CreativeAssetStatus = 'ready' | 'archived';
 ])
 @Index('IDX_social_creative_assets_folder', ['folderId'])
 @Index('IDX_social_creative_assets_content', ['contentItemId'])
-@Check('CK_social_creative_assets_type', `"asset_type" IN ('image', 'video')`)
+@Check(
+  'CK_social_creative_assets_type',
+  `"asset_type" IN ('image', 'video', 'document')`,
+)
 @Check('CK_social_creative_assets_status', `"status" IN ('ready', 'archived')`)
 export class CreativeAssetEntity {
   @PrimaryGeneratedColumn('uuid') id!: string;

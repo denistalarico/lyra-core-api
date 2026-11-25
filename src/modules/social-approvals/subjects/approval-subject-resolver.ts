@@ -135,6 +135,7 @@ export class ApprovalSubjectResolver {
           ...approvalScopeWhere(scope),
         },
       });
+      this.assertMediaAsset(asset);
       const version = await this.versions.findOneOrFail({
         where: { id: subject.subjectRevisionId, creativeAssetId: asset.id },
       });
@@ -370,6 +371,7 @@ export class ApprovalSubjectResolver {
     });
     if (!asset)
       throw new NotFoundException('Criativo não encontrado no contexto atual.');
+    this.assertMediaAsset(asset);
     const version = await this.versions.findOne({
       where: { id: input.subjectRevisionId, creativeAssetId: asset.id },
     });
@@ -386,6 +388,15 @@ export class ApprovalSubjectResolver {
       title: asset.name,
       subjectVersionLabel: `v${version.versionNumber}`,
     };
+  }
+  private assertMediaAsset(
+    asset: CreativeAssetEntity,
+  ): asserts asset is CreativeAssetEntity & { assetType: 'image' | 'video' } {
+    if (asset.assetType === 'document')
+      throw new BadRequestException({
+        code: 'creative_document_not_publishable',
+        message: 'Documentos não podem ser vinculados ao fluxo de publicação.',
+      });
   }
   private async resolvePlannerContentRevision(
     scope: CompanyAwareScope,

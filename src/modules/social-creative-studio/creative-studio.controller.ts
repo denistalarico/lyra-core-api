@@ -24,8 +24,10 @@ import { RequestContextData } from '../../common/context/request-context.decorat
 import type { RequestContext } from '../../common/context/request-context.interface';
 import {
   DirectUploadTokenDto,
+  creativeDocumentExtension,
   MEDIA_ASSET_MAX_UPLOAD_BYTES,
   MediaAssetDirectUploadService,
+  sanitizeMediaAssetFilename,
   SignDirectUploadPartsDto,
   StartDirectUploadDto,
 } from '../../common/media-assets';
@@ -478,7 +480,24 @@ export class CreativeStudioController {
       versionId,
     );
     const file = await this.files.getPrivateAsset(media.storagePath);
-    response.setHeader('Content-Type', media.mimeType);
+    if (!thumbnail) {
+      const extension = creativeDocumentExtension(media.mimeType);
+      const name = sanitizeMediaAssetFilename(media.name);
+      const filename =
+        extension && !name.toLowerCase().endsWith(`.${extension}`)
+          ? `${name}.${extension}`
+          : name;
+      response.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${filename}"`,
+      );
+    }
+    response.setHeader(
+      'Content-Type',
+      media.assetType === 'document'
+        ? 'application/octet-stream'
+        : media.mimeType,
+    );
     response.setHeader('Cache-Control', 'private, no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
     file.body.pipe(response);

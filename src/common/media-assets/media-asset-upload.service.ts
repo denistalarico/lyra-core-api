@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomUUID } from 'node:crypto';
-import { IsNull, Not, Raw, Repository } from 'typeorm';
+import { And, IsNull, Not, Raw, Repository } from 'typeorm';
 import { FilesService } from '../files/files.service';
 import {
   MEDIA_ASSET_METADATA_READER,
@@ -24,8 +24,13 @@ import {
 } from './media-asset-metadata.port';
 import {
   assertMediaAssetSize,
+  assertCreativeDocumentSize,
   buildMediaAssetObjectKey,
+  CREATIVE_DOCUMENT_SOURCE,
+  creativeDocumentMimeFromName,
+  resolveCreativeDocumentContentType,
   resolveMediaAssetContentType,
+  sanitizeCreativeDocumentFilename,
   sanitizeMediaAssetFilename,
 } from './media-asset-upload.rules';
 import {
@@ -52,6 +57,7 @@ export type UploadMediaAssetInput = {
     readonly size?: number;
   };
   readonly source: string;
+  readonly allowCreativeDocuments?: boolean;
   /** Sanitized product metadata (the entity's rule applies: no secrets). */
   readonly metadata?: Record<string, unknown>;
 };
@@ -119,10 +125,11 @@ export class MediaAssetUploadService {
     // 1. Validate before anything is created or written anywhere.
     assertMediaAssetSize(file.size ?? file.buffer.length);
     assertMediaAssetSize(file.buffer.length);
-    const contentType = resolveMediaAssetContentType(
-      file.buffer,
-      file.mimetype,
-    );
+    const documentMime = input.allowCreativeDocuments
+      ? resolveCreativeDocumentContentType(file.buffer, file.originalname)
+      : undefined;
+    const contentType =
+      documentMime ?? resolveMediaAssetContentType(file.buffer, file.mimetype);
     if (
       input.source === VIDEO_COVER_SOURCE &&
       (file.buffer.length > VIDEO_COVER_MAX_BYTES ||
@@ -134,10 +141,12 @@ export class MediaAssetUploadService {
     // 2. Intrinsic properties, from the bytes. M2 throws a 400 for anything it
     //    cannot read; that refusal is deliberate and is not softened here into
     //    a stored row with null dimensions.
-    const metadata = await this.metadataReader.extract({
-      body: file.buffer,
-      mimeType: contentType,
-    });
+    const metadata = documentMime
+      ? null
+      : await this.metadataReader.extract({
+          body: file.buffer,
+          mimeType: contentType,
+        });
 
     // 3. Server-controlled id and key. No part of the user's filename.
     const { assetId, objectKey } = buildMediaAssetObjectKey({
@@ -155,7 +164,7 @@ export class MediaAssetUploadService {
     await this.filesService.uploadPrivateBuffer({
       body: file.buffer,
       path: storagePath,
-      contentType,
+      contentType: documentMime ? 'application/octet-stream' : contentType,
     });
 
     // 5. Row second, with cleanup if it fails.
@@ -170,16 +179,18 @@ export class MediaAssetUploadService {
           storagePath,
           mimeType: contentType,
           byteSize: String(file.buffer.length),
-          originalFilename: sanitizeMediaAssetFilename(file.originalname),
+          originalFilename: documentMime
+            ? sanitizeCreativeDocumentFilename(file.originalname, documentMime)
+            : sanitizeMediaAssetFilename(file.originalname),
           checksum: createHash('sha256').update(file.buffer).digest('hex'),
-          width: metadata.width,
-          height: metadata.height,
+          width: metadata?.width ?? null,
+          height: metadata?.height ?? null,
           durationMs:
-            metadata.durationSeconds === null
+            metadata?.durationSeconds == null
               ? null
               : String(Math.round(metadata.durationSeconds * 1000)),
-          codec: metadata.codec || null,
-          source: input.source,
+          codec: metadata?.codec || null,
+          source: documentMime ? CREATIVE_DOCUMENT_SOURCE : input.source,
           metadata: input.metadata ?? {},
           createdById: actorUserId,
         }),
@@ -212,13 +223,18 @@ export class MediaAssetUploadService {
       readonly source: string;
     },
   ) {
-    const existing = await this.mediaAssets.findOne({
-      where: { id: input.assetId, ...mediaAssetScopeWhere(scope) },
-    });
+    const where = { id: input.assetId, ...mediaAssetScopeWhere(scope) };
+    const existing = await this.mediaAssets.findOne({ where });
     if (existing) return existing;
 
+    const documentMime =
+      input.source === 'creative_studio'
+        ? creativeDocumentMimeFromName(input.originalFilename)
+        : undefined;
+    const document = documentMime === input.declaredMimeType;
     try {
       const head = await this.filesService.headPrivateObject(input.storagePath);
+      if (document) assertCreativeDocumentSize(head.byteSize);
       assertDirectUploadSize(head.byteSize);
       if (head.byteSize !== input.declaredBytes) {
         throw new BadRequestException(
@@ -227,19 +243,33 @@ export class MediaAssetUploadService {
       }
       const read = (start: number, end: number) =>
         this.filesService.readPrivateRange(input.storagePath, start, end);
-      const contentType = resolveMediaAssetContentType(
-        await read(0, Math.min(4095, head.byteSize - 1)),
-        input.declaredMimeType,
-      );
-      if (!contentType.startsWith('video/')) {
+      const documentBytes = document ? await read(0, head.byteSize - 1) : null;
+      if (documentBytes && documentBytes.length !== head.byteSize)
+        throw new BadRequestException({
+          code: 'creative_document_incomplete',
+          message:
+            'O envio do documento ficou incompleto. Envie o arquivo novamente.',
+        });
+      const contentType = documentBytes
+        ? resolveCreativeDocumentContentType(
+            documentBytes,
+            input.originalFilename,
+          )!
+        : resolveMediaAssetContentType(
+            await read(0, Math.min(4095, head.byteSize - 1)),
+            input.declaredMimeType,
+          );
+      if (!document && !contentType.startsWith('video/')) {
         throw new BadRequestException(
           'O envio direto aceita apenas vídeo MP4 ou MOV.',
         );
       }
-      const metadata = await this.metadataReader.extract({
-        body: await readIsoMediaHead(read, head.byteSize),
-        mimeType: contentType,
-      });
+      const metadata = document
+        ? null
+        : await this.metadataReader.extract({
+            body: await readIsoMediaHead(read, head.byteSize),
+            mimeType: contentType,
+          });
 
       return await this.mediaAssets.save(
         this.mediaAssets.create({
@@ -251,22 +281,32 @@ export class MediaAssetUploadService {
           storagePath: input.storagePath,
           mimeType: contentType,
           byteSize: String(head.byteSize),
-          originalFilename: sanitizeMediaAssetFilename(input.originalFilename),
+          originalFilename:
+            documentMime && document
+              ? sanitizeCreativeDocumentFilename(
+                  input.originalFilename,
+                  documentMime,
+                )
+              : sanitizeMediaAssetFilename(input.originalFilename),
           // Hashing would mean reading the whole video back: skipped.
           checksum: null,
-          width: metadata.width,
-          height: metadata.height,
+          width: metadata?.width ?? null,
+          height: metadata?.height ?? null,
           durationMs:
-            metadata.durationSeconds === null
+            metadata?.durationSeconds == null
               ? null
               : String(Math.round(metadata.durationSeconds * 1000)),
-          codec: metadata.codec || null,
-          source: input.source,
+          codec: metadata?.codec || null,
+          source: document ? CREATIVE_DOCUMENT_SOURCE : input.source,
           metadata: { upload: 'direct' },
           createdById: actorUserId,
         }),
       );
     } catch (error) {
+      if (document && (error as { code?: string } | null)?.code === '23505') {
+        const registered = await this.mediaAssets.findOne({ where });
+        if (registered) return registered;
+      }
       await this.bestEffortRemoveObject(input.storagePath);
       throw error;
     }
@@ -342,11 +382,12 @@ export class MediaAssetUploadService {
         // Durable, minus video stills and covers: not media to pick.
         source: Raw(
           (column) =>
-            `${column} NOT LIKE :temporaryPrefix AND ${column} <> :posterSource AND ${column} <> :coverSource`,
+            `${column} NOT LIKE :temporaryPrefix AND ${column} NOT IN (:posterSource, :coverSource, :documentSource)`,
           {
             temporaryPrefix: `${TEMPORARY_MEDIA_ASSET_SOURCE_PREFIX}%`,
             posterSource: MEDIA_POSTER_SOURCE,
             coverSource: VIDEO_COVER_SOURCE,
+            documentSource: CREATIVE_DOCUMENT_SOURCE,
           },
         ),
       },
@@ -372,7 +413,7 @@ export class MediaAssetUploadService {
       where: {
         id: mediaAssetId,
         ...mediaAssetScopeWhere(scope),
-        source: durableMediaAssetSource(),
+        source: And(durableMediaAssetSource(), Not(CREATIVE_DOCUMENT_SOURCE)),
       },
     });
 

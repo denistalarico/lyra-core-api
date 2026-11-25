@@ -3,6 +3,10 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import express from 'express';
+import request from 'supertest';
+import { Readable } from 'node:stream';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PERMISSION_KEYS } from '../permissions/catalog/permission-keys.catalog';
 import {
@@ -12,7 +16,16 @@ import {
 import { PermissionsGuard } from '../permissions/guards/permissions.guard';
 import type { RequestContext } from '../../common/context/request-context.interface';
 import { CreativeStudioController } from './creative-studio.controller';
-import { CreateCreativeVersionDto } from './dto/creative-studio.dto';
+import {
+  CreateCreativeVersionDto,
+  ListCreativeAssetsQueryDto,
+} from './dto/creative-studio.dto';
+import {
+  CREATIVE_DOCUMENT_SOURCE,
+  MediaAssetDirectUploadService,
+  MediaAssetEntity,
+  MediaAssetUploadService,
+} from '../../common/media-assets';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 
@@ -32,6 +45,12 @@ const ROUTE_PERMISSIONS = {
   archive: 'social.creative.content.delete.owner_or_admin_explicit',
   deleteFolder: 'social.creative.content.delete.owner_or_admin_explicit',
 } as const;
+
+const studioContext = {
+  userId: 'user-a',
+  tenantId: 'tenant-a',
+  workspaceId: 'workspace-a',
+} as RequestContext;
 
 function executionContext(handler: unknown): ExecutionContext {
   const request = {
@@ -59,6 +78,127 @@ function executionContext(handler: unknown): ExecutionContext {
 }
 
 describe('Creative Studio controller permission contract', () => {
+  it('accepts document and media filters in the scoped library', async () => {
+    for (const assetType of ['document', 'media']) {
+      const errors = await validate(
+        plainToInstance(ListCreativeAssetsQueryDto, { assetType }),
+      );
+      expect(errors).toEqual([]);
+    }
+  });
+
+  it.each([true, false])(
+    'validates stored CSV bytes during direct completion (valid: %s)',
+    async (valid) => {
+      const body = valid ? Buffer.from('name\nAda') : Buffer.from([0xff, 0, 1]);
+      const files = {
+        hasR2: () => true,
+        r2Path: (path: string) => path,
+        createPrivateMultipartUpload: jest.fn().mockResolvedValue('upload-id'),
+        completePrivateMultipartUpload: jest.fn(),
+        headPrivateObject: async () => ({ byteSize: body.length }),
+        readPrivateRange: jest.fn().mockResolvedValue(body),
+        deleteObject: jest.fn(),
+      };
+      const save = jest.fn((row: MediaAssetEntity) => row);
+      const uploads = new MediaAssetUploadService(
+        {
+          findOne: async () => null,
+          create: (row: MediaAssetEntity) => row,
+          save,
+        } as never,
+        files as never,
+        {} as never,
+      );
+      const directUploads = new MediaAssetDirectUploadService(
+        files as never,
+        uploads,
+        new ConfigService({ files: { r2: { secretAccessKey: 'fixture' } } }),
+      );
+      const assets = { upload: jest.fn() };
+      const controller = new CreativeStudioController(
+        assets as never,
+        {} as never,
+        files as never,
+        {} as never,
+        {} as never,
+        {} as never,
+        directUploads,
+      );
+      const { token } = await controller.startDirectUpload(studioContext, {
+        filename: 'brief.csv',
+        mimeType: 'application/octet-stream',
+        byteSize: body.length,
+      });
+      expect(files.createPrivateMultipartUpload).toHaveBeenCalledWith(
+        expect.objectContaining({ contentType: 'application/octet-stream' }),
+      );
+      const completion = controller.completeDirectUpload(studioContext, {
+        token,
+        parts: [{ partNumber: 1, etag: 'part-etag' }],
+      });
+      if (valid) {
+        await completion;
+        expect(save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            source: CREATIVE_DOCUMENT_SOURCE,
+            mimeType: 'text/csv',
+          }),
+        );
+        expect(assets.upload).toHaveBeenCalledTimes(1);
+      } else {
+        await expect(completion).rejects.toMatchObject({
+          status: 400,
+          response: { code: 'creative_document_invalid_format' },
+        });
+        expect(save).not.toHaveBeenCalled();
+        expect(assets.upload).not.toHaveBeenCalled();
+        expect(files.deleteObject).toHaveBeenCalledTimes(1);
+      }
+      expect(files.readPrivateRange).toHaveBeenCalledWith(
+        expect.any(String),
+        0,
+        body.length - 1,
+      );
+    },
+  );
+
+  it('serves a stored XML document only as a nosniff attachment', async () => {
+    const xml = '<?xml version="1.0"?><document/>';
+    const assets = {
+      content: jest.fn().mockResolvedValue({
+        assetType: 'document',
+        mimeType: 'application/xml',
+        name: 'Relatório',
+        storagePath: 'private/document.xml',
+      }),
+    };
+    const files = {
+      getPrivateAsset: async () => ({ body: Readable.from([xml]) }),
+    };
+    const controller = new CreativeStudioController(
+      assets as never,
+      {} as never,
+      files as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const app = express();
+    app.get('/content', (_req, res, next) => {
+      controller
+        .content(studioContext, 'asset-id', 'version-id', res)
+        .catch(next);
+    });
+    const result = await request(app)
+      .get('/content')
+      .expect(200)
+      .expect('Content-Type', 'application/octet-stream')
+      .expect('X-Content-Type-Options', 'nosniff')
+      .expect('Content-Disposition', /^attachment;.*\.xml/);
+    expect(Buffer.from(result.body as Uint8Array).toString()).toBe(xml);
+  });
   it('loads Brand Context exclusively from the resolved company-aware request scope', () => {
     const brandContext = { load: jest.fn().mockResolvedValue({}) };
     const controller = new CreativeStudioController(

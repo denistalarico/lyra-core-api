@@ -293,25 +293,26 @@ export class CreativeProductionService {
         creativeFormat: contentItem.creativeFormat,
         archived: Boolean(contentItem.archivedAt),
       },
-      selectedCreative: selection
-        ? {
-            assetId: selection.asset.id,
-            assetName: selection.asset.name,
-            mediaType: selection.asset.assetType,
-            versionId: selection.version.id,
-            versionNumber: selection.version.versionNumber,
-            isAssetCurrentVersion:
-              selection.asset.currentVersionId === selection.version.id,
-            available: selection.unavailableReason === null,
-            unavailableReason: selection.unavailableReason,
-            selectedAt: production?.selectedAt?.toISOString() ?? null,
-            selectedById: production?.selectedById ?? null,
-            contentPath: `/social/creative-studio/assets/${selection.asset.id}/content?versionId=${selection.version.id}`,
-            thumbnailPath: selection.version.thumbnailMediaAssetId
-              ? `/social/creative-studio/assets/${selection.asset.id}/thumbnail?versionId=${selection.version.id}`
-              : null,
-          }
-        : null,
+      selectedCreative:
+        selection && selection.asset.assetType !== 'document'
+          ? {
+              assetId: selection.asset.id,
+              assetName: selection.asset.name,
+              mediaType: selection.asset.assetType,
+              versionId: selection.version.id,
+              versionNumber: selection.version.versionNumber,
+              isAssetCurrentVersion:
+                selection.asset.currentVersionId === selection.version.id,
+              available: selection.unavailableReason === null,
+              unavailableReason: selection.unavailableReason,
+              selectedAt: production?.selectedAt?.toISOString() ?? null,
+              selectedById: production?.selectedById ?? null,
+              contentPath: `/social/creative-studio/assets/${selection.asset.id}/content?versionId=${selection.version.id}`,
+              thumbnailPath: selection.version.thumbnailMediaAssetId
+                ? `/social/creative-studio/assets/${selection.asset.id}/thumbnail?versionId=${selection.version.id}`
+                : null,
+            }
+          : null,
       approval: {
         required: approval.required,
         scopeKind: approval.scopeKind,
@@ -368,6 +369,11 @@ export class CreativeProductionService {
       }));
     if (!version || !asset)
       throw new NotFoundException('Versão não encontrada.');
+    if (asset.assetType === 'document')
+      throw new BadRequestException({
+        code: 'creative_document_not_publishable',
+        message: 'Documentos não podem ser vinculados ao fluxo de publicação.',
+      });
     if (asset.status === 'archived' || asset.archivedAt)
       throw this.conflict(
         'creative_archived',

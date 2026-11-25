@@ -11,6 +11,7 @@
 
 import { BadRequestException } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { CreativeDocumentMimeType } from './media-asset-upload.rules';
 
 /** Owner's decision (2026-11-18): videos up to 2 GB. */
 export const MEDIA_ASSET_DIRECT_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024;
@@ -43,7 +44,7 @@ export type DirectUploadClaims = {
   readonly companyContextId: string | null;
   readonly actorUserId: string | null;
   readonly source: string;
-  readonly mimeType: DirectUploadMimeType;
+  readonly mimeType: DirectUploadMimeType | CreativeDocumentMimeType;
   readonly byteSize: number;
   readonly filename: string;
   /** Epoch seconds. */

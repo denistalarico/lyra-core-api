@@ -15,6 +15,8 @@
 
 import { BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { extname } from 'node:path';
+import { crc32, inflateRawSync } from 'node:zlib';
 
 /**
  * Formats a publishable asset may be uploaded in.
@@ -43,6 +45,191 @@ export const MEDIA_ASSET_ALLOWED_MIME_TYPES = [
 
 export type MediaAssetAllowedMimeType =
   (typeof MEDIA_ASSET_ALLOWED_MIME_TYPES)[number];
+
+const DOCUMENT_MIME_BY_EXTENSION = {
+  '.pdf': 'application/pdf',
+  '.docx':
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx':
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.doc': 'application/msword',
+  '.xls': 'application/vnd.ms-excel',
+  '.csv': 'text/csv',
+  '.txt': 'text/plain',
+  '.xml': 'application/xml',
+  '.json': 'application/json',
+} as const;
+export type CreativeDocumentMimeType =
+  (typeof DOCUMENT_MIME_BY_EXTENSION)[keyof typeof DOCUMENT_MIME_BY_EXTENSION];
+export const CREATIVE_DOCUMENT_MAX_BYTES = 50 * 1024 * 1024;
+export const CREATIVE_DOCUMENT_SOURCE = 'creative_studio_document';
+const OFFICE_MAIN_PART = new Map([
+  ['.docx', '/word/document.xml'],
+  ['.xlsx', '/xl/workbook.xml'],
+  ['.pptx', '/ppt/presentation.xml'],
+]);
+const OLE_SIGNATURE = Buffer.from('d0cf11e0a1b11ae1', 'hex');
+const OFFICE_TYPES_ENTRY = '[Content_Types].xml';
+const OFFICE_TYPES_MAX_BYTES = 1024 * 1024;
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+const utf16le = new TextDecoder('utf-16le', { fatal: true });
+const utf16be = new TextDecoder('utf-16be', { fatal: true });
+
+export function creativeDocumentMimeFromName(
+  filename: string,
+): CreativeDocumentMimeType | undefined {
+  const extension = extname(filename).toLowerCase();
+  return DOCUMENT_MIME_BY_EXTENSION[
+    extension as keyof typeof DOCUMENT_MIME_BY_EXTENSION
+  ];
+}
+
+// Read only the package manifest, bounded before decompression. The central
+// directory supplies sizes even for ZIP entries written with data descriptors.
+function officeContentTypes(zip: Buffer): string | null {
+  if (zip.length < 22 || zip.readUInt32LE(0) !== 0x04034b50) return null;
+  for (
+    let end = zip.length - 22;
+    end >= Math.max(0, zip.length - 22 - 65535);
+    end--
+  ) {
+    if (
+      zip.readUInt32LE(end) !== 0x06054b50 ||
+      end + 22 + zip.readUInt16LE(end + 20) !== zip.length
+    )
+      continue;
+    if (zip.readUInt32LE(end + 4) !== 0) return null;
+    let entry = zip.readUInt32LE(end + 16);
+    if (entry + zip.readUInt32LE(end + 12) !== end) return null;
+    while (entry + 46 <= end && zip.readUInt32LE(entry) === 0x02014b50) {
+      const nameLength = zip.readUInt16LE(entry + 28);
+      const next =
+        entry +
+        46 +
+        nameLength +
+        zip.readUInt16LE(entry + 30) +
+        zip.readUInt16LE(entry + 32);
+      if (next > end) return null;
+      if (
+        zip.toString('utf8', entry + 46, entry + 46 + nameLength) ===
+        OFFICE_TYPES_ENTRY
+      ) {
+        const flags = zip.readUInt16LE(entry + 8);
+        const compression = zip.readUInt16LE(entry + 10);
+        const compressed = zip.readUInt32LE(entry + 20);
+        const size = zip.readUInt32LE(entry + 24);
+        const local = zip.readUInt32LE(entry + 42);
+        if (
+          flags & 1 ||
+          size > OFFICE_TYPES_MAX_BYTES ||
+          local + 30 > entry ||
+          zip.readUInt32LE(local) !== 0x04034b50 ||
+          zip.readUInt16LE(local + 8) !== compression
+        )
+          return null;
+        const start =
+          local +
+          30 +
+          zip.readUInt16LE(local + 26) +
+          zip.readUInt16LE(local + 28);
+        if (
+          start + compressed > zip.readUInt32LE(end + 16) ||
+          zip.toString(
+            'utf8',
+            local + 30,
+            local + 30 + zip.readUInt16LE(local + 26),
+          ) !== OFFICE_TYPES_ENTRY
+        )
+          return null;
+        const payload = zip.subarray(start, start + compressed);
+        const xml =
+          compression === 0
+            ? payload
+            : compression === 8
+              ? inflateRawSync(payload, {
+                  maxOutputLength: OFFICE_TYPES_MAX_BYTES,
+                })
+              : null;
+        if (
+          !xml ||
+          xml.length !== size ||
+          crc32(xml) !== zip.readUInt32LE(entry + 16)
+        )
+          return null;
+        const bom = xml.length >= 2 ? xml.readUInt16BE(0) : 0;
+        return (
+          bom === 0xfffe ? utf16le : bom === 0xfeff ? utf16be : utf8
+        ).decode(xml);
+      }
+      entry = next;
+    }
+    return null;
+  }
+  return null;
+}
+
+function hasOfficeContentType(
+  buffer: Buffer,
+  part: string,
+  contentType: string,
+): boolean {
+  const manifest = officeContentTypes(buffer)?.replace(
+    /<!--(?:[^-]|-(?!-))*-->/g,
+    '',
+  );
+  if (
+    !manifest ||
+    !/<(?:[\w.-]+:)?Types\b/.test(manifest) ||
+    /<!/.test(manifest)
+  )
+    return false;
+  for (const [override] of manifest.matchAll(
+    /<(?:[\w.-]+:)?Override\s+[^>]*>/g,
+  )) {
+    const name = override.match(/\sPartName\s*=\s*(["'])(.*?)\1/)?.[2];
+    const type = override.match(/\sContentType\s*=\s*(["'])(.*?)\1/)?.[2];
+    if (name === part && type === contentType) return true;
+  }
+  return false;
+}
+
+export function assertCreativeDocumentSize(bytes: number): void {
+  if (bytes > CREATIVE_DOCUMENT_MAX_BYTES) {
+    throw new BadRequestException({
+      code: 'creative_document_too_large',
+      message: 'O documento excede o limite de 50 MB.',
+    });
+  }
+}
+
+export function resolveCreativeDocumentContentType(
+  buffer: Buffer,
+  filename: string,
+): CreativeDocumentMimeType | undefined {
+  const mime = creativeDocumentMimeFromName(filename);
+  if (!mime) return undefined;
+  assertCreativeDocumentSize(buffer.length);
+  const office = OFFICE_MAIN_PART.get(extname(filename).toLowerCase());
+  try {
+    const valid =
+      buffer.length > 0 &&
+      (office
+        ? hasOfficeContentType(buffer, office, `${mime}.main+xml`)
+        : mime === 'application/pdf'
+          ? buffer.subarray(0, 5).equals(Buffer.from('%PDF-'))
+          : mime === 'application/msword' || mime === 'application/vnd.ms-excel'
+            ? buffer.subarray(0, OLE_SIGNATURE.length).equals(OLE_SIGNATURE)
+            : !utf8.decode(buffer).includes('\0'));
+    if (valid) return mime;
+  } catch {
+    // Invalid UTF-8, malformed ZIP or a manifest exceeding the output limit.
+  }
+  throw new BadRequestException({
+    code: 'creative_document_invalid_format',
+    message: 'O conteúdo do documento não corresponde à extensão.',
+  });
+}
 
 /**
  * Hard ceiling at the transport layer.
@@ -194,6 +381,25 @@ const EXTENSION_BY_MIME: Record<MediaAssetAllowedMimeType, string> = {
   'video/mp4': 'mp4',
   'video/quicktime': 'mov',
 };
+const DOCUMENT_EXTENSION_BY_MIME = new Map<string, string>(
+  Object.entries(DOCUMENT_MIME_BY_EXTENSION).map(([extension, mime]) => [
+    mime,
+    extension.slice(1),
+  ]),
+);
+
+export function creativeDocumentExtension(mime: string): string | undefined {
+  return DOCUMENT_EXTENSION_BY_MIME.get(mime);
+}
+
+export function sanitizeCreativeDocumentFilename(
+  filename: string,
+  mime: CreativeDocumentMimeType,
+): string {
+  const extension = creativeDocumentExtension(mime);
+  const base = filename.slice(0, -extname(filename).length);
+  return `${sanitizeMediaAssetFilename(base).slice(0, 190)}.${extension}`;
+}
 
 /**
  * The private-bucket key.
@@ -212,13 +418,15 @@ export function buildMediaAssetObjectKey(input: {
   tenantId: string;
   agencyClientId: string | null;
   assetId?: string;
-  contentType: MediaAssetAllowedMimeType;
+  contentType: MediaAssetAllowedMimeType | CreativeDocumentMimeType;
 }): { objectKey: string; assetId: string } {
   const assetId = input.assetId ?? randomUUID();
   const scope = input.agencyClientId
     ? `clients/${input.agencyClientId}`
     : 'agency';
-  const extension = EXTENSION_BY_MIME[input.contentType];
+  const extension =
+    creativeDocumentExtension(input.contentType) ??
+    EXTENSION_BY_MIME[input.contentType as MediaAssetAllowedMimeType];
 
   return {
     assetId,

@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { CompleteDirectUploadDto } from '../../../common/media-assets/dto/direct-upload.dto';
+import type { CreativeAssetType } from '../entities/creative-asset.entity';
 import {
   IsIn,
   IsISO8601,
@@ -12,7 +13,9 @@ import {
 } from 'class-validator';
 
 export class ListCreativeAssetsQueryDto {
-  @IsOptional() @IsIn(['image', 'video']) assetType?: 'image' | 'video';
+  @IsOptional() @IsIn(['image', 'video', 'document', 'media']) assetType?:
+    | CreativeAssetType
+    | 'media';
   @IsOptional() @IsUUID() folderId?: string;
   @IsOptional() @IsIn(['ready', 'archived']) status?: 'ready' | 'archived';
   @IsOptional() @IsUUID() contentItemId?: string;

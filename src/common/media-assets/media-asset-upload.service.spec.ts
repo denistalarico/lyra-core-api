@@ -1,8 +1,9 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { type FindOperator, IsNull, Not } from 'typeorm';
+import { And, type FindOperator, IsNull, Not } from 'typeorm';
 import type { FilesService } from '../files/files.service';
 import type { MediaAssetMetadataReader } from './media-asset-metadata.port';
 import type { MediaAssetScope } from './media-asset-resolver.service';
+import { CREATIVE_DOCUMENT_SOURCE } from './media-asset-upload.rules';
 import { MediaAssetUploadService } from './media-asset-upload.service';
 import type { MediaAssetEntity } from './media-asset.entity';
 import {
@@ -345,7 +346,7 @@ describe('MediaAssetUploadService', () => {
           workspaceId: agencyScope.workspaceId,
           agencyClientId: IsNull(),
           companyContextId: IsNull(),
-          source: durableMediaAssetSource(),
+          source: And(durableMediaAssetSource(), Not(CREATIVE_DOCUMENT_SOURCE)),
         },
       });
     });
@@ -383,7 +384,7 @@ describe('MediaAssetUploadService', () => {
       expect(durable.metadata).toEqual({});
     });
 
-    it('excludes temporary assets from the listing and the generic content read', async () => {
+    it('excludes temporary assets and Library documents from publication media', async () => {
       await service.list(clientScope);
       repository.findOne.mockResolvedValue(null);
       await expect(service.getContent(clientScope, 'temp-1')).rejects.toThrow(
@@ -400,8 +401,11 @@ describe('MediaAssetUploadService', () => {
         temporaryPrefix: 'temporary:%',
         posterSource: 'media_poster',
         coverSource: 'video_cover',
+        documentSource: CREATIVE_DOCUMENT_SOURCE,
       });
-      expect(content.where.source).toEqual(durableMediaAssetSource());
+      expect(content.where.source).toEqual(
+        And(durableMediaAssetSource(), Not(CREATIVE_DOCUMENT_SOURCE)),
+      );
     });
 
     it('reads a temporary asset only by its exact source, in the full company scope', async () => {

@@ -6,6 +6,7 @@ import {
 import { SELF_DECLARED_DEPS_METADATA } from '@nestjs/common/constants';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { Readable } from 'node:stream';
+import { crc32, deflateRawSync } from 'node:zlib';
 import { FindOperator, IsNull, Repository } from 'typeorm';
 import type { CreativeStudioScope } from './creative-studio.scope';
 import {
@@ -16,7 +17,11 @@ import {
 import { CreativeAssetService } from './creative-asset.service';
 import { CreativeFolderService } from './creative-folder.service';
 import { CreativeThumbnailService } from './creative-thumbnail.service';
-import { MediaAssetEntity } from '../../common/media-assets';
+import {
+  CREATIVE_DOCUMENT_SOURCE,
+  MediaAssetEntity,
+  MediaAssetUploadService,
+} from '../../common/media-assets';
 
 const agency: CreativeStudioScope = {
   tenantId: '10000000-0000-4000-8000-000000000001',
@@ -363,6 +368,7 @@ function makeHarness() {
   mediaQuery.getRawOne = jest.fn(async () => ({ usedBytes: '4294967296' }));
   const mediaAssets = {
     createQueryBuilder: jest.fn(() => mediaQuery),
+    findOne: jest.fn().mockResolvedValue(null),
   };
   const dataSource = {
     getRepository: jest.fn((entity: unknown) =>
@@ -379,7 +385,11 @@ function makeHarness() {
         try {
           return await callback({
             getRepository: (entity) =>
-              entity === CreativeAssetEntity ? assets : versions,
+              entity === CreativeAssetEntity
+                ? assets
+                : entity === MediaAssetEntity
+                  ? mediaAssets
+                  : versions,
           });
         } catch (error) {
           state.assets = assetSnapshot;
@@ -437,7 +447,177 @@ function file(
   return { buffer, originalname, mimetype, size };
 }
 
+function officePackage(part: string, type: string): Buffer {
+  const manifest = Buffer.from(
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/${part}" ContentType="application/vnd.openxmlformats-officedocument.${type}.main+xml"/></Types>`,
+  );
+  const compressed = deflateRawSync(manifest);
+  const name = Buffer.from('[Content_Types].xml');
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(8, 8);
+  local.writeUInt32LE(crc32(manifest), 14);
+  local.writeUInt32LE(compressed.length, 18);
+  local.writeUInt32LE(manifest.length, 22);
+  local.writeUInt16LE(name.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50);
+  central.writeUInt16LE(20, 4);
+  local.copy(central, 6, 4, 28);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(central.length + name.length, 12);
+  end.writeUInt32LE(local.length + name.length + compressed.length, 16);
+  return Buffer.concat([local, name, compressed, central, name, end]);
+}
+
+function useDocumentStorage(h: ReturnType<typeof makeHarness>) {
+  const uploadPrivateBuffer = jest.fn();
+  const extract = jest.fn();
+  const save = jest.fn((row: MediaAssetEntity) => row);
+  const storage = new MediaAssetUploadService(
+    { create: (row: MediaAssetEntity) => row, save } as never,
+    { r2Path: (path: string) => path, uploadPrivateBuffer } as never,
+    { extract } as never,
+  );
+  h.mediaUpload.upload.mockImplementation(async (scope, actor, input) => {
+    const saved = await storage.upload(
+      scope,
+      actor,
+      input as Parameters<MediaAssetUploadService['upload']>[2],
+    );
+    return { id: saved.id, originalFilename: saved.originalFilename ?? '' };
+  });
+  return { uploadPrivateBuffer, extract, save };
+}
+
+const DOCX = officePackage('word/document.xml', 'wordprocessingml.document');
+const CFB = Buffer.from('d0cf11e0a1b11ae1', 'hex');
+
 describe('Creative Studio asset service', () => {
+  it.each([
+    ['pdf', Buffer.from('%PDF-1.7'), 'application/pdf'],
+    [
+      'docx',
+      DOCX,
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
+    [
+      'xlsx',
+      officePackage('xl/workbook.xml', 'spreadsheetml.sheet'),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ],
+    [
+      'pptx',
+      officePackage('ppt/presentation.xml', 'presentationml.presentation'),
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    ],
+    ['doc', CFB, 'application/msword'],
+    ['xls', CFB, 'application/vnd.ms-excel'],
+    ['csv', Buffer.from('nome,cidade\nAna,São Paulo'), 'text/csv'],
+    ['txt', Buffer.from('Biblioteca'), 'text/plain'],
+    ['xml', Buffer.from('<arquivo/>'), 'application/xml'],
+    ['json', Buffer.from('{"arquivo":true}'), 'application/json'],
+  ])(
+    'stores a %s privately based on its bytes, without thumbnails',
+    async (extension, bytes, mimeType) => {
+      const h = makeHarness();
+      const storage = useDocumentStorage(h);
+      const saved = await h.assetService.upload(clientA, 'user-a', {
+        file: file(bytes, `brief.${extension}`, 'image/png'),
+      });
+      expect(saved.assetType).toBe('document');
+      expect(storage.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mimeType,
+          source: CREATIVE_DOCUMENT_SOURCE,
+        }),
+      );
+      expect(storage.uploadPrivateBuffer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          contentType: 'application/octet-stream',
+        }),
+      );
+      expect(storage.extract).not.toHaveBeenCalled();
+      expect(h.thumbnails.create).not.toHaveBeenCalled();
+      expect(h.state.versions[0].thumbnailMediaAssetId).toBeNull();
+    },
+  );
+
+  it.each([
+    ['brief.csv', Buffer.from([0xff, 0xfe])],
+    ['brief.txt', Buffer.from('text\0hidden')],
+    ['brief.xlsx', DOCX],
+    ['brief.pdf', Buffer.from('plain text')],
+    ['brief.doc', Buffer.from('plain text')],
+    ['brief.svg', Buffer.from('<svg/>')],
+  ])(
+    'refuses mismatched or non-accepted bytes for %s before writing storage',
+    async (name, bytes) => {
+      const h = makeHarness();
+      const storage = useDocumentStorage(h);
+      await expect(
+        h.assetService.upload(clientA, 'user-a', {
+          file: file(bytes, name, 'text/plain'),
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(storage.uploadPrivateBuffer).not.toHaveBeenCalled();
+      expect(h.state.assets).toHaveLength(0);
+    },
+  );
+
+  it('refuses a document linked to the Planner', async () => {
+    const h = makeHarness();
+    await expect(
+      h.assetService.upload(clientA, 'user-a', {
+        file: file(Buffer.from('%PDF-1.7'), 'brief.pdf', 'application/pdf'),
+        contentItemId: 'content-1',
+      }),
+    ).rejects.toMatchObject({
+      response: { code: 'creative_document_not_publishable' },
+    });
+    expect(h.mediaUpload.upload).not.toHaveBeenCalled();
+  });
+
+  it('replays direct document completion without creating another logical asset or version', async () => {
+    const h = makeHarness();
+    const stored = {
+      id: 'stored-document',
+      mimeType: 'text/csv',
+      originalFilename: 'report.csv',
+      source: CREATIVE_DOCUMENT_SOURCE,
+    } as MediaAssetEntity;
+    h.mediaAssets.findOne.mockResolvedValue(stored);
+    const first = await h.assetService.upload(clientA, 'user-a', {
+      file: { stored },
+    });
+    const replay = await h.assetService.upload(clientA, 'user-a', {
+      file: { stored },
+    });
+    expect(replay.id).toBe(first.id);
+    expect(h.state.assets).toHaveLength(1);
+    expect(h.state.versions).toHaveLength(1);
+
+    const replacement = { ...stored, id: 'replacement' };
+    h.mediaAssets.findOne.mockResolvedValue(replacement);
+    const updated = await h.assetService.createVersion(
+      clientA,
+      'user-a',
+      first.id,
+      { stored: replacement },
+    );
+    const replayedVersion = await h.assetService.createVersion(
+      clientA,
+      'user-a',
+      first.id,
+      { stored: replacement },
+    );
+    expect(replayedVersion.id).toBe(updated.id);
+    expect(h.state.versions).toHaveLength(2);
+  });
   it('uses the agency data source for transactional asset writes', () => {
     expect(
       Reflect.getMetadata(SELF_DECLARED_DEPS_METADATA, CreativeAssetService),
@@ -613,6 +793,15 @@ describe('Creative Studio asset service', () => {
   it.each([
     ['image', file(PNG, 'large.png', 'image/png', 20 * 1024 * 1024 + 1)],
     ['video', file(MP4, 'large.mp4', 'video/mp4', 300 * 1024 * 1024 + 1)],
+    [
+      'document',
+      file(
+        Buffer.from('%PDF-1.7'),
+        'large.pdf',
+        'application/pdf',
+        50 * 1024 * 1024 + 1,
+      ),
+    ],
   ])(
     'rejects an oversized %s at the Creative Studio boundary',
     async (_type, uploadFile) => {

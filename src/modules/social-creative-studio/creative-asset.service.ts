@@ -13,6 +13,10 @@ import {
   Repository,
 } from 'typeorm';
 import {
+  assertCreativeDocumentSize,
+  CREATIVE_DOCUMENT_SOURCE,
+  creativeDocumentExtension,
+  creativeDocumentMimeFromName,
   detectMediaAssetMimeType,
   MediaAssetEntity,
   mediaAssetPosterId,
@@ -24,6 +28,7 @@ import {
   CreativeAssetVersionEntity,
   CreativeFolderEntity,
 } from './entities';
+import type { CreativeAssetType } from './entities/creative-asset.entity';
 import { CreativeThumbnailService } from './creative-thumbnail.service';
 import type { CreativeStudioScope } from './creative-studio.scope';
 import {
@@ -71,10 +76,10 @@ function isStoredUpload(
     Boolean(source.stored)
   );
 }
-function storedKind(media: MediaAssetEntity): 'image' | 'video' {
+function storedKind(media: MediaAssetEntity): CreativeAssetType {
+  if (media.source === CREATIVE_DOCUMENT_SOURCE) return 'document';
   return media.mimeType.startsWith('image/') ? 'image' : 'video';
 }
-
 /**
  * CS3.2: runs inside the transaction that creates a version, once the version
  * row exists. A throw rolls the version back and compensates its binaries —
@@ -307,30 +312,62 @@ export class CreativeAssetService {
     try {
       return await run();
     } catch (error) {
-      if (stored)
-        await this.mediaUpload.removeAfterFailedConsumerOperation(
-          scope,
-          stored.id,
-        );
+      if (stored) await this.discardDirectUpload(scope, stored.id);
       throw error;
     }
   }
-  private kind(file: UploadFile | undefined): 'image' | 'video' {
+  private async directDocumentVersion(
+    manager: EntityManager,
+    media: MediaAssetEntity,
+  ) {
+    // Completion can replay the same R2 token. Serialize consumers of its stored object.
+    const existing = await manager.getRepository(MediaAssetEntity).findOne({
+      where: { id: media.id },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!existing)
+      throw new ConflictException({
+        code: 'creative_direct_upload_unavailable',
+        message: 'O envio expirou. Envie o documento novamente.',
+      });
+    return manager.getRepository(CreativeAssetVersionEntity).findOne({
+      where: { mediaAssetId: media.id },
+      order: { createdAt: 'ASC' },
+    });
+  }
+  private kind(file: UploadFile | undefined): CreativeAssetType {
     if (!file?.buffer?.length)
       throw new BadRequestException('Nenhum arquivo foi enviado.');
+    if (creativeDocumentMimeFromName(file.originalname)) {
+      return 'document';
+    }
     const mime = detectMediaAssetMimeType(file.buffer);
     if (!mime)
-      throw new BadRequestException('Envie uma imagem ou vídeo aceito.');
+      throw new BadRequestException(
+        'Envie uma imagem, vídeo ou documento aceito.',
+      );
     return mime.startsWith('image/') ? 'image' : 'video';
   }
-  private assertDomainLimit(file: UploadFile, type: 'image' | 'video') {
+  private assertDomainLimit(file: UploadFile, type: CreativeAssetType) {
     const bytes = Math.max(file.size ?? 0, file.buffer.length);
+    if (type === 'document') {
+      assertCreativeDocumentSize(bytes);
+      return;
+    }
     if (bytes > (type === 'image' ? CREATIVE_IMAGE_MAX_BYTES : VIDEO_MAX))
       throw new BadRequestException(
         type === 'image'
           ? 'A imagem excede o limite de 20 MB.'
           : 'O vídeo excede o limite de 300 MB.',
       );
+  }
+
+  private assertMediaUse(type: CreativeAssetType, usesMedia: boolean) {
+    if (type === 'document' && usesMedia)
+      throw new BadRequestException({
+        code: 'creative_document_not_publishable',
+        message: 'Documentos não podem ser vinculados ao fluxo de publicação.',
+      });
   }
   /**
    * Lists a file sent in the Planner, sharing its binary rather than copying
@@ -409,11 +446,11 @@ export class CreativeAssetService {
     scope: CreativeStudioScope,
     actor: string | null,
     file: UploadFile,
-    assetType: 'image' | 'video',
+    assetType: CreativeAssetType,
   ): Promise<string | null> {
     if (assetType === 'image')
       return (await this.thumbnails.create(scope, actor, file)).id;
-    if (!file.videoPoster) return null;
+    if (assetType !== 'video' || !file.videoPoster) return null;
     // A poster is a convenience: an unreadable one never blocks the video.
     try {
       return (await this.thumbnails.create(scope, actor, file.videoPoster)).id;
@@ -443,6 +480,10 @@ export class CreativeAssetService {
         const assetType = stored
           ? storedKind(stored)
           : this.kind(file ?? undefined);
+        this.assertMediaUse(
+          assetType,
+          Boolean(input.contentItemId || input.sourceType === 'generated'),
+        );
         if (file) this.assertDomainLimit(file, assetType);
         await this.assertFolder(scope, input.folderId);
         const link = await this.assertContentItem(scope, input.contentItemId);
@@ -457,6 +498,7 @@ export class CreativeAssetService {
       (await this.mediaUpload.upload(scope, actor, {
         file: file!,
         source: 'creative_studio',
+        allowCreativeDocuments: true,
       }));
     let thumbnailId: string | null = null;
     try {
@@ -467,6 +509,10 @@ export class CreativeAssetService {
       return await this.dataSource.transaction(async (manager) => {
         const assets = manager.getRepository(CreativeAssetEntity);
         const versions = manager.getRepository(CreativeAssetVersionEntity);
+        if (stored && assetType === 'document') {
+          const replay = await this.directDocumentVersion(manager, stored);
+          if (replay) return this.find(scope, replay.creativeAssetId, assets);
+        }
         const asset = await assets.save(
           assets.create({
             ...this.scopeValues(scope),
@@ -511,10 +557,7 @@ export class CreativeAssetService {
           scope,
           thumbnailId,
         );
-      await this.mediaUpload.removeAfterFailedConsumerOperation(
-        scope,
-        original.id,
-      );
+      await this.discardDirectUpload(scope, original.id);
       throw error;
     }
   }
@@ -544,6 +587,10 @@ export class CreativeAssetService {
         const assetType = stored
           ? storedKind(stored)
           : this.kind(file ?? undefined);
+        this.assertMediaUse(
+          assetType,
+          Boolean(revision || asset.contentItemId),
+        );
         if (asset.assetType !== assetType)
           throw new BadRequestException(
             'A nova versão deve manter o tipo do criativo.',
@@ -557,6 +604,7 @@ export class CreativeAssetService {
       (await this.mediaUpload.upload(scope, actor, {
         file: file!,
         source: 'creative_studio',
+        allowCreativeDocuments: true,
       }));
     let thumbnailId: string | null = null;
     try {
@@ -566,6 +614,17 @@ export class CreativeAssetService {
       return await this.dataSource.transaction(async (manager) => {
         const versions = manager.getRepository(CreativeAssetVersionEntity);
         const assets = manager.getRepository(CreativeAssetEntity);
+        if (stored && assetType === 'document') {
+          const replay = await this.directDocumentVersion(manager, stored);
+          if (replay) {
+            if (replay.creativeAssetId !== asset.id)
+              throw new ConflictException({
+                code: 'creative_direct_upload_already_used',
+                message: 'Este envio já pertence a outro documento.',
+              });
+            return this.versionView(replay);
+          }
+        }
         const latest = await versions
           .createQueryBuilder('v')
           .select('MAX(v.versionNumber)', 'max')
@@ -614,10 +673,7 @@ export class CreativeAssetService {
           scope,
           thumbnailId,
         );
-      await this.mediaUpload.removeAfterFailedConsumerOperation(
-        scope,
-        original.id,
-      );
+      await this.discardDirectUpload(scope, original.id);
       // Two versions racing for the same number: the unique constraint already
       // serializes them; report the loser as a conflict instead of a 500.
       if (this.isVersionNumberConflict(error))
@@ -711,7 +767,9 @@ export class CreativeAssetService {
           ? {}
           : { companyContextId: scope.companyContextId },
       );
-    if (query.assetType)
+    if (query.assetType === 'media')
+      qb.andWhere("asset.assetType IN ('image', 'video')");
+    else if (query.assetType)
       qb.andWhere('asset.assetType = :assetType', {
         assetType: query.assetType,
       });
@@ -784,8 +842,12 @@ export class CreativeAssetService {
       order: { versionNumber: 'DESC' },
     });
     const current = versions.find((v) => v.id === asset.currentVersionId);
+    const media =
+      current && asset.assetType === 'document'
+        ? await this.mediaAssets.findOneBy({ id: current.mediaAssetId })
+        : null;
     return {
-      ...this.toView(asset, current),
+      ...this.toView(asset, current, media ?? undefined),
       versions: versions.map((v) => this.versionView(v)),
       planner: await this.plannerLink(scope, asset.contentItemId),
     };
@@ -983,7 +1045,8 @@ export class CreativeAssetService {
           ? 'Thumbnail não encontrada.'
           : 'Versão atual não encontrada.',
       );
-    return this.mediaResolver.resolve({ ...scope, mediaAssetId });
+    const media = await this.mediaResolver.resolve({ ...scope, mediaAssetId });
+    return { ...media, assetType: asset.assetType, name: asset.name };
   }
   async versionsFor(scope: CreativeStudioScope, id: string) {
     await this.find(scope, id);
@@ -1001,8 +1064,12 @@ export class CreativeAssetService {
       throw new NotFoundException('Criativo não encontrado.');
     return asset;
   }
-  private async find(scope: CreativeStudioScope, id: string) {
-    const asset = await this.assets.findOne({
+  private async find(
+    scope: CreativeStudioScope,
+    id: string,
+    repository = this.assets,
+  ) {
+    const asset = await repository.findOne({
       where: { ...this.scopeWhere(scope), id, deletedAt: IsNull() },
     });
     if (!asset) throw new NotFoundException('Criativo não encontrado.');
@@ -1030,6 +1097,11 @@ export class CreativeAssetService {
       id: asset.id,
       name: asset.name,
       assetType: asset.assetType,
+      ...(asset.assetType === 'document' && {
+        documentExtension: media
+          ? (creativeDocumentExtension(media.mimeType) ?? null)
+          : null,
+      }),
       sourceType: asset.sourceType,
       status: asset.status,
       folderId: asset.folderId,

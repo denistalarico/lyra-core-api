@@ -16,6 +16,7 @@ import { FilesService } from '../files/files.service';
 import {
   assertDirectUploadPartNumbers,
   assertDirectUploadRequest,
+  assertDirectUploadSize,
   type DirectUploadClaims,
   directUploadPartCount,
   MEDIA_ASSET_DIRECT_UPLOAD_PART_BYTES,
@@ -27,7 +28,10 @@ import {
 } from './media-asset-direct-upload.rules';
 import type { MediaAssetScope } from './media-asset-resolver.service';
 import {
+  assertCreativeDocumentSize,
   buildMediaAssetObjectKey,
+  creativeDocumentMimeFromName,
+  sanitizeCreativeDocumentFilename,
   sanitizeMediaAssetFilename,
 } from './media-asset-upload.rules';
 import { MediaAssetUploadService } from './media-asset-upload.service';
@@ -67,7 +71,15 @@ export class MediaAssetDirectUploadService {
         message: 'Envio direto indisponível.',
       });
     }
-    const mimeType = assertDirectUploadRequest(input);
+    const documentMime =
+      input.source === 'creative_studio'
+        ? creativeDocumentMimeFromName(input.filename)
+        : undefined;
+    if (documentMime) {
+      assertDirectUploadSize(input.byteSize);
+      assertCreativeDocumentSize(input.byteSize);
+    }
+    const mimeType = documentMime ?? assertDirectUploadRequest(input);
     const { assetId, objectKey } = buildMediaAssetObjectKey({
       tenantId: scope.tenantId,
       agencyClientId: scope.agencyClientId,
@@ -76,7 +88,7 @@ export class MediaAssetDirectUploadService {
     const path = this.files.r2Path(objectKey);
     const uploadId = await this.files.createPrivateMultipartUpload({
       path,
-      contentType: mimeType,
+      contentType: documentMime ? 'application/octet-stream' : mimeType,
     });
     const exp =
       Math.floor(Date.now() / 1000) +
@@ -94,7 +106,9 @@ export class MediaAssetDirectUploadService {
       source: input.source,
       mimeType,
       byteSize: input.byteSize,
-      filename: sanitizeMediaAssetFilename(input.filename),
+      filename: documentMime
+        ? sanitizeCreativeDocumentFilename(input.filename, documentMime)
+        : sanitizeMediaAssetFilename(input.filename),
       exp,
     };
     return {
