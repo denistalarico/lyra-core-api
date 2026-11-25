@@ -259,7 +259,7 @@ export class ClientAreaAuthorizationService {
       role: membership.role,
       accountRole:
         membership.role === 'client_owner' ? 'client_owner' : 'client_member',
-      permissions: permissionsForMemberAccess(memberAccess),
+      permissions: permissionsForMemberAccess(memberAccess, membership.role),
       modules: Object.fromEntries(
         Object.entries(memberAccess).map(([key, state]) => [
           key,

@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  ParseUUIDPipe,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import type { CompanyAwareScope } from '../../../common/context/company-aware-scope';
@@ -34,9 +39,22 @@ const AGENCY_CONNECTION = 'agency';
 /** §17 — the agency side never shows an operator's identifiers to a client. */
 const AGENCY_TEAM_LABEL = 'Equipe da agência';
 
+export const ClientApprovalPieceIdPipe = new ParseUUIDPipe({
+  exceptionFactory: () =>
+    new BadRequestException({
+      code: 'approval_invalid_piece_id',
+      message: 'Identificador de peça inválido.',
+    }),
+});
+
 export type ClientApprovalReader = {
   userId: string;
-  permissions: { comment: boolean; decide: boolean; editText?: boolean };
+  permissions: {
+    comment: boolean;
+    decide: boolean;
+    editText?: boolean;
+    manage?: boolean;
+  };
 };
 
 /**

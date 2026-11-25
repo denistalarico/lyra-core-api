@@ -10,6 +10,7 @@ import { clientFeedbackTargets } from './client-approval-board.view';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -46,7 +47,10 @@ import {
   ClientApprovalWorkItemsQueryDto,
 } from './client-approval.dto';
 import { ClientApprovalTextEditService } from './client-approval-text-edit.service';
-import { ClientApprovalsService } from './client-approvals.service';
+import {
+  ClientApprovalPieceIdPipe,
+  ClientApprovalsService,
+} from './client-approvals.service';
 import {
   buildClientApprovalListItem,
   isClientApprovalMediaRef,
@@ -103,6 +107,7 @@ export class ClientAreaApprovalsController {
         comment: context.permissions.has('client_area.approvals.comment'),
         decide: context.permissions.has('client_area.approvals.decide'),
         editText: context.permissions.has('client_area.approvals.edit_text'),
+        manage: context.permissions.has('client_area.approvals.manage'),
       },
     };
   }
@@ -120,10 +125,78 @@ export class ClientAreaApprovalsController {
     @ClientAreaContextData() context: ClientAreaContext,
     @Query() query: ClientApprovalBoardQueryDto,
   ) {
-    return this.board.board(toCompanyAwareScope(context), query);
+    return this.board.board(
+      toCompanyAwareScope(context),
+      query,
+      context.permissions.has('client_area.approvals.manage'),
+    );
   }
 
   /** AR4 / D-06: read-only, same card as the board. */
+  @Post('board/archive-column')
+  archiveColumn(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Body('column') column: unknown,
+  ) {
+    return this.board.archiveColumn(
+      toCompanyAwareScope(context),
+      column,
+      this.reader(context),
+    );
+  }
+
+  @Post('pieces/:pieceId/finish')
+  finishPiece(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('pieceId', ClientApprovalPieceIdPipe) pieceId: string,
+  ) {
+    return this.board.managePiece(
+      toCompanyAwareScope(context),
+      pieceId,
+      'finish',
+      this.reader(context),
+    );
+  }
+
+  @Post('pieces/:pieceId/archive')
+  archivePiece(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('pieceId', ClientApprovalPieceIdPipe) pieceId: string,
+  ) {
+    return this.board.managePiece(
+      toCompanyAwareScope(context),
+      pieceId,
+      'archive',
+      this.reader(context),
+    );
+  }
+
+  @Post('pieces/:pieceId/unarchive')
+  unarchivePiece(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('pieceId', ClientApprovalPieceIdPipe) pieceId: string,
+  ) {
+    return this.board.managePiece(
+      toCompanyAwareScope(context),
+      pieceId,
+      'unarchive',
+      this.reader(context),
+    );
+  }
+
+  @Delete('pieces/:pieceId')
+  deletePiece(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('pieceId', ClientApprovalPieceIdPipe) pieceId: string,
+  ) {
+    return this.board.managePiece(
+      toCompanyAwareScope(context),
+      pieceId,
+      'delete',
+      this.reader(context),
+    );
+  }
+
   @Get('work-items')
   @RequireClientAreaPermission('client_area.approvals.view')
   workItems(

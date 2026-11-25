@@ -411,6 +411,8 @@ run('AR4 Planner, Approvals and Projects (real PostgreSQL)', () => {
       {} as never,
       { syncContexts: async () => undefined } as never,
       { thumbnailPaths: async () => new Map() } as never,
+      {} as never,
+      actions,
     );
 
     await db.getRepository(ClientAreaMembershipEntity).save(

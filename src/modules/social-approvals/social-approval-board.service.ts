@@ -234,20 +234,37 @@ export class SocialApprovalBoardService {
         'piece.workspaceId',
         'piece.agencyClientId',
         'piece.companyContextId',
+        'piece.boardColumn',
       ])
       .getMany();
+    return this.archiveCards(targets, actorUserId);
+  }
+
+  async archiveCards(
+    targets: ReadonlyArray<
+      CompanyAwareScope & Pick<SocialApprovalPieceEntity, 'id' | 'boardColumn'>
+    >,
+    actorUserId: string,
+  ) {
     if (targets.length === 0) return { archived: 0 };
-    await this.pieces.manager.transaction(async (manager) => {
-      await manager
+    return this.pieces.manager.transaction(async (manager) => {
+      const updated = await manager
         .getRepository(SocialApprovalPieceEntity)
         .createQueryBuilder()
         .update()
         .set({ archivedAt: () => 'now()', updatedAt: () => '"updated_at"' })
-        .where('id IN (:...ids) AND archived_at IS NULL', {
-          ids: targets.map((piece) => piece.id),
-        })
+        .where(
+          'id IN (:...ids) AND archived_at IS NULL AND deleted_at IS NULL',
+          {
+            ids: targets.map((piece) => piece.id),
+          },
+        )
+        .returning('id')
         .execute();
-      for (const piece of targets)
+      const archivedIds = new Set(
+        (updated.raw as Array<{ id: string }>).map(({ id }) => id),
+      );
+      for (const piece of targets.filter(({ id }) => archivedIds.has(id)))
         await this.domain.recordEvent(
           manager,
           {
@@ -262,10 +279,10 @@ export class SocialApprovalBoardService {
           'archived',
           { type: 'user', userId: actorUserId },
           'agency',
-          { column: query.column },
+          { column: piece.boardColumn },
         );
+      return { archived: archivedIds.size };
     });
-    return { archived: targets.length };
   }
 
   /** `source_state = 'hidden'` is what makes archiving take a card away. */

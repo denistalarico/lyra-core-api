@@ -36,6 +36,7 @@ import {
 import {
   ClientApprovalBoardService,
   type ClientBoardSource,
+  type ClientPieceAction,
   type ClientWorkItemsQuery,
 } from './client-approval-board.service';
 import type { ClientBoardColumn } from './client-approval-board.view';
@@ -89,7 +90,12 @@ const SELF_COLUMNS: Record<
 export type SelfApprovalReader = {
   userId: string;
   agencyRole: 'owner' | 'admin';
-  permissions: { comment: boolean; decide: boolean; editText?: boolean };
+  permissions: {
+    comment: boolean;
+    decide: boolean;
+    editText?: boolean;
+    manage?: boolean;
+  };
 };
 
 /**
@@ -198,6 +204,7 @@ export class SelfApprovalsService {
     return {
       scope,
       visibleSql: PIECE_SUBMITTED,
+      canManage: reader?.permissions.manage,
       columnsFor: (column) => SELF_COLUMNS[column],
       presentPiece: (piece: SocialApprovalPieceEntity) => ({
         ...piece,
@@ -239,8 +246,38 @@ export class SelfApprovalsService {
     return latest;
   }
 
-  boardList(scope: CompanyAwareScope, query: ClientApprovalBoardQueryDto) {
-    return this.board.boardFor(this.source(scope), query);
+  boardList(
+    scope: CompanyAwareScope,
+    query: ClientApprovalBoardQueryDto,
+    canManage = false,
+  ) {
+    return this.board.boardFor({ ...this.source(scope), canManage }, query);
+  }
+
+  managePiece(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    action: ClientPieceAction,
+    reader: SelfApprovalReader,
+  ) {
+    return this.board.managePieceFor(
+      this.source(scope, reader),
+      pieceId,
+      action,
+      reader.userId,
+    );
+  }
+
+  archiveColumn(
+    scope: CompanyAwareScope,
+    column: unknown,
+    reader: SelfApprovalReader,
+  ) {
+    return this.board.archiveColumnFor(
+      this.source(scope, reader),
+      column,
+      reader.userId,
+    );
   }
 
   workItems(scope: CompanyAwareScope, query: ClientWorkItemsQuery) {

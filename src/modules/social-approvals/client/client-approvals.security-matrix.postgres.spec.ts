@@ -1,4 +1,5 @@
 import { AddSocialApprovalCommentRichContent1803500000000 } from '../../../database/migrations/1803500000000-add-social-approval-comment-rich-content';
+import { FilesService } from '../../../common/files/files.service';
 import { Module, ValidationPipe, type INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PassportModule } from '@nestjs/passport';
@@ -63,7 +64,7 @@ type DetailBody = {
   versionLabel: string;
   comments: Array<{ body: string; author: { name: string; side: string } }>;
   history: Array<{ kind: string }>;
-  actions: { canComment: boolean; canDecide: boolean };
+  actions: { canComment: boolean; canDecide: boolean; canEditText: boolean };
   preview: { format: string; text?: { copy: string | null } };
 };
 
@@ -72,9 +73,9 @@ type DetailBody = {
  * through the real guards and the real controller.
  *
  * Fixture (CA0 shape, extended for AP3):
- *   U1  client_viewer    → Company A
- *   U2  client_operator  → Company A
- *   U3  client_admin     → Company B
+ *   U1  approvals/operator, no decision assignment → Company A
+ *   U2  approvals/manager and designated approver  → Company A
+ *   U3  approvals/manager                         → Company B
  */
 run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
   let app: INestApplication;
@@ -83,6 +84,7 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
   const savedEnv = { ...process.env };
 
   const runId = randomUUID().slice(0, 8);
+  const noticeId = randomUUID();
   const email = (label: string) => `${label}.${runId}@ap3-spec.example.com`;
 
   const T = randomUUID(),
@@ -147,7 +149,19 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
    * and CRM chain. Used by the cases that break one link of the chain, so
    * the shared U1/U2/U3 fixture is never mutated.
    */
-  async function disposableMember(label: string) {
+  async function grantApprovals(
+    membershipId: string,
+    level: 'viewer' | 'operator' | 'manager',
+  ) {
+    await db.query(
+      `INSERT INTO client_area_member_module_access
+         (membership_id,module_key,level,granted_by_user_id,granted_by_surface)
+       VALUES ($1,'approvals',$2,$3,'agency')`,
+      [membershipId, level, OP],
+    );
+  }
+
+  async function disposableMember(label: string, role = 'client_viewer') {
     const userId = randomUUID();
     const address = email(label);
     await db.query(
@@ -161,13 +175,14 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
        VALUES ($1,$2,$3,$4)`,
       [T, userId, `Cliente ${label}`, address],
     );
-    await memberships.grant({
+    const membership = await memberships.grant({
       tenantId: T,
       companyContextId: A,
       userId,
-      role: 'client_viewer',
+      role,
       grantedByUserId: OP,
     });
+    if (role !== 'client_owner') await grantApprovals(membership.id, 'viewer');
     const personContactId = await crmLink(userId, address, orgA);
     return { userId, token: await tokenFor(address), personContactId };
   }
@@ -195,8 +210,8 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
    * preview, and the detail route would fail exactly as it should.
    */
   async function seedPlannerSubject(
-    companyContextId: string,
-    agencyClientId: string,
+    companyContextId: string | null,
+    agencyClientId: string | null,
     copy: string,
   ) {
     const [{ id: planId }] = await db.query<Array<{ id: string }>>(
@@ -222,8 +237,8 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
 
   async function seedApproval(
     id: string,
-    companyContextId: string,
-    agencyClientId: string,
+    companyContextId: string | null,
+    agencyClientId: string | null,
     overrides: {
       status?: string;
       stage?: string;
@@ -345,6 +360,7 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
     process.env.JWT_ACCESS_SECRET = AGENCY_SECRET;
     process.env.JWT_CLIENT_AREA_ACCESS_SECRET = CLIENT_SECRET;
     process.env.CLIENT_AREA_ENABLED = 'true';
+    process.env.CLIENT_AREA_SELF_MODULES_ENABLED = 'true';
     delete process.env.JWT_2FA_SECRET;
 
     const moduleRef = await Test.createTestingModule({
@@ -362,6 +378,8 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
       ],
       providers: [JwtStrategy, TenantContextAuthority],
     })
+      .overrideProvider(FilesService)
+      .useValue({})
       .overrideModule(EmailModule)
       .useModule(FakeEmailModule)
       .compile();
@@ -422,6 +440,12 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
       [T, W, X, Y, A, B],
     );
     await db.query(
+      `INSERT INTO agency_client_company_products
+         (tenant_id, workspace_id, agency_client_id, company_context_id, product_key, status)
+       VALUES ($1,$2,$3,$4,'social','active'),($1,$2,$5,$6,'social','active')`,
+      [T, W, X, A, Y, B],
+    );
+    await db.query(
       `INSERT INTO tenant_product_entitlements (tenant_id,product_key,status,source) VALUES
         ($1,'social','active','manual'),($2,'social','active','manual')`,
       [MX, MY],
@@ -463,12 +487,41 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
         grantedByUserId: OP,
       });
     membershipU1 = (await grant(A, U1, 'client_viewer')).id;
-    await grant(A, U2, 'client_operator');
-    await grant(B, U3, 'client_admin');
+    const membershipU2 = (await grant(A, U2, 'client_operator')).id;
+    const membershipU3 = (await grant(B, U3, 'client_admin')).id;
+    await grantApprovals(membershipU1, 'operator');
+    await grantApprovals(membershipU2, 'manager');
+    await grantApprovals(membershipU3, 'manager');
+    await db.query(
+      `INSERT INTO social_approval_settings
+         (tenant_id,workspace_id,agency_client_id,company_context_id,client_approver_membership_ids)
+       VALUES ($1,$2,$3,$4,jsonb_build_array($5::text))`,
+      [T, W, X, A, membershipU2],
+    );
 
     await crmLink(U1, email('u1'), orgA);
     await crmLink(U2, email('u2'), orgA);
     await crmLink(U3, email('u3'), orgB);
+
+    await db.query(
+      `INSERT INTO leadflow_telemetry_consent_notices
+         (id,purpose_key,version,title,body,content_hash,retention_days,legal_review_status,effective_at)
+       SELECT $1,'client_area_essential_processing',COALESCE(MAX(version),0)+1,
+              'Aviso AP3','Aviso dos testes de aprovação',repeat('a',64),30,'approved',now()
+         FROM leadflow_telemetry_consent_notices WHERE purpose_key='client_area_essential_processing'`,
+      [noticeId],
+    );
+    await db.query(
+      `INSERT INTO leadflow_telemetry_consents
+         (tenant_id,workspace_id,agency_client_id,company_context_id,context_type,purpose_key,
+          status,occurred_at,notice_id,notice_version,notice_content_hash,actor_user_id,actor_surface)
+       SELECT $1,$2,c.agency_client_id,c.id,'client',n.purpose_key,
+              'opted_in',now(),n.id,n.version,n.content_hash,$4,'client_area'
+         FROM agency_client_company_contexts c
+         CROSS JOIN leadflow_telemetry_consent_notices n
+        WHERE c.tenant_id=$1 AND c.workspace_id=$2 AND n.id=$3`,
+      [T, W, noticeId, OP],
+    );
 
     await seedApproval(sentA, A, X, { title: 'Enviado A', versionLabel: 'r2' });
     await seedApproval(draftA, A, X, {
@@ -518,7 +571,47 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
           );
           await db.query(`ALTER TABLE "${table}" ENABLE TRIGGER "${trigger}"`);
         }
+        await db.transaction(async (manager) => {
+          await manager.query(
+            'ALTER TABLE social_approval_events DISABLE TRIGGER "TRG_social_approval_events_append_only"',
+          );
+          await manager.query(
+            'DELETE FROM social_approval_events WHERE tenant_id = $1',
+            [T],
+          );
+          await manager.query(
+            'ALTER TABLE social_approval_events ENABLE TRIGGER "TRG_social_approval_events_append_only"',
+          );
+        });
+        await db.query(
+          'UPDATE social_approval_requests SET step_id = NULL WHERE tenant_id = $1 AND step_id IS NOT NULL',
+          [T],
+        );
+        await db.transaction(async (manager) => {
+          await manager.query(
+            'ALTER TABLE leadflow_telemetry_consents DISABLE TRIGGER client_area_consent_append_only',
+          );
+          await manager.query(
+            'DELETE FROM leadflow_telemetry_consents WHERE tenant_id = $1',
+            [T],
+          );
+          await manager.query(
+            'ALTER TABLE leadflow_telemetry_consents ENABLE TRIGGER client_area_consent_append_only',
+          );
+        });
+        await db.query(
+          'DELETE FROM leadflow_telemetry_consent_notices WHERE id = $1',
+          [noticeId],
+        );
+        await db.query(
+          `DELETE FROM client_area_member_module_access WHERE membership_id IN
+             (SELECT id FROM client_area_memberships WHERE tenant_id = $1)`,
+          [T],
+        );
         for (const table of [
+          'social_approval_settings',
+          'social_approval_steps',
+          'social_approval_pieces',
           'client_area_approval_notifications',
           'client_area_member_events',
           'client_area_invitations',
@@ -526,6 +619,7 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
           'contact_company_links',
           'contact_methods',
           'client_area_memberships',
+          'client_area_self_access',
           'client_area_company_settings',
           'client_area_settings',
           'social_approval_requests',
@@ -537,6 +631,7 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
           'user_security_settings',
           'user_profile',
           'workspace_users',
+          'agency_client_company_products',
           'agency_client_company_contexts',
           'agency_clients',
           'contacts',
@@ -545,7 +640,7 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
         }
         await db.query(
           `DELETE FROM tenant_product_entitlements WHERE tenant_id = ANY($1::uuid[])`,
-          [[MX, MY]],
+          [[MX, MY, T]],
         );
       }
     } finally {
@@ -658,7 +753,7 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
   });
 
   describe('§60 permissions by role', () => {
-    it('a viewer may view and comment but may not decide', async () => {
+    it('a member can comment, with decisions limited to the designated approver', async () => {
       const token = await tokenFor(email('u1'));
 
       await authed(approvalsPath(A, `/${sentA}`), token).expect(200);
@@ -671,22 +766,30 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
         .expect(403);
     });
 
-    it('the detail tells a viewer it cannot decide', async () => {
+    it('the detail tells a member it cannot decide without assignment', async () => {
       const token = await tokenFor(email('u1'));
       const detail = (
         await authed(approvalsPath(A, `/${sentA}`), token).expect(200)
       ).body as DetailBody;
 
-      expect(detail.actions).toEqual({ canComment: true, canDecide: false });
+      expect(detail.actions).toEqual({
+        canComment: true,
+        canDecide: false,
+        canEditText: false,
+      });
     });
 
-    it('an operator of the same company may decide', async () => {
+    it('the designated approver of the same company can decide', async () => {
       const token = await tokenFor(email('u2'));
       const detail = (
         await authed(approvalsPath(A, `/${sentA}`), token).expect(200)
       ).body as DetailBody;
 
-      expect(detail.actions).toEqual({ canComment: true, canDecide: true });
+      expect(detail.actions).toEqual({
+        canComment: true,
+        canDecide: true,
+        canEditText: false,
+      });
     });
   });
 
@@ -821,7 +924,11 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
       ).body as DetailBody;
 
       expect(detail.status).toBe('approved');
-      expect(detail.actions).toEqual({ canComment: false, canDecide: false });
+      expect(detail.actions).toEqual({
+        canComment: false,
+        canDecide: false,
+        canEditText: false,
+      });
 
       const [row] = await db.query<
         Array<{ status: string; approved_at: Date }>
@@ -1064,5 +1171,227 @@ run('AP3 Client Approvals security matrix (PostgreSQL, real guards)', () => {
           .expect(404);
       }
     });
+  });
+  describe('F5 Owner lifecycle', () => {
+    const routes = [
+      ['post', '/pieces/:id/finish'],
+      ['post', '/pieces/:id/archive'],
+      ['post', '/pieces/:id/unarchive'],
+      ['delete', '/pieces/:id'],
+      ['post', '/board/archive-column'],
+    ] as const;
+
+    it.each(routes)(
+      '%s %s requires Owner and rejects company tokens on self',
+      async (method, route) => {
+        const suffix = route.replace(':id', sentA);
+        const member = await tokenFor(email('u2'));
+        await http()
+          [method](approvalsPath(A, suffix))
+          .set('Authorization', `Bearer ${member}`)
+          .send({ column: 'approved' })
+          .expect(400)
+          .expect(({ body }) =>
+            expect(body.code).toBe('approval_manage_requires_owner'),
+          );
+        await http()
+          [method](`/client-area/self/approvals${suffix}`)
+          .set('Authorization', `Bearer ${member}`)
+          .send({ column: 'approved' })
+          .expect(404);
+      },
+    );
+
+    async function seedBoardPiece(approvalId: string, column: string) {
+      const pieceId = randomUUID();
+      const stepId = randomUUID();
+      await db.query(
+        `INSERT INTO social_approval_pieces
+           (id, tenant_id, workspace_id, agency_client_id, company_context_id, kind, origin, title, board_column)
+         SELECT $2, tenant_id, workspace_id, agency_client_id, company_context_id,
+                'standalone', 'approvals', title, $3
+           FROM social_approval_requests WHERE id = $1`,
+        [approvalId, pieceId, column],
+      );
+      await db.query(
+        `INSERT INTO social_approval_steps
+           (id, tenant_id, workspace_id, agency_client_id, company_context_id, piece_id, kind, title, current_request_id)
+         SELECT $2, tenant_id, workspace_id, agency_client_id, company_context_id,
+                $3, 'text', title, id
+           FROM social_approval_requests WHERE id = $1`,
+        [approvalId, stepId, pieceId],
+      );
+      await db.query(
+        'UPDATE social_approval_requests SET step_id = $2 WHERE id = $1',
+        [approvalId, stepId],
+      );
+      return pieceId;
+    }
+
+    it('finishes, archives, restores and tombstones a visible card in the Owner company', async () => {
+      const { token, userId } = await disposableMember(
+        'f5-owner',
+        'client_owner',
+      );
+      const id = randomUUID();
+      const openId = randomUUID();
+      const foreignId = randomUUID();
+      await seedApproval(id, A, X, { status: 'approved' });
+      await seedApproval(openId, A, X);
+      await seedApproval(foreignId, B, Y, { status: 'approved' });
+      const approved = await seedBoardPiece(id, 'approved');
+      const pending = await seedBoardPiece(openId, 'awaiting_client');
+      const foreign = await seedBoardPiece(foreignId, 'approved');
+      const path = (piece: string, action = '') =>
+        approvalsPath(A, `/pieces/${piece}${action}`);
+      const boardPath = approvalsPath(A, '/board');
+      const member = await tokenFor(email('u2'));
+      await authed(boardPath, member)
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.canArchive).toBeUndefined();
+          expect(
+            body.columns.approved.items.find(
+              (item: { id: string }) => item.id === approved,
+            )?.actions,
+          ).toBeUndefined();
+        });
+      await authed(boardPath, token)
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.canArchive).toBe(true);
+          expect(body.columns.approved.items).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                id: approved,
+                actions: expect.objectContaining({
+                  canFinish: true,
+                  canArchive: true,
+                  canDelete: true,
+                }),
+              }),
+            ]),
+          );
+        });
+      await post(path('invalid', '/archive'), token)
+        .expect(400)
+        .expect(({ body }) =>
+          expect(body.code).toBe('approval_invalid_piece_id'),
+        );
+      await post(`${boardPath}/archive-column`, token)
+        .send({ column: 'internal_review' })
+        .expect(400)
+        .expect(({ body }) =>
+          expect(body.code).toBe('approval_invalid_board_column'),
+        );
+      await post(path(foreign, '/archive'), token).expect(404);
+      await post(path(pending, '/finish'), token).expect(409);
+      await http()
+        .delete(path(pending))
+        .set('Authorization', `Bearer ${token}`)
+        .expect(409)
+        .expect(({ body }) =>
+          expect(body.code).toBe('approval_piece_delete_conflict'),
+        );
+      await post(`${boardPath}/archive-column`, token)
+        .send({ column: 'approved' })
+        .expect(201);
+      await authed(boardPath, token)
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.columns.approved.items).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                id: approved,
+                archivedAt: expect.any(String),
+              }),
+            ]),
+          );
+        });
+      const [other] = await db.query(
+        'SELECT archived_at FROM social_approval_pieces WHERE id = $1',
+        [foreign],
+      );
+      expect(other.archived_at).toBeNull();
+      await post(path(approved, '/unarchive'), token).expect(201);
+      await post(path(approved, '/finish'), token).expect(201);
+      await post(path(approved, '/archive'), token).expect(201);
+      await http()
+        .delete(path(approved))
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      await authed(path(approved), token).expect(404);
+      const [tombstone] = await db.query(
+        'SELECT finished_by_user_id, deleted_at FROM social_approval_pieces WHERE id = $1',
+        [approved],
+      );
+      expect(tombstone).toEqual({
+        finished_by_user_id: userId,
+        deleted_at: expect.any(Date),
+      });
+      const [request] = await db.query(
+        'SELECT status FROM social_approval_requests WHERE id = $1',
+        [id],
+      );
+      expect(request.status).toBe('approved');
+    }, 20_000);
+
+    it('uses the self Owner preset and keeps the agency scope separate', async () => {
+      await db.query(
+        'UPDATE client_area_settings SET self_enabled = true WHERE tenant_id = $1 AND workspace_id = $2',
+        [T, W],
+      );
+      await db.query(
+        `INSERT INTO client_area_self_access (tenant_id,workspace_id,user_id,role)
+         VALUES ($1,$2,$3,'client_admin')`,
+        [T, W, OP],
+      );
+      await db.query(
+        `INSERT INTO tenant_product_entitlements (tenant_id,product_key,status,source)
+         VALUES ($1,'social','active','manual')`,
+        [T],
+      );
+      const requestId = randomUUID();
+      await seedApproval(requestId, null, null, {
+        status: 'approved',
+        stage: 'internal',
+        sentToClientAt: null,
+      });
+      const pieceId = await seedBoardPiece(requestId, 'approved');
+      await db.query(
+        `INSERT INTO social_approval_events
+           (tenant_id,workspace_id,piece_id,step_id,request_id,type,actor_type,actor_user_id,surface)
+         SELECT $1,$2,$3,step_id,id,'sent','user',$4,'agency'
+           FROM social_approval_requests WHERE id=$5`,
+        [T, W, pieceId, OP, requestId],
+      );
+      const token = await tokenFor(email('op'));
+      const root = '/client-area/self/approvals';
+      const path = `${root}/pieces/${pieceId}`;
+      await authed(`${root}/board`, token)
+        .expect(200)
+        .expect(({ body }) => {
+          expect(body.canArchive).toBe(true);
+          expect(body.columns.approved.items).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                id: pieceId,
+                actions: expect.objectContaining({ canFinish: true }),
+              }),
+            ]),
+          );
+        });
+      await post(`${path}/finish`, token).expect(201);
+      await post(`${root}/board/archive-column`, token)
+        .send({ column: 'finished' })
+        .expect(201);
+      await post(`${path}/unarchive`, token).expect(201);
+      await post(`${path}/archive`, token).expect(201);
+      await http()
+        .delete(path)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      await authed(path, token).expect(404);
+    }, 20_000);
   });
 });

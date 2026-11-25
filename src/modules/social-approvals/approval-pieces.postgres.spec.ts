@@ -273,6 +273,8 @@ run('AR1 approval pieces (real PostgreSQL)', () => {
       clientApprovals,
       sync,
       { thumbnailPaths: async () => new Map() } as never,
+      board,
+      actions,
     );
     selfApprovals = new SelfApprovalsService(
       db.getRepository(SocialApprovalRequestEntity),

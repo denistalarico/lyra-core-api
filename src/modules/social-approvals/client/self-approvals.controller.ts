@@ -6,10 +6,12 @@ import {
   SocialApprovalFeedbackService,
   type ApprovalFeedbackFile,
 } from '../social-approval-feedback.service';
+import { ClientApprovalPieceIdPipe } from './client-approvals.service';
 import { clientFeedbackTargets } from './client-approval-board.view';
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -53,8 +55,7 @@ import {
  * path keeps refusing Agency decisions (`social-client-area.routes.spec.ts`),
  * and this one is unreachable without `ClientAreaSelfContextGuard`, which an
  * external client never passes. Mirrors the company routes and payloads so
- * the screen is the same; submitting, cancelling, overriding and finishing
- * stay on the Agency surface.
+ * the screen is the same; submitting, cancelling and overriding stay on the Agency surface.
  */
 @Controller('client-area/self/approvals')
 @UseGuards(
@@ -78,6 +79,7 @@ export class SelfApprovalsController {
         comment: context.permissions.has('client_area.approvals.comment'),
         decide: context.permissions.has('client_area.approvals.decide'),
         editText: context.permissions.has('client_area.approvals.edit_text'),
+        manage: context.permissions.has('client_area.approvals.manage'),
       },
     };
   }
@@ -95,7 +97,75 @@ export class SelfApprovalsController {
     @ClientAreaSelfContextData() context: ClientAreaSelfContext,
     @Query() query: ClientApprovalBoardQueryDto,
   ) {
-    return this.approvals.boardList(selfApprovalScope(context), query);
+    return this.approvals.boardList(
+      selfApprovalScope(context),
+      query,
+      context.permissions.has('client_area.approvals.manage'),
+    );
+  }
+
+  @Post('board/archive-column')
+  archiveColumn(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Body('column') column: unknown,
+  ) {
+    return this.approvals.archiveColumn(
+      selfApprovalScope(context),
+      column,
+      this.reader(context),
+    );
+  }
+
+  @Post('pieces/:pieceId/finish')
+  finishPiece(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Param('pieceId', ClientApprovalPieceIdPipe) pieceId: string,
+  ) {
+    return this.approvals.managePiece(
+      selfApprovalScope(context),
+      pieceId,
+      'finish',
+      this.reader(context),
+    );
+  }
+
+  @Post('pieces/:pieceId/archive')
+  archivePiece(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Param('pieceId', ClientApprovalPieceIdPipe) pieceId: string,
+  ) {
+    return this.approvals.managePiece(
+      selfApprovalScope(context),
+      pieceId,
+      'archive',
+      this.reader(context),
+    );
+  }
+
+  @Post('pieces/:pieceId/unarchive')
+  unarchivePiece(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Param('pieceId', ClientApprovalPieceIdPipe) pieceId: string,
+  ) {
+    return this.approvals.managePiece(
+      selfApprovalScope(context),
+      pieceId,
+      'unarchive',
+      this.reader(context),
+    );
+  }
+
+  @Delete('pieces/:pieceId')
+  deletePiece(
+    @ClientAreaSelfContextData() context: ClientAreaSelfContext,
+    @Param('pieceId', ClientApprovalPieceIdPipe) pieceId: string,
+  ) {
+    return this.approvals.managePiece(
+      selfApprovalScope(context),
+      pieceId,
+      'delete',
+      this.reader(context),
+    );
   }
 
   @Get('work-items')

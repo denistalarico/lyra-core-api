@@ -87,6 +87,13 @@ export type ClientBoardCard = {
   steps: ClientBoardStep[];
   lastActivityAt: string;
   finishedAt: string | null;
+  archivedAt?: string | null;
+  actions?: {
+    canFinish: boolean;
+    canArchive: boolean;
+    canDelete: boolean;
+    canRemove: boolean;
+  };
 };
 
 export type ClientPieceDetail = ClientBoardCard & {
@@ -124,10 +131,15 @@ export function buildClientBoardCard(
   extras: {
     inCampaign?: boolean;
     thumbnail?: ClientBoardCard['thumbnail'];
+    canManage?: boolean;
   } = {},
 ): ClientBoardCard {
   const column = toClientBoardColumn(piece.boardColumn);
   const active = steps.find((step) => step.id === piece.activeStepId);
+  const canDelete =
+    Boolean(piece.finishedAt) ||
+    (piece.boardColumn !== 'awaiting_client' &&
+      piece.boardColumn !== 'internal_review');
   return {
     id: piece.id,
     kind: piece.kind,
@@ -149,6 +161,15 @@ export function buildClientBoardCard(
     ),
     lastActivityAt: piece.updatedAt.toISOString(),
     finishedAt: piece.finishedAt?.toISOString() ?? null,
+    ...(extras.canManage && {
+      archivedAt: piece.archivedAt?.toISOString() ?? null,
+      actions: {
+        canFinish: column === 'approved' && !piece.archivedAt,
+        canArchive: true,
+        canDelete,
+        canRemove: canDelete,
+      },
+    }),
   };
 }
 

@@ -137,6 +137,7 @@ import { ApprovalSubjectResolver } from './subjects/approval-subject-resolver';
     ClientApprovalNotifierRegistry,
   ],
   exports: [
+    SocialApprovalBoardService,
     SocialApprovalFeedbackService,
     SocialApprovalsService,
     SocialApprovalAuthorityService,

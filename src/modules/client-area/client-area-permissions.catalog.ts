@@ -24,6 +24,7 @@ export const CLIENT_AREA_ROLE_PERMISSIONS: Readonly<
     'client_area.approvals.comment',
     'client_area.approvals.decide',
     'client_area.approvals.edit_text',
+    'client_area.approvals.manage',
     'client_area.conversations.view',
     'client_area.conversations.send',
     'client_area.self.overview.view',
@@ -106,12 +107,14 @@ export function resolveMemberAccess(
 
 export function permissionsForMemberAccess(
   access: ClientAreaMemberAccess,
+  role?: ClientAreaRole,
 ): ReadonlySet<ClientAreaPermissionKey> {
   const result = new Set<ClientAreaPermissionKey>();
   if (access.agency_billing.available)
     result.add('client_area.agency_billing.view');
   if (access.approvals.available) {
     result.add('client_area.approvals.view');
+    if (role === 'client_owner') result.add('client_area.approvals.manage');
     if (access.approvals.level !== 'viewer') {
       result.add('client_area.approvals.comment');
       result.add('client_area.approvals.decide');

@@ -1,5 +1,10 @@
 import { approvalPiecePost } from '../approval-piece-post';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository } from 'typeorm';
 import type { CompanyAwareScope } from '../../../common/context/company-aware-scope';
@@ -14,7 +19,11 @@ import { SocialContentItemEntity } from '../../social-planner/entities';
 import { ApprovalSubjectResolver } from '../subjects/approval-subject-resolver';
 import { approvalScopeWhere } from '../approval-scope';
 import { SocialApprovalPieceSyncService } from '../social-approval-piece-sync.service';
-import { parseBoardCursor } from '../social-approval-board.service';
+import {
+  parseBoardCursor,
+  SocialApprovalBoardService,
+} from '../social-approval-board.service';
+import { SocialApprovalPieceActionsService } from '../social-approval-piece-actions.service';
 import {
   agencyColumnsFor,
   buildClientBoardCard,
@@ -31,6 +40,8 @@ import {
 
 const DEFAULT_LIMIT = 30;
 const WORK_ITEMS_LIMIT = 50;
+
+export type ClientPieceAction = 'finish' | 'archive' | 'unarchive' | 'delete';
 
 export type ClientWorkItemsQuery = { taskId: string; subtaskId?: string };
 const SENT_TO_CLIENT = `EXISTS (
@@ -49,6 +60,7 @@ export type ClientBoardSource = {
   scope: CompanyAwareScope;
   /** Piece-level phase rule, over the alias `piece`. */
   visibleSql: string;
+  canManage?: boolean;
   columnsFor: (column: ClientBoardColumn) => SocialApprovalBoardColumn[];
   latestVisible: (
     steps: readonly SocialApprovalStepEntity[],
@@ -78,6 +90,8 @@ export class ClientApprovalBoardService {
     private readonly approvals: ClientApprovalsService,
     private readonly sync: SocialApprovalPieceSyncService,
     private readonly subjects: ApprovalSubjectResolver,
+    private readonly agencyBoard: SocialApprovalBoardService,
+    private readonly pieceActions: SocialApprovalPieceActionsService,
   ) {}
 
   private companySource(
@@ -87,6 +101,7 @@ export class ClientApprovalBoardService {
     return {
       scope,
       visibleSql: SENT_TO_CLIENT,
+      canManage: reader?.permissions.manage,
       columnsFor: agencyColumnsFor,
       latestVisible: (steps) => this.latestSent(scope, steps),
       detail: (approvalId) =>
@@ -127,8 +142,117 @@ export class ClientApprovalBoardService {
     return latest;
   }
 
-  board(scope: CompanyAwareScope, query: ClientApprovalBoardQueryDto) {
-    return this.boardFor(this.companySource(scope), query);
+  board(
+    scope: CompanyAwareScope,
+    query: ClientApprovalBoardQueryDto,
+    canManage = false,
+  ) {
+    return this.boardFor({ ...this.companySource(scope), canManage }, query);
+  }
+
+  managePiece(
+    scope: CompanyAwareScope,
+    pieceId: string,
+    action: ClientPieceAction,
+    reader: ClientApprovalReader,
+  ) {
+    return this.managePieceFor(
+      this.companySource(scope, reader),
+      pieceId,
+      action,
+      reader.userId,
+    );
+  }
+
+  archiveColumn(
+    scope: CompanyAwareScope,
+    column: unknown,
+    reader: ClientApprovalReader,
+  ) {
+    return this.archiveColumnFor(
+      this.companySource(scope, reader),
+      column,
+      reader.userId,
+    );
+  }
+
+  async managePieceFor(
+    source: ClientBoardSource,
+    pieceId: string,
+    action: ClientPieceAction,
+    actorUserId: string,
+  ) {
+    this.requireManage(source);
+    await this.findVisiblePiece(source, pieceId);
+    try {
+      switch (action) {
+        case 'finish':
+          return await this.pieceActions.finish(
+            source.scope,
+            pieceId,
+            actorUserId,
+            undefined,
+            () =>
+              Promise.reject(
+                new ConflictException(
+                  'A peça precisa estar aprovada para finalizar.',
+                ),
+              ),
+          );
+        case 'archive':
+        case 'unarchive':
+          return await this.pieceActions.setArchived(
+            source.scope,
+            pieceId,
+            actorUserId,
+            action === 'archive',
+          );
+        case 'delete':
+          return await this.pieceActions.remove(
+            source.scope,
+            pieceId,
+            actorUserId,
+            true,
+          );
+      }
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        throw new ConflictException({
+          code: `approval_piece_${action}_conflict`,
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  }
+
+  async archiveColumnFor(
+    source: ClientBoardSource,
+    column: unknown,
+    actorUserId: string,
+  ) {
+    this.requireManage(source);
+    const target = CLIENT_BOARD_COLUMNS.find((option) => option === column);
+    if (!target)
+      throw new BadRequestException({
+        code: 'approval_invalid_board_column',
+        message: 'Coluna de aprovações inválida.',
+      });
+    const cards = await this.visible(source)
+      .andWhere('piece.boardColumn IN (:...columns)', {
+        columns: source.columnsFor(target),
+      })
+      .andWhere('piece.archivedAt IS NULL')
+      .getMany();
+    return this.agencyBoard.archiveCards(cards, actorUserId);
+  }
+
+  private requireManage(source: ClientBoardSource) {
+    if (!source.canManage)
+      throw new BadRequestException({
+        code: 'approval_manage_requires_owner',
+        message: 'Só o Owner pode gerenciar as peças de aprovação.',
+      });
   }
 
   workItems(scope: CompanyAwareScope, query: ClientWorkItemsQuery) {
@@ -204,6 +328,7 @@ export class ClientApprovalBoardService {
               .map((step) => latest.get(step.id))
               .find((item) => item && thumbnails.has(item.id));
             return buildClientBoardCard(present(piece), pieceSteps, latest, {
+              canManage: source.canManage,
               inCampaign: Boolean(
                 piece.sourceId && inCampaign.has(piece.sourceId),
               ),
@@ -223,7 +348,7 @@ export class ClientApprovalBoardService {
         };
       }),
     );
-    return { columns: result };
+    return { columns: result, ...(source.canManage && { canArchive: true }) };
   }
 
   /**
@@ -276,14 +401,19 @@ export class ClientApprovalBoardService {
     };
   }
 
-  async pieceFor(
-    source: ClientBoardSource,
-    pieceId: string,
-  ): Promise<ClientPieceDetail> {
+  private async findVisiblePiece(source: ClientBoardSource, pieceId: string) {
     const piece = await this.visible(source)
       .andWhere('piece.id = :pieceId', { pieceId })
       .getOne();
     if (!piece) throw new NotFoundException('Aprovação não encontrada.');
+    return piece;
+  }
+
+  async pieceFor(
+    source: ClientBoardSource,
+    pieceId: string,
+  ): Promise<ClientPieceDetail> {
+    const piece = await this.findVisiblePiece(source, pieceId);
     const steps = await this.steps.find({
       where: { pieceId: piece.id },
       order: { position: 'ASC' },
@@ -291,7 +421,9 @@ export class ClientApprovalBoardService {
     const latest = await source.latestVisible(steps);
     const present = source.presentPiece ?? ((item) => item);
     return {
-      ...buildClientBoardCard(present(piece), steps, latest),
+      ...buildClientBoardCard(present(piece), steps, latest, {
+        canManage: source.canManage,
+      }),
       description: piece.description,
       post: await approvalPiecePost(this.pieces.manager, piece),
       steps: await Promise.all(
