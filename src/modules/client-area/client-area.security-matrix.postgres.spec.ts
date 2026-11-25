@@ -35,6 +35,7 @@ import { AgencyAuthModule } from '../agency/agency-auth.module';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { EmailModule } from '../email/email.module';
 import { EmailService } from '../email/email.service';
+import { FilesService } from '../../common/files/files.service';
 import {
   ClientAreaContextData,
   RequireClientAreaModule,
@@ -209,6 +210,9 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
     })
       .overrideModule(EmailModule)
       .useModule(FakeEmailModule)
+      // No object storage in this suite (logos/files are not exercised).
+      .overrideProvider(FilesService)
+      .useValue({})
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -516,6 +520,8 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
         id: U1,
         email: email('u1'),
         displayName: 'Joana Cliente',
+        // Avatar joined the session user after CA1 (none uploaded here).
+        avatarUrl: null,
       });
       const [session] = await db.query<
         Array<{ surface: string; status: string }>
@@ -548,7 +554,12 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
       // PD3 added `hasAgencySelfContext`, and `false` is the correct value —
       // U1 is an external client person, never an Agency operator.
       expect(me.body).toEqual({
-        user: { id: U1, email: email('u1'), displayName: 'Joana Cliente' },
+        user: {
+          id: U1,
+          email: email('u1'),
+          displayName: 'Joana Cliente',
+          avatarUrl: null,
+        },
         activeMembershipCount: 1,
         hasAgencySelfContext: false,
       });
@@ -652,6 +663,8 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
           companyContextId: A,
           displayName: 'Empresa A',
           role: 'client_member',
+          // Company logo joined the directory after CA1 (none uploaded here).
+          companyLogoUrl: null,
         },
       ]);
       expect(JSON.stringify(response.body)).not.toContain('Rotulo interno');
@@ -690,26 +703,47 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
       // never broken; the expectation simply did not know about the new
       // module. Kept exhaustive on purpose, because this case is also what
       // proves the projection carries nothing extra.
+      // Refreshed 2026-11-24 (F4): later stages legitimately added
+      // `edit_text` (approvals text edit), the Owner settings keys (CA14),
+      // the analytics keys and fields (CA-AN1), `costActions`, the company
+      // logo and the login image. Module states are unchanged.
       expect(bodyOf(contextA).context).toEqual({
         companyContextId: A,
         displayName: 'Empresa A',
+        companyLogoUrl: null,
         role: 'client_owner',
         accountRole: 'client_owner',
         permissions: [
           'client_area.approvals.comment',
           'client_area.approvals.decide',
+          'client_area.approvals.edit_text',
           'client_area.approvals.view',
         ],
         uiPermissions: [
           'client_area.approvals.comment',
           'client_area.approvals.decide',
+          'client_area.approvals.edit_text',
           'client_area.approvals.view',
+          'client_area.settings.audit.view',
+          'client_area.settings.business.manage',
+          'client_area.settings.consent.decide',
+          'client_area.settings.members.manage',
+          'client_area.settings.privacy.view',
+          'client_area.settings.security.manage_self',
+          'leadflow.analytics.reports.view.full',
+          'leadflow.analytics.reports.view.operational',
+          'social.analytics.dashboards.manage.admin_or_explicit',
+          'social.analytics.organic.view.operational',
+          'social.analytics.reports.view.operational',
         ],
         consent: {
           status: 'accepted',
           noticeVersion: activeNoticeVersion,
           ownerDecides: true,
         },
+        costActions: { ai: false, media: false },
+        analyticsOverviewFirst: 'leadflow',
+        analyticsProducts: ['social'],
         modules: {
           approvals: { available: true, level: 'manager' },
           overview: { available: true, level: 'manager' },
@@ -780,6 +814,7 @@ run('CA1 Client Area security matrix (PostgreSQL, real guards)', () => {
             heading: null,
             supportingText: null,
             backgroundColor: null,
+            imageUrl: null,
           },
         },
       });

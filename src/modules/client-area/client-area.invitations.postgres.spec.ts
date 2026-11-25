@@ -633,6 +633,8 @@ run(
             companyContextId: A,
             displayName: 'Empresa A <b>',
             role: 'client_owner',
+            // The directory gained the company logo after CA2 (no logo here).
+            companyLogoUrl: null,
           },
         ]);
 
@@ -1432,7 +1434,7 @@ run(
         const created = await as(ownerToken)
           .post(path, {
             email: address,
-            moduleLevels: { overview: 'viewer', conversations: 'operator' },
+            moduleLevels: { overview: 'operator', conversations: 'manager' },
           })
           .expect(201);
         expect(bodyOf(created).delivery).toBe('sent');
@@ -1454,7 +1456,7 @@ run(
         expect(row).toEqual({
           invited_by_user_id: ownerUserId,
           role: 'client_member',
-          module_levels: { overview: 'viewer', conversations: 'operator' },
+          module_levels: { overview: 'operator', conversations: 'manager' },
         });
         const listed = await as(ownerToken).get(path).expect(200);
         expect(
@@ -1483,8 +1485,8 @@ run(
           [userId],
         );
         expect(levels).toEqual([
-          { module_key: 'conversations', level: 'operator' },
-          { module_key: 'overview', level: 'viewer' },
+          { module_key: 'conversations', level: 'manager' },
+          { module_key: 'overview', level: 'operator' },
         ]);
         const trail = await events('invitation_id = $1', [invitationId]);
         expect(
