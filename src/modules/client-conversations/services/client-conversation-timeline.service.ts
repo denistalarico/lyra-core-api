@@ -78,6 +78,17 @@ export type ConversationTimelineReader = {
   userId: string | null;
   approvalsModuleEnabled: boolean;
   permissions: { comment: boolean; decide: boolean };
+  /**
+   * F9 (D-11) — the reader's surface, so authors are projected for it. Absent
+   * (the support preview) means no author decoration at all.
+   */
+  surface?: 'agency' | 'client_area';
+  /**
+   * F9 (D-08) — the reader's own "Limpar canal" mark: messages, cards and
+   * approval comments at or before it are left out. A lower bound only, so
+   * the keyset cursor stays valid.
+   */
+  clearedBeforeAt?: Date | null;
 };
 
 /**
@@ -132,8 +143,14 @@ export class ClientConversationTimelineService {
      * result is truncated to `limit` after merging, so the response never
      * returns `limit × sources` rows.
      */
+    const clearedBeforeAt = reader.clearedBeforeAt ?? null;
     const [messages, comments] = await Promise.all([
-      this.conversations.readMessageWindow(conversationId, limit, cursor),
+      this.conversations.readMessageWindow(
+        conversationId,
+        limit,
+        cursor,
+        clearedBeforeAt,
+      ),
       this.approvals
         ? this.approvals.listClientVisibleComments(scope, {
             before: cursor?.createdAt ?? null,
@@ -159,7 +176,12 @@ export class ClientConversationTimelineService {
         id: comment.id,
         comment,
       }))
-      .filter((row) => isBeforeCursor(row, cursor));
+      .filter((row) => isBeforeCursor(row, cursor))
+      .filter(
+        (row) =>
+          !clearedBeforeAt ||
+          row.createdAt.getTime() > clearedBeforeAt.getTime(),
+      );
 
     const merged = mergeTimelinePage<
       | {
@@ -197,10 +219,29 @@ export class ClientConversationTimelineService {
       reader,
     );
 
+    // F9 (D-11) — authors for this reader's surface, only for the page kept.
+    const pageMessages = merged.items.flatMap((item) =>
+      item.source === 'conversation_message' ? [item.message] : [],
+    );
+    const decorated =
+      reader.surface && reader.userId
+        ? await this.conversations.withSenders(
+            scope,
+            conversationId,
+            pageMessages,
+            { surface: reader.surface, userId: reader.userId },
+          )
+        : pageMessages;
+    const byId = new Map(decorated.map((message) => [message.id, message]));
+
     return {
       items: merged.items.map((item) =>
         item.source === 'conversation_message'
-          ? this.toMessageItem(item.message, cards, reader)
+          ? this.toMessageItem(
+              byId.get(item.message.id) ?? item.message,
+              cards,
+              reader,
+            )
           : toCommentItem(item.comment),
       ),
       nextCursor: merged.nextCursor,

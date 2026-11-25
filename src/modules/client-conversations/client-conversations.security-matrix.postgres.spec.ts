@@ -17,6 +17,7 @@ import { CreateClientAreaManagement1797150000000 } from '../../database/migratio
 import { AddCompanyBrandIdentityFoundation1797160000000 } from '../../database/migrations/1797160000000-add-company-brand-identity-foundation';
 import { CreateClientAreaCrmIdentityRelationships1797300000000 } from '../../database/migrations/1797300000000-create-client-area-crm-identity-relationships';
 import { CreateClientConversations1797500000000 } from '../../database/migrations/1797500000000-create-client-conversations';
+import { AddClientConversationClearedBefore1805900000002 } from '../../database/migrations/1805900000002-add-client-conversation-cleared-before';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyAuthModule } from '../agency/agency-auth.module';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
@@ -91,6 +92,10 @@ run(
     const VIEWER = randomUUID();
     const REVOKED = randomUUID();
     const OP = randomUUID();
+    // F9 — the current access model: one Client Owner and one Client Member
+    // (module level `operator`) of company A, both seated explicitly.
+    const OWNER_A = randomUUID();
+    const MEMBER_A = randomUUID();
 
     let conversationA = '';
     let conversationB = '';
@@ -102,6 +107,8 @@ run(
         http().get(path).set('Authorization', `Bearer ${token}`),
       post: (path: string) =>
         http().post(path).set('Authorization', `Bearer ${token}`),
+      patch: (path: string) =>
+        http().patch(path).set('Authorization', `Bearer ${token}`),
     });
 
     /**
@@ -162,6 +169,14 @@ run(
           uploadPrivateBuffer: jest.fn(({ path }: { path: string }) =>
             Promise.resolve({ path }),
           ),
+          // F9 — the seat avatar stream reads the profile file.
+          getAsset: jest.fn(() =>
+            Promise.resolve({
+              body: { pipe: (response: { end: () => void }) => response.end() },
+              contentType: 'image/webp',
+              cacheControl: 'private',
+            }),
+          ),
           getPrivateAsset: jest.fn(() =>
             Promise.resolve({
               body: { pipe: (response: { end: () => void }) => response.end() },
@@ -196,6 +211,7 @@ run(
           runner,
         );
         await new CreateClientConversations1797500000000().up(runner);
+        await new AddClientConversationClearedBefore1805900000002().up(runner);
       } finally {
         await runner.release();
       }
@@ -240,6 +256,8 @@ run(
         [VIEWER, 'viewer'],
         [REVOKED, 'revoked'],
         [OP, 'op'],
+        [OWNER_A, 'owner-a'],
+        [MEMBER_A, 'member-a'],
       ] as const) {
         await db.query(
           `INSERT INTO user_security_settings
@@ -295,6 +313,20 @@ run(
       await grant(B, U2, 'client_operator');
       await grant(A, VIEWER, 'client_viewer');
       revokedMembershipId = (await grant(A, REVOKED, 'client_operator')).id;
+
+      await crmLink(OWNER_A, email('owner-a'), orgA);
+      await crmLink(MEMBER_A, email('member-a'), orgA);
+      await grant(A, OWNER_A, 'client_owner');
+      const memberA = await grant(A, MEMBER_A, 'client_member');
+      await db.query(
+        `INSERT INTO client_area_member_module_access (membership_id,module_key,level,granted_by_user_id,granted_by_surface) VALUES ($1,'conversations','operator',$2,'agency')`,
+        [memberA.id, OP],
+      );
+      // D-11 — the operator's public identity; the e-mail must never reach a client.
+      await db.query(
+        `INSERT INTO user_profile (tenant_id,user_id,display_name,email,avatar_asset_key) VALUES ($1,$2,'Ana Operadora',$3,'agency/tenants/t/users/op/avatar.webp')`,
+        [T, OP, email('op')],
+      );
     }, 180000);
 
     afterAll(async () => {
@@ -693,6 +725,257 @@ run(
             )
             .expect(404);
         }
+      });
+    });
+
+    /**
+     * F9 (2026-11-24) — layout do canal, autor visível (D-11), Editar canal /
+     * notificações (D-09) e "Limpar canal" só para mim (D-08).
+     *
+     * Self-contained on purpose: the CCOM1 cases above predate TC-CL1 (explicit
+     * seats) and the per-module access levels, so they seed `client_operator`
+     * people who are no longer seated nor granted the module. This block uses
+     * the current model — a Client Owner and a Client Member, seated — and does
+     * not depend on any earlier case.
+     */
+    describe('F9 channel menu, author identity and clear-for-me', () => {
+      const scopeA = () => ({
+        tenantId: T,
+        workspaceId: W,
+        agencyClientId: clientX,
+        companyContextId: A,
+      });
+      const op = () => ({ surface: 'agency' as const, userId: OP });
+      let channel = '';
+      let channelB = '';
+
+      beforeAll(async () => {
+        const service = app.get(ClientConversationsService);
+        channel = (await service.ensureConversation(scopeA())).id;
+        channelB = (
+          await service.ensureConversation({
+            ...scopeA(),
+            agencyClientId: clientY,
+            companyContextId: B,
+          })
+        ).id;
+        await service.joinAsAgency(scopeA(), OP);
+        await service.addParticipants(
+          scopeA(),
+          channel,
+          [
+            { surface: 'client_area', userId: OWNER_A },
+            { surface: 'client_area', userId: MEMBER_A },
+          ],
+          OP,
+        );
+      });
+
+      const timelineBodies = async (token: string) => {
+        const response = await authed(token)
+          .get(`${conversationsPath(A)}/${channel}/timeline`)
+          .expect(200);
+        return response.body as {
+          items: Array<{
+            body?: string;
+            senderUserId?: string | null;
+            sender?: {
+              participantId: string;
+              displayName: string;
+              avatarUrl: string | null;
+            } | null;
+          }>;
+        };
+      };
+
+      it('the client sees the agency author by name and avatar, never the e-mail', async () => {
+        const service = app.get(ClientConversationsService);
+        await service.createMessage(scopeA(), op(), channel, {
+          body: 'Olá @Owner, enviamos o calendário.',
+        });
+
+        const token = await tokenFor(email('owner-a'));
+        const page = await timelineBodies(token);
+        const item = page.items.find(
+          (entry) => entry.body === 'Olá @Owner, enviamos o calendário.',
+        );
+        expect(item?.sender).toMatchObject({ displayName: 'Ana Operadora' });
+        expect(item?.sender?.avatarUrl).toMatch(
+          new RegExp(
+            `^/client-area/companies/${A}/conversations/${channel}/participants/${item?.sender?.participantId}/avatar\\?v=\\d+$`,
+          ),
+        );
+        const serialized = JSON.stringify(page);
+        expect(serialized).not.toContain(email('op'));
+        expect(serialized).not.toContain('agency/tenants/');
+
+        const members = await authed(token)
+          .get(`${conversationsPath(A)}/${channel}/members`)
+          .expect(200);
+        const memberJson = JSON.stringify(members.body);
+        expect(memberJson).not.toContain('@ccom1-spec.example.com');
+        expect(memberJson).not.toContain(OP);
+        expect(
+          (
+            members.body as { members: Array<{ displayName: string }> }
+          ).members.map((member) => member.displayName),
+        ).toContain('Ana Operadora');
+      });
+
+      it('a client user id is only ever one of a live seat', async () => {
+        const token = await tokenFor(email('owner-a'));
+        const page = await timelineBodies(token);
+        const seated = new Set<string>([OP, OWNER_A, MEMBER_A]);
+        for (const entry of page.items) {
+          if (entry.senderUserId)
+            expect(seated.has(entry.senderUserId)).toBe(true);
+        }
+      });
+
+      it('streams a seat avatar, and a seat of another company answers 404', async () => {
+        const token = await tokenFor(email('owner-a'));
+        const page = await timelineBodies(token);
+        const url = page.items.find((entry) => entry.sender?.avatarUrl)?.sender
+          ?.avatarUrl as string;
+        await authed(token).get(url).expect(200);
+        await authed(token)
+          .get(
+            `${conversationsPath(A)}/${channelB}/participants/${randomUUID()}/avatar`,
+          )
+          .expect(404);
+        await authed(token)
+          .get(
+            `${conversationsPath(A)}/${channel}/participants/${randomUUID()}/avatar`,
+          )
+          .expect(404);
+      });
+
+      it('only the Client Owner edits the channel; a Member forcing it gets 409, not 403', async () => {
+        const member = await tokenFor(email('member-a'));
+        const forced = await authed(member)
+          .patch(`${conversationsPath(A)}/${channel}`)
+          .send({ title: 'Tentativa' })
+          .expect(409);
+        expect((forced.body as { code: string }).code).toBe(
+          'client_conversation_edit_requires_owner',
+        );
+
+        const owner = await tokenFor(email('owner-a'));
+        const saved = await authed(owner)
+          .patch(`${conversationsPath(A)}/${channel}`)
+          .send({ title: 'Canal da Empresa A', description: 'Projetos 2027' })
+          .expect(200);
+        expect(saved.body).toMatchObject({
+          title: 'Canal da Empresa A',
+          description: 'Projetos 2027',
+        });
+
+        // Another company's real conversation id, through company A: 404.
+        await authed(owner)
+          .patch(`${conversationsPath(A)}/${channelB}`)
+          .send({ title: 'x' })
+          .expect(404);
+      });
+
+      it('each participant mutes the channel only for themself', async () => {
+        const member = await tokenFor(email('member-a'));
+        const until = new Date(Date.now() + 3_600_000).toISOString();
+        await authed(member)
+          .patch(`${conversationsPath(A)}/${channel}/notifications`)
+          .send({ mutedUntil: until })
+          .expect(200);
+
+        const owner = await tokenFor(email('owner-a'));
+        const ownerView = await authed(owner)
+          .get(`${conversationsPath(A)}/${channel}`)
+          .expect(200);
+        expect(
+          (ownerView.body as { conversation: { mutedUntil: string | null } })
+            .conversation.mutedUntil,
+        ).toBeNull();
+        const memberView = await authed(member)
+          .get(`${conversationsPath(A)}/${channel}`)
+          .expect(200);
+        expect(
+          (memberView.body as { conversation: { mutedUntil: string | null } })
+            .conversation.mutedUntil,
+        ).not.toBeNull();
+      });
+
+      it('"Limpar canal" hides history only for whoever cleared (2 readers), deleting nothing', async () => {
+        const service = app.get(ClientConversationsService);
+        await service.createMessage(scopeA(), op(), channel, {
+          body: 'Mensagem antes de limpar',
+        });
+        const member = await tokenFor(email('member-a'));
+        const owner = await tokenFor(email('owner-a'));
+
+        const before = await authed(member)
+          .get(conversationsPath(A))
+          .expect(200);
+        expect(
+          (before.body as { conversations: Array<{ unreadCount: number }> })
+            .conversations[0].unreadCount,
+        ).toBeGreaterThan(0);
+
+        await authed(member)
+          .post(`${conversationsPath(A)}/${channel}/clear`)
+          .expect(200);
+
+        const memberPage = await timelineBodies(member);
+        expect(memberPage.items).toHaveLength(0);
+        const memberMessages = await authed(member)
+          .get(`${conversationsPath(A)}/${channel}/messages`)
+          .expect(200);
+        expect(
+          (memberMessages.body as { messages: unknown[] }).messages,
+        ).toHaveLength(0);
+        const after = await authed(member)
+          .get(conversationsPath(A))
+          .expect(200);
+        expect(
+          (
+            after.body as {
+              conversations: Array<{
+                unreadCount: number;
+                lastMessageAt: string | null;
+              }>;
+            }
+          ).conversations[0],
+        ).toMatchObject({ unreadCount: 0, lastMessageAt: null });
+
+        // The other reader still sees everything.
+        const ownerPage = await timelineBodies(owner);
+        expect(ownerPage.items.map((entry) => entry.body)).toEqual(
+          expect.arrayContaining([
+            'Olá @Owner, enviamos o calendário.',
+            'Mensagem antes de limpar',
+          ]),
+        );
+
+        // Nothing was deleted.
+        const [{ count }] = await db.query<Array<{ count: string }>>(
+          `SELECT count(*)::text AS count FROM client_conversation_messages WHERE conversation_id = $1`,
+          [channel],
+        );
+        expect(Number(count)).toBeGreaterThanOrEqual(2);
+
+        // What arrives afterwards is visible again to whoever cleared.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await service.createMessage(scopeA(), op(), channel, {
+          body: 'Mensagem depois de limpar',
+        });
+        const later = await timelineBodies(member);
+        expect(later.items.map((entry) => entry.body)).toEqual([
+          'Mensagem depois de limpar',
+        ]);
+      });
+
+      it("clearing another company's conversation through company A answers 404", async () => {
+        const owner = await tokenFor(email('owner-a'));
+        await authed(owner)
+          .post(`${conversationsPath(A)}/${channelB}/clear`)
+          .expect(404);
       });
     });
 

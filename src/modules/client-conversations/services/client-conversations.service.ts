@@ -89,6 +89,30 @@ export type ConversationMessageView = {
    * client from the presence of other fields.
    */
   source: 'conversation_message';
+  /**
+   * F9 (D-11) — the author as the reader's surface may see them: display name
+   * and avatar of the seat, never an e-mail. Absent/null on platform lines
+   * (cards, system, Orion), which have no human author. Decorated per reader
+   * by `withSenders`; a bare `toMessageView` carries none.
+   */
+  sender?: ConversationSenderView | null;
+};
+
+/** F9 (D-11) — a message author, per reader. */
+export type ConversationSenderView = {
+  /** The opaque seat id (rows are never deleted, so it outlives a removal). */
+  participantId: string;
+  displayName: string;
+  /** Client Area: a facade URL; Agency: the profile URL. Never a storage key. */
+  avatarUrl: string | null;
+  /** True when the reader wrote it (aligns the bubble per person, not side). */
+  isReader: boolean;
+};
+
+/** F9 — who reads a projection, so identity is shaped for their surface. */
+export type ConversationReader = {
+  surface: ClientConversationSurface;
+  userId: string;
 };
 
 export type ConversationAttachmentView = {
@@ -116,6 +140,8 @@ export type ConversationView = {
   avatarUrl: string | null;
   /** The reader's own mute, or null. */
   mutedUntil: Date | null;
+  /** F9 (D-08) — the reader's own "Limpar canal" mark, or null. */
+  clearedBeforeAt: Date | null;
 };
 
 /** TC-CL1 — one live seat, as the Agency members panel shows it. */
@@ -128,6 +154,12 @@ export type ConversationParticipantView = {
   displayName: string;
   email: string | null;
   avatarUrl: string | null;
+  /**
+   * F9 — version of a stored avatar (`?v=`), or null when the profile has no
+   * stored file. Lets the Client Area build its facade URL without ever
+   * receiving the profile URL or the storage key.
+   */
+  avatarVersion: number | null;
   joinedAt: Date;
 };
 
@@ -665,6 +697,120 @@ export class ClientConversationsService {
     return { mutedUntil };
   }
 
+  /**
+   * F9 (D-08) — "Limpar canal" só para mim. Grava o marco no **próprio**
+   * assento (nunca no de outro) e move o watermark junto, então o unread zera.
+   * Nada é apagado do banco ou do storage, não há linha de sistema e ninguém é
+   * avisado: os outros participantes continuam vendo tudo.
+   */
+  async clearForMe(
+    scope: ClientConversationScope,
+    actor: ConversationActor,
+    conversationId: unknown,
+  ): Promise<{ clearedBeforeAt: Date; unreadCount: number }> {
+    const conversation = await this.findAccessible(scope, conversationId);
+    await this.assertActorEligible(scope, actor);
+    const participant = await this.requireParticipant(conversation, actor);
+    const clearedBeforeAt = new Date();
+    await this.participants.update(
+      { id: participant.id },
+      { clearedBeforeAt, lastReadAt: clearedBeforeAt },
+    );
+    return { clearedBeforeAt, unreadCount: 0 };
+  }
+
+  /**
+   * F9 — the storage key of a seat's profile avatar, for the facade stream.
+   * Any seat of *this* conversation (left seats included: they authored
+   * history), resolved inside the proven scope; anything else answers 404.
+   */
+  async seatAvatarKey(
+    scope: ClientConversationScope,
+    conversationId: unknown,
+    participantId: unknown,
+  ): Promise<string> {
+    const conversation = await this.findAccessible(scope, conversationId);
+    if (!isUuid(participantId)) throw conversationNotFound();
+    const seat = await this.participants.findOne({
+      where: { id: participantId, conversationId: conversation.id },
+    });
+    if (!seat) throw conversationNotFound();
+    const profile = await this.profiles.findOne({
+      where: { tenantId: scope.tenantId, userId: seat.userId },
+    });
+    const key = profile?.avatarAssetKey || profile?.avatarPath;
+    if (!key) throw new NotFoundException('Avatar not found.');
+    return key;
+  }
+
+  /**
+   * F9 (D-11) — decorates messages with their author for one reader.
+   *
+   * Name and avatar come from `user_profile` of the tenant (the same source
+   * the Agency shows); the e-mail never leaves. For a Client Area reader the
+   * avatar is a facade URL by seat id and `senderUserId` is kept only when it
+   * is the id of a live seat — the client never learns the id of somebody
+   * who is not in the room.
+   */
+  async withSenders(
+    scope: ClientConversationScope,
+    conversationId: string,
+    messages: ConversationMessageView[],
+    reader: ConversationReader,
+  ): Promise<ConversationMessageView[]> {
+    const authored = messages.filter((message) => message.senderUserId);
+    if (!authored.length) {
+      return messages.map((message) => ({ ...message, sender: null }));
+    }
+    const seats = await this.participants.find({ where: { conversationId } });
+    const seatBy = new Map(
+      seats.map((seat) => [`${seat.participantSurface}:${seat.userId}`, seat]),
+    );
+    const identity = await this.identities(
+      scope,
+      authored.map((message) => message.senderUserId as string),
+    );
+    const forClient = reader.surface === 'client_area';
+
+    return messages.map((message) => {
+      const seat = message.senderUserId
+        ? seatBy.get(`${message.senderSurface}:${message.senderUserId}`)
+        : undefined;
+      const liveSeat = Boolean(seat && !seat.leftAt);
+      const senderUserId = forClient && !liveSeat ? null : message.senderUserId;
+      if (!seat || !message.senderUserId) {
+        return { ...message, senderUserId, sender: null };
+      }
+      const who = identity.get(message.senderUserId);
+      const avatarUrl = forClient
+        ? who?.avatarVersion
+          ? clientSeatAvatarUrl(
+              scope,
+              conversationId,
+              seat.id,
+              who.avatarVersion,
+            )
+          : null
+        : (who?.avatarUrl ?? null);
+      return {
+        ...message,
+        senderUserId,
+        sender: {
+          participantId: seat.id,
+          displayName:
+            who?.displayName ||
+            (message.senderSurface === 'agency'
+              ? 'Equipe da agência'
+              : 'Usuário do cliente'),
+          avatarUrl,
+          isReader:
+            message.senderSurface === reader.surface &&
+            message.senderUserId === reader.userId,
+        },
+      };
+    });
+  }
+
   /** TC-CL1 — live seats with identity, for the Agency members panel. */
   async listParticipants(
     scope: ClientConversationScope,
@@ -690,6 +836,7 @@ export class ClientConversationsService {
         displayName: who?.displayName || who?.email || 'Usuário',
         email: who?.email ?? null,
         avatarUrl: who?.avatarUrl ?? null,
+        avatarVersion: who?.avatarVersion ?? null,
         joinedAt: row.joinedAt,
       };
     });
@@ -894,7 +1041,12 @@ export class ClientConversationsService {
   ): Promise<
     Map<
       string,
-      { displayName: string; email: string | null; avatarUrl: string | null }
+      {
+        displayName: string;
+        email: string | null;
+        avatarUrl: string | null;
+        avatarVersion: number | null;
+      }
     >
   > {
     const ids = [...new Set(userIds)];
@@ -909,6 +1061,10 @@ export class ClientConversationsService {
           displayName: row.displayName?.trim() ?? '',
           email: row.email?.trim() || null,
           avatarUrl: row.avatarUrl ?? null,
+          avatarVersion:
+            row.avatarAssetKey || row.avatarPath
+              ? (row.updatedAt?.getTime() ?? 1)
+              : null,
         },
       ]),
     );
@@ -920,20 +1076,33 @@ export class ClientConversationsService {
     companyDisplayName: string | null,
   ): Promise<ConversationView> {
     const participant = await this.findParticipant(conversation.id, actor);
-    const watermark = participant ? unreadWatermark(participant) : null;
+    const clearedBeforeAt = participant?.clearedBeforeAt ?? null;
+    // F9 (D-08) — nothing at or before the reader's own mark counts, even if
+    // a legacy watermark is older.
+    const watermark = latest(
+      participant ? unreadWatermark(participant) : null,
+      clearedBeforeAt,
+    );
+    const lastMessageAt =
+      clearedBeforeAt &&
+      conversation.lastMessageAt &&
+      conversation.lastMessageAt.getTime() <= clearedBeforeAt.getTime()
+        ? null
+        : conversation.lastMessageAt;
 
     return {
       id: conversation.id,
       companyContextId: conversation.companyContextId,
       companyDisplayName,
       status: conversation.status,
-      lastMessageAt: conversation.lastMessageAt,
+      lastMessageAt,
       unreadCount: await this.countUnread(conversation.id, watermark),
       lastReadAt: participant?.lastReadAt ?? null,
       title: conversation.title ?? null,
       description: conversation.description ?? null,
       avatarUrl: conversation.avatarUrl ?? null,
       mutedUntil: participant?.mutedUntil ?? null,
+      clearedBeforeAt,
     };
   }
 
@@ -975,9 +1144,20 @@ export class ClientConversationsService {
   }> {
     const conversation = await this.findAccessible(scope, conversationId);
     await this.assertActorEligible(scope, actor);
-    await this.requireParticipant(conversation, actor);
+    const participant = await this.requireParticipant(conversation, actor);
 
-    return this.pageMessages(conversation.id, query);
+    const page = await this.pageMessages(
+      conversation.id,
+      query,
+      participant.clearedBeforeAt ?? null,
+    );
+    return {
+      ...page,
+      messages: await this.withSenders(scope, conversation.id, page.messages, {
+        surface: actor.surface,
+        userId: actor.userId,
+      }),
+    };
   }
 
   /**
@@ -999,6 +1179,7 @@ export class ClientConversationsService {
     conversationId: string,
     limit: number,
     cursor: ClientConversationCursor | null,
+    after: Date | null = null,
   ): Promise<ClientConversationMessageEntity[]> {
     const builder = this.messages
       .createQueryBuilder('m')
@@ -1008,6 +1189,14 @@ export class ClientConversationsService {
       .orderBy('m.created_at', 'DESC')
       .addOrderBy('m.id', 'DESC')
       .take(limit + 1);
+
+    // F9 (D-08) — the reader's "Limpar canal" mark is only a lower bound, so
+    // the keyset cursor (an upper bound) stays valid as it is.
+    if (after) {
+      builder.andWhere('m.created_at > :clearedBeforeAt', {
+        clearedBeforeAt: after,
+      });
+    }
 
     if (cursor) {
       const rank = timelineSourceRank('conversation_message');
@@ -1038,6 +1227,7 @@ export class ClientConversationsService {
   private async pageMessages(
     conversationId: string,
     query: { limit?: unknown; before?: unknown },
+    after: Date | null = null,
   ): Promise<{
     messages: ConversationMessageView[];
     nextCursor: string | null;
@@ -1045,7 +1235,12 @@ export class ClientConversationsService {
     const limit = resolveLimit(query.limit);
     const cursor = decodeConversationCursor(query.before);
 
-    const rows = await this.pageMessageWindow(conversationId, limit, cursor);
+    const rows = await this.pageMessageWindow(
+      conversationId,
+      limit,
+      cursor,
+      after,
+    );
     const { items, nextCursor } = mergeTimelinePage(
       [
         rows.map((row) => ({
@@ -1082,8 +1277,14 @@ export class ClientConversationsService {
     conversationId: string,
     limit: number,
     cursor: ClientConversationCursor | null,
+    after: Date | null = null,
   ): Promise<ConversationMessageView[]> {
-    const rows = await this.pageMessageWindow(conversationId, limit, cursor);
+    const rows = await this.pageMessageWindow(
+      conversationId,
+      limit,
+      cursor,
+      after,
+    );
     const attachments = this.attachmentsFor
       ? await this.attachmentsFor(rows.map((row) => row.id))
       : new Map<string, ConversationAttachmentView[]>();
@@ -1505,6 +1706,7 @@ export class ClientConversationsService {
       description: conversation.description ?? null,
       avatarUrl: conversation.avatarUrl ?? null,
       mutedUntil: null,
+      clearedBeforeAt: null,
     };
   }
 
@@ -1537,6 +1739,30 @@ export class ClientConversationsService {
       where: { conversationId, leftAt: IsNull() },
     });
   }
+}
+
+function latest(left: Date | null, right: Date | null): Date | null {
+  if (!left) return right;
+  if (!right) return left;
+  return left.getTime() >= right.getTime() ? left : right;
+}
+
+/**
+ * F9 (D-11) — the Client Area URL of a seat's avatar: authenticated by the
+ * Client Area session, re-proved per request, `?v=` so a new photo busts the
+ * cache (the `CompanyLogo` pattern). Never a storage key or profile URL.
+ */
+export function clientSeatAvatarUrl(
+  scope: Pick<ClientConversationScope, 'companyContextId'>,
+  conversationId: string,
+  participantId: string,
+  version: number,
+): string {
+  return `/client-area/companies/${encodeURIComponent(
+    scope.companyContextId,
+  )}/conversations/${encodeURIComponent(
+    conversationId,
+  )}/participants/${encodeURIComponent(participantId)}/avatar?v=${version}`;
 }
 
 function resolveLimit(value: unknown): number {

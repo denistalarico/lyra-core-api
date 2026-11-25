@@ -29,6 +29,11 @@ export type ClientConversationMessageNotice = {
   createdAt: Date;
   /** CA14 requests notify workspace Owner/Admin when the conversation has no Agency seat yet. */
   agencyFallbackRecipientUserIds?: string[];
+  /**
+   * F9 (D-11) — Agency seats mentioned (`@Nome`) by an Agency author. Only
+   * live, unmuted Agency seats of this conversation are kept.
+   */
+  mentionedAgencyUserIds?: string[];
 };
 
 /**
@@ -97,8 +102,9 @@ export class ClientConversationNotificationPublisher {
         occurredAt: notice.createdAt.toISOString(),
         recipients: fromClient
           ? await this.agencyParticipants(notice)
-          : // An Agency-authored message addresses only the client surface.
-            [],
+          : // An Agency-authored message addresses the client surface, plus
+            // (F9) the Agency colleagues it mentions.
+            await this.mentionedAgencyParticipants(notice),
         clientAudience: fromClient
           ? undefined
           : {
@@ -184,6 +190,21 @@ export class ClientConversationNotificationPublisher {
     surface: 'agency' | 'client_area',
   ): Promise<string[]> {
     return (await this.liveRows(notice, surface)).map((row) => row.userId);
+  }
+
+  private async mentionedAgencyParticipants(
+    notice: ClientConversationMessageNotice,
+  ): Promise<NotificationExplicitRecipient[]> {
+    const mentioned = new Set(notice.mentionedAgencyUserIds ?? []);
+    mentioned.delete(notice.authorUserId);
+    if (!mentioned.size) return [];
+    return (await this.liveRows(notice, 'agency'))
+      .filter((row) => mentioned.has(row.userId))
+      .map((row) => ({
+        userId: row.userId,
+        interestReason: NotificationInterestReason.MENTIONED,
+        surface: NotificationRecipientSurface.AGENCY,
+      }));
   }
 
   private async agencyParticipants(

@@ -249,7 +249,7 @@ export class ClientConversationAttachmentsService {
       .catch(() => {
         throw attachmentNotFound();
       });
-    await this.conversations.detail(scope, actor, conversation.id);
+    const view = await this.conversations.detail(scope, actor, conversation.id);
 
     // A bound attachment must still belong to a message of that conversation.
     if (attachment.messageId) {
@@ -257,6 +257,14 @@ export class ClientConversationAttachmentsService {
         where: { id: attachment.messageId, conversationId: conversation.id },
       });
       if (!message) throw attachmentNotFound();
+      // F9 (D-08) — a message hidden by the reader's own "Limpar canal" hides
+      // its files too, with the same answer as a ref that does not exist.
+      if (
+        view.clearedBeforeAt &&
+        message.createdAt.getTime() <= view.clearedBeforeAt.getTime()
+      ) {
+        throw attachmentNotFound();
+      }
     }
 
     return {

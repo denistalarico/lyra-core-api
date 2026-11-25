@@ -104,6 +104,26 @@ describe('client conversation message notifications', () => {
         'A agência enviou uma nova mensagem na sua conversa.',
       );
     });
+
+    /** F9 (D-11) — an Agency colleague mentioned in the channel is notified. */
+    it('notifies mentioned live Agency seats, never the author', async () => {
+      const { publisher, events } = build([
+        { userId: 'operator-2', participantSurface: 'agency' },
+      ]);
+
+      await publisher.publishMessageCreated({
+        ...notice,
+        mentionedAgencyUserIds: ['operator-2', 'operator-1', 'stranger'],
+      });
+
+      expect(events[0].recipients).toEqual([
+        {
+          userId: 'operator-2',
+          interestReason: 'mentioned',
+          surface: NotificationRecipientSurface.AGENCY,
+        },
+      ]);
+    });
   });
 
   describe('client writes to the Agency (§40)', () => {

@@ -46,6 +46,14 @@ import {
 
 const AGENCY_CONNECTION = 'agency';
 
+/** `@Nome` as the composer inserts it, case-insensitive, at a word edge. */
+function mentionsName(body: string, displayName: string): boolean {
+  const name = displayName.trim();
+  if (!name) return false;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|\\s)@${escaped}(?=$|[\\s.,;:!?])`, 'iu').test(body);
+}
+
 export const CLIENT_CONVERSATION_VIEW_PERMISSION =
   'agency.client_conversations.view.assigned';
 export const CLIENT_CONVERSATION_SEND_PERMISSION =
@@ -342,6 +350,29 @@ export class AgencyClientConversationsController {
     );
   }
 
+  /**
+   * F9 (D-08) — "Limpar canal" só para mim, for any Agency participant. The
+   * mark lands on the operator's own seat; the client keeps seeing everything.
+   */
+  @Post('companies/:companyContextId/conversations/:conversationId/clear')
+  @RequirePermission(CLIENT_CONVERSATION_VIEW_PERMISSION)
+  @HttpCode(200)
+  async clear(
+    @AuthenticatedUser() user: AuthTokenPayload,
+    @Param('companyContextId') companyContextId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const scope = await this.access.resolveScope(
+      this.actorOf(user),
+      companyContextId,
+    );
+    return this.conversations.clearForMe(
+      scope,
+      this.participant(user),
+      conversationId,
+    );
+  }
+
   private baseScope(actor: { tenantId: string; workspaceId: string }) {
     return { tenantId: actor.tenantId, workspaceId: actor.workspaceId };
   }
@@ -485,6 +516,8 @@ export class AgencyClientConversationsController {
         // and the two action flags below keep it inert.
         approvalsModuleEnabled: true,
         permissions: { comment: false, decide: false },
+        surface: 'agency',
+        clearedBeforeAt: conversation.clearedBeforeAt,
       },
       { limit, before },
     );
@@ -513,14 +546,50 @@ export class AgencyClientConversationsController {
       },
     );
 
-    const payload = {
+    // F9 (D-11) — each room gets the author projected for its own surface.
+    const [forClient] = await this.conversations.withSenders(
+      scope,
+      message.conversationId,
+      [message],
+      { surface: 'client_area', userId: '' },
+    );
+    const [forAgency] = await this.conversations.withSenders(
+      scope,
+      message.conversationId,
+      [message],
+      { surface: 'agency', userId: '' },
+    );
+    const base = {
       tenantId: scope.tenantId,
       companyContextId: scope.companyContextId,
       conversationId: message.conversationId,
-      message,
     };
-    this.clientRealtime.broadcastMessageCreated(payload);
-    this.agencyRealtime.broadcastMessageCreated(payload);
+    this.clientRealtime.broadcastMessageCreated({
+      ...base,
+      message: forClient,
+    });
+    this.agencyRealtime.broadcastMessageCreated({
+      ...base,
+      message: forAgency,
+    });
+
+    // F9 (D-11) — a colleague mentioned as `@Nome` in the client channel is
+    // notified on the Agency (a client message already notifies every seat).
+    const mentionedAgencyUserIds = dto.body?.includes('@')
+      ? (
+          await this.conversations.listParticipants(
+            scope,
+            message.conversationId,
+          )
+        )
+          .filter(
+            (member) =>
+              member.surface === 'agency' &&
+              member.userId !== user.sub &&
+              mentionsName(dto.body ?? '', member.displayName),
+          )
+          .map((member) => member.userId)
+      : [];
 
     // OR7 — asynchronous; never delays or fails the send.
     this.assistants.schedule({
@@ -540,9 +609,17 @@ export class AgencyClientConversationsController {
       authorSurface: NotificationRecipientSurface.AGENCY,
       authorUserId: user.sub,
       createdAt: new Date(message.createdAt),
+      mentionedAgencyUserIds,
     });
 
-    return { message };
+    return {
+      message: {
+        ...forAgency,
+        sender: forAgency.sender
+          ? { ...forAgency.sender, isReader: true }
+          : null,
+      },
+    };
   }
 
   @Post('companies/:companyContextId/conversations/:conversationId/read')

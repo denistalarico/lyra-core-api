@@ -92,6 +92,14 @@ export class ClientConversationParticipantEntity {
   @Column({ name: 'muted_until', type: 'timestamptz', nullable: true })
   mutedUntil!: Date | null;
 
+  /**
+   * F9 (D-08) — "Limpar canal" só para este assento. A timeline, os anexos, o
+   * unread e a última mensagem deste leitor consideram só `created_at >` este
+   * marco. Nada é apagado e os outros participantes não são afetados.
+   */
+  @Column({ name: 'cleared_before_at', type: 'timestamptz', nullable: true })
+  clearedBeforeAt!: Date | null;
+
   @Column({ name: 'joined_at', type: 'timestamptz' })
   joinedAt!: Date;
 

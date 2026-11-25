@@ -1,8 +1,11 @@
 import {
   Body,
+  ConflictException,
   Controller,
   Get,
+  HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -26,12 +29,21 @@ import {
   ClientAreaMembershipGuard,
 } from '../../client-area/guards/client-area.guards';
 import { ClientConversationAttachmentsService } from '../services/client-conversation-attachments.service';
-import { ClientConversationsService } from '../services/client-conversations.service';
+import {
+  clientSeatAvatarUrl,
+  ClientConversationsService,
+  type ConversationMessageView,
+} from '../services/client-conversations.service';
+import { CLIENT_CONVERSATION_ERROR_CODES } from '../client-conversation.types';
 import { ClientConversationTimelineService } from '../services/client-conversation-timeline.service';
 import { toConversationScope } from '../services/client-conversation-access';
 import { ClientConversationsGateway } from '../gateways/client-conversations.gateway';
 import { AgencyClientConversationsGateway } from '../gateways/agency-client-conversations.gateway';
-import { SendClientConversationMessageDto } from '../dto/client-conversation.dto';
+import {
+  SendClientConversationMessageDto,
+  UpdateClientConversationDetailsDto,
+  UpdateClientConversationNotificationsDto,
+} from '../dto/client-conversation.dto';
 import { NotificationRecipientSurface } from '../../notifications/enums';
 import { ClientConversationNotificationPublisher } from '../services/client-conversation-notification.publisher';
 import {
@@ -122,6 +134,10 @@ export class ClientAreaConversationsController {
    * TC-CL1 — who is in the conversation, for the composer's `@` list. Display
    * names only: no e-mail, no user id of the Agency side beyond the opaque
    * seat id. Requires the reader's own live seat (via `detail`).
+   *
+   * F9 (D-11) — the same list feeds "Participantes": every live seat of both
+   * sides with its avatar (a facade URL by seat id), the reader included and
+   * marked `isReader` so the `@` list can leave them out.
    */
   @Get(':conversationId/members')
   @RequireClientAreaPermission('client_area.conversations.view')
@@ -136,10 +152,117 @@ export class ClientAreaConversationsController {
       conversationId,
     );
     return {
-      members: members
-        .filter((member) => member.userId !== context.userId)
-        .map((member) => ({ id: member.id, displayName: member.displayName })),
+      members: members.map((member) => ({
+        id: member.id,
+        displayName: member.displayName,
+        surface: member.surface,
+        avatarUrl: member.avatarVersion
+          ? clientSeatAvatarUrl(
+              scope,
+              conversationId,
+              member.id,
+              member.avatarVersion,
+            )
+          : null,
+        isReader:
+          member.surface === 'client_area' && member.userId === context.userId,
+      })),
     };
+  }
+
+  /**
+   * F9 (D-11) — a seat's avatar bytes. Any seat of this conversation, inside
+   * the company the membership proved; the reader must hold a live seat.
+   */
+  @Get(':conversationId/participants/:participantId/avatar')
+  @RequireClientAreaPermission('client_area.conversations.view')
+  async participantAvatar(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('conversationId') conversationId: string,
+    @Param('participantId') participantId: string,
+    @Res() response: Response,
+  ) {
+    const scope = this.scope(context);
+    await this.conversations.detail(scope, this.actor(context), conversationId);
+    const key = await this.conversations.seatAvatarKey(
+      scope,
+      conversationId,
+      participantId,
+    );
+    const file = await this.files.getAsset(key);
+    response.setHeader('Content-Type', file.contentType);
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader(
+      'Content-Security-Policy',
+      "default-src 'none'; sandbox",
+    );
+    file.body.pipe(response);
+  }
+
+  /**
+   * F9 (D-09) — "Editar canal": name, description and avatar, Client Owner
+   * only. Guarded by `view` (not a new key) so a Member forcing the route gets
+   * a stable 409 instead of a 403 from the façade (§0.2 invariant 2).
+   */
+  @Patch(':conversationId')
+  @RequireClientAreaPermission('client_area.conversations.view')
+  async updateDetails(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: UpdateClientConversationDetailsDto,
+  ) {
+    const scope = this.scope(context);
+    await this.conversations.detail(scope, this.actor(context), conversationId);
+    if (context.role !== 'client_owner') {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        message: 'Only the company owner can edit this conversation.',
+        code: CLIENT_CONVERSATION_ERROR_CODES.editRequiresOwner,
+      });
+    }
+    const row = await this.conversations.updateDetails(
+      scope,
+      conversationId,
+      dto,
+    );
+    return {
+      title: row.title,
+      description: row.description,
+      avatarUrl: row.avatarUrl,
+    };
+  }
+
+  /** F9 (D-09) — "Editar notificações": the reader's own mute. */
+  @Patch(':conversationId/notifications')
+  @RequireClientAreaPermission('client_area.conversations.view')
+  notifications(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: UpdateClientConversationNotificationsDto,
+  ) {
+    return this.conversations.setMuted(
+      this.scope(context),
+      this.actor(context),
+      conversationId,
+      dto.mutedUntil ? new Date(dto.mutedUntil) : null,
+    );
+  }
+
+  /** F9 (D-08) — "Limpar canal" só para mim. Deletes nothing. */
+  @Post(':conversationId/clear')
+  @HttpCode(200)
+  @RequireClientAreaPermission('client_area.conversations.view')
+  clear(
+    @ClientAreaContextData() context: ClientAreaContext,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversations.clearForMe(
+      this.scope(context),
+      this.actor(context),
+      conversationId,
+    );
   }
 
   @Get(':conversationId/messages')
@@ -211,6 +334,8 @@ export class ClientAreaConversationsController {
           comment: context.permissions.has('client_area.approvals.comment'),
           decide: context.permissions.has('client_area.approvals.decide'),
         },
+        surface: 'client_area',
+        clearedBeforeAt: conversation.clearedBeforeAt,
       },
       { limit, before },
     );
@@ -237,7 +362,12 @@ export class ClientAreaConversationsController {
 
     // Both surfaces watching this conversation learn about it; the rooms are
     // separate, so this is two explicit emits rather than one shared room.
-    this.broadcast(scope, message.conversationId, message);
+    // F9 — each room receives the author shaped for its own surface.
+    const forClient = await this.broadcast(
+      scope,
+      message.conversationId,
+      message,
+    );
 
     // OR7 — asynchronous; never delays or fails the send.
     this.assistants.schedule({
@@ -261,7 +391,14 @@ export class ClientAreaConversationsController {
       createdAt: new Date(message.createdAt),
     });
 
-    return { message };
+    return {
+      message: {
+        ...forClient,
+        sender: forClient.sender
+          ? { ...forClient.sender, isReader: true }
+          : null,
+      },
+    };
   }
 
   @Post(':conversationId/read')
@@ -344,18 +481,42 @@ export class ClientAreaConversationsController {
     file.body.pipe(response);
   }
 
-  private broadcast(
-    scope: { tenantId: string; companyContextId: string },
+  /**
+   * Emits to both rooms, each with the author projected for its surface
+   * (F9/D-11). `isReader` is false in a broadcast: the payload is shared by
+   * everyone in the room, and the author's own echo is aligned by the
+   * response. Returns the Client Area projection.
+   */
+  private async broadcast(
+    scope: ReturnType<ClientAreaConversationsController['scope']>,
     conversationId: string,
-    message: unknown,
-  ) {
-    const payload = {
+    message: ConversationMessageView,
+  ): Promise<ConversationMessageView> {
+    const [forClient] = await this.conversations.withSenders(
+      scope,
+      conversationId,
+      [message],
+      { surface: 'client_area', userId: '' },
+    );
+    const [forAgency] = await this.conversations.withSenders(
+      scope,
+      conversationId,
+      [message],
+      { surface: 'agency', userId: '' },
+    );
+    const base = {
       tenantId: scope.tenantId,
       companyContextId: scope.companyContextId,
       conversationId,
-      message,
     };
-    this.clientRealtime.broadcastMessageCreated(payload);
-    this.agencyRealtime.broadcastMessageCreated(payload);
+    this.clientRealtime.broadcastMessageCreated({
+      ...base,
+      message: forClient,
+    });
+    this.agencyRealtime.broadcastMessageCreated({
+      ...base,
+      message: forAgency,
+    });
+    return forClient;
   }
 }

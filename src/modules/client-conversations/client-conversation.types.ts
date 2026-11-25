@@ -174,6 +174,8 @@ export const CLIENT_CONVERSATION_ERROR_CODES = {
   attachmentNotFound: 'client_conversation_attachment_not_found',
   conversationArchived: 'client_conversation_archived',
   messageEmpty: 'client_conversation_message_empty',
+  /** F9 (D-09) — on the Client Area only the Client Owner edits the channel. */
+  editRequiresOwner: 'client_conversation_edit_requires_owner',
 } as const;
 
 /**
