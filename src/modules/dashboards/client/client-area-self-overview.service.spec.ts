@@ -22,8 +22,10 @@ const SELF_CONTEXT: ClientAreaSelfContext = {
   selfAccessId: 'self-access-1',
   workspaceId: 'workspace-1',
   agencyDisplayName: 'Talarico Labs',
-  role: 'client_admin',
+  // F2 (2026-11-24, D-02): the self-context is always the Owner.
+  role: 'client_owner',
   agencyRole: 'owner',
+  accountRole: 'client_owner',
   permissions: new Set(['client_area.self.overview.view']),
   modules: { approvals: false, conversations: false },
 };

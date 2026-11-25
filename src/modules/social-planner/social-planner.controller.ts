@@ -185,7 +185,11 @@ export class SocialPlannerController {
    *
    * 204 with no body, for the reason `removeContent` gives: there is no
    * post-delete state worth returning.
+   *
+   * F2 (2026-11-24): exposed to the Client Area; `@DangerousAction` keeps it
+   * for the company's Owner only (the guard refuses any other account role).
    */
+  @ClientAreaExposed('social_planner')
   @Delete('plans/:planId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
@@ -300,6 +304,7 @@ export class SocialPlannerController {
     );
   }
 
+  @ClientAreaExposed('social_planner')
   @Post('content/batch/delete')
   @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
   @DangerousAction()
@@ -439,7 +444,10 @@ export class SocialPlannerController {
    *
    * 204 with no body: there is no post-delete state worth returning, and
    * echoing the soft-deleted row would invite a caller to keep using it.
+   *
+   * F2 (2026-11-24): exposed to the Client Area, Owner only (Danger Zone).
    */
+  @ClientAreaExposed('social_planner')
   @Delete('content/:contentId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)
@@ -461,7 +469,10 @@ export class SocialPlannerController {
    * draft instead of leaving a soft-deleted row behind. This route cannot
    * remove a publication: the lifecycle service requires its guard to report
    * no publication before the hard delete is attempted.
+   *
+   * F2 (2026-11-24): exposed to the Client Area, Owner only (Danger Zone).
    */
+  @ClientAreaExposed('social_planner')
   @Delete('content/:contentId/discard')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(SOCIAL_PLANNER_DELETE_PERMISSION)

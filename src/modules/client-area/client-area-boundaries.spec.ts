@@ -11,8 +11,18 @@ const digest = (value: string) =>
 /** Exposed `@DangerousAction` routes; only the company's Owner passes the guard. */
 const OWNER_DANGEROUS_ROUTES = [
   'inbox/comments/inbox-comments.controller.ts:remove',
+  // F2 (2026-11-24): Planner deletes, Owner only.
+  'social-planner/social-planner.controller.ts:discardContent',
+  'social-planner/social-planner.controller.ts:removeContent',
+  'social-planner/social-planner.controller.ts:removeContentBatch',
+  'social-planner/social-planner.controller.ts:removePlan',
 ];
-const OWNER_DANGEROUS_KEYS = ['leadflow.inbox.comment.delete.admin'];
+/** Projected only with `accountRole === 'client_owner'` (F2, 2026-11-24, for the Social ones). */
+const OWNER_DANGEROUS_KEYS = [
+  'leadflow.inbox.comment.delete.admin',
+  'social.planner.calendar.delete.owner_or_admin_explicit',
+  'social.creative.content.delete.owner_or_admin_explicit',
+];
 
 describe('CA7 production route boundaries and Agency preservation', () => {
   it('keeps the Agency PermissionsGuard body byte-for-byte after the isolated dispatch', () => {
@@ -49,6 +59,19 @@ describe('CA7 production route boundaries and Agency preservation', () => {
     );
   });
   it('projects only real, non-dangerous keys and no workspace configuration or automations', () => {
+    // F2 (2026-11-24): the Social dangerous keys reach only the Owner.
+    for (const key of OWNER_DANGEROUS_KEYS.filter((k) =>
+      k.startsWith('social.'),
+    ))
+      for (const module of CLIENT_AREA_MODULE_KEYS)
+        for (const level of ['viewer', 'operator', 'manager'] as const)
+          expect([
+            module,
+            level,
+            projectAgencyPermissions(module, level, 'client_member').some(
+              (entry) => entry.key === key,
+            ),
+          ]).toEqual([module, level, false]);
     for (const module of CLIENT_AREA_MODULE_KEYS)
       for (const level of ['viewer', 'operator', 'manager'] as const)
         for (const entry of projectAgencyPermissions(module, level)) {
@@ -339,6 +362,7 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "social-creative-studio/creative-image-generation.controller.ts:varyOutput",
        "social-creative-studio/creative-image-generation.controller.ts:varyVersion",
        "social-creative-studio/creative-production.controller.ts:view",
+       "social-creative-studio/creative-studio.controller.ts:archive",
        "social-creative-studio/creative-studio.controller.ts:brandContextForStudio",
        "social-creative-studio/creative-studio.controller.ts:content",
        "social-creative-studio/creative-studio.controller.ts:copy",
@@ -346,6 +370,8 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "social-creative-studio/creative-studio.controller.ts:detail",
        "social-creative-studio/creative-studio.controller.ts:foldersList",
        "social-creative-studio/creative-studio.controller.ts:list",
+       "social-creative-studio/creative-studio.controller.ts:removeAsset",
+       "social-creative-studio/creative-studio.controller.ts:restore",
        "social-creative-studio/creative-studio.controller.ts:storage",
        "social-creative-studio/creative-studio.controller.ts:thumbnail",
        "social-creative-studio/creative-studio.controller.ts:update",
@@ -421,6 +447,7 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "social-planner/social-planner.controller.ts:createPillar",
        "social-planner/social-planner.controller.ts:createPlan",
        "social-planner/social-planner.controller.ts:createRevision",
+       "social-planner/social-planner.controller.ts:discardContent",
        "social-planner/social-planner.controller.ts:discardIdea",
        "social-planner/social-planner.controller.ts:duplicateContent",
        "social-planner/social-planner.controller.ts:exportPlanContent",
@@ -442,6 +469,9 @@ describe('CA7 production route boundaries and Agency preservation', () => {
        "social-planner/social-planner.controller.ts:listPlans",
        "social-planner/social-planner.controller.ts:listRevisions",
        "social-planner/social-planner.controller.ts:rejectCopyProposals",
+       "social-planner/social-planner.controller.ts:removeContent",
+       "social-planner/social-planner.controller.ts:removeContentBatch",
+       "social-planner/social-planner.controller.ts:removePlan",
        "social-planner/social-planner.controller.ts:replaceDestinations",
        "social-planner/social-planner.controller.ts:requestCopyGeneration",
        "social-planner/social-planner.controller.ts:requestCopyGenerationForPlan",

@@ -1,4 +1,7 @@
-import { clientAreaSettingsUiPermissions } from '../client-area-settings-ui-permissions';
+import {
+  clientAreaSelfSettingsUiPermissions,
+  clientAreaSettingsUiPermissions,
+} from '../client-area-settings-ui-permissions';
 import { Optional } from '@nestjs/common';
 import { CompanyLogoRegistry } from '../../../common/client-area-bridge/company-logo.registry';
 import { toCompanyAwareScope } from '../client-area-scope';
@@ -72,6 +75,8 @@ export type ClientAreaSelfContextProjection = {
   modules: ClientAreaSelfContext['modules'];
   /** CA15 — same shape the company workspace gates on (`modules` there). */
   memberAccess: NonNullable<ClientAreaSelfContext['memberAccess']> | null;
+  /** F2 (D-02) — the self-context is the agency Owner's own area. */
+  accountRole: ClientAreaSelfContext['accountRole'];
   uiPermissions: string[];
   branding: Awaited<ReturnType<ClientAreaManagementService['branding']>>;
 };
@@ -161,12 +166,20 @@ export class ClientAreaDirectoryService {
         conversations: context.modules.conversations,
       },
       memberAccess: context.memberAccess ?? null,
-      // Only personal settings: consent, access and integrations are company-bound.
+      accountRole: context.accountRole,
+      // F2 (D-02): the Owner's view of the own area, minus what invariant 7
+      // excludes (members, consent, billing). Superseded the CA15 "personal
+      // settings only" projection (2026-11-24).
       uiPermissions: context.memberAccess
         ? [
-            'client_area.settings.security.manage_self',
-            ...clientAreaUiPermissions(context.memberAccess),
-          ]
+            ...new Set([
+              ...clientAreaSelfSettingsUiPermissions(context.memberAccess),
+              ...clientAreaUiPermissions(
+                context.memberAccess,
+                context.accountRole,
+              ),
+            ]),
+          ].sort()
         : [],
       // §32 — the self Client Area wears the agency's own branding, reusing
       // the PD1-corrected resolver. No separate self branding.

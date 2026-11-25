@@ -136,10 +136,14 @@ function projectLeadFlowPermissions(
 }
 /** CA10 — §3.3 Planner (with publishing and media), Studio and Campaigns rows. Manager-only and
  * cost-bearing routes sharing a key with ordinary writes are narrowed by the Social scope adapter;
- * keys used only by media-spend routes carry `cost` here. Planner/Studio deletes stay unexposed. */
+ * keys used only by media-spend routes carry `cost` here.
+ * F2 (2026-11-24) supersedes "Planner/Studio deletes stay unexposed": both delete keys are dangerous
+ * in the catalog, so only the company's Owner gets them (CA7 boundary). Planner deletes are also
+ * `@DangerousAction`, which the guard refuses to any other account role. */
 function projectSocialPermissions(
   module: ClientAreaModuleKey,
   level: ClientAreaAccessLevel,
+  accountRole?: ClientAreaAccountRole,
 ): readonly ClientAreaAgencyGrant[] {
   const own = level === 'operator' ? 'created_by_me' : 'client';
   if (module === 'social_planner') {
@@ -167,6 +171,15 @@ function projectSocialPermissions(
         'PATCH',
       ]),
       grant('social.publishing.publication.cancel.manager', ['POST']),
+      ...(accountRole === 'client_owner'
+        ? [
+            // DELETE plan/content/discard; POST content/batch/delete.
+            grant('social.planner.calendar.delete.owner_or_admin_explicit', [
+              'DELETE',
+              'POST',
+            ]),
+          ]
+        : []),
     ];
   }
   if (module === 'social_creative_studio') {
@@ -182,6 +195,16 @@ function projectSocialPermissions(
             grant('social.brandkit.assets.manage.manager_or_admin', [
               'POST',
               'PATCH',
+            ]),
+          ]
+        : []),
+      // F2: POST archive/restore, DELETE to the trash or permanently. A
+      // dangerous key in the catalog, so the Owner only (CA7 boundary).
+      ...(level === 'manager' && accountRole === 'client_owner'
+        ? [
+            grant('social.creative.content.delete.owner_or_admin_explicit', [
+              'POST',
+              'DELETE',
             ]),
           ]
         : []),
@@ -251,7 +274,7 @@ export function projectAgencyPermissions(
   if (module.startsWith('leadflow_'))
     return projectLeadFlowPermissions(module, level, accountRole);
   if (module !== 'agency_projects')
-    return projectSocialPermissions(module, level);
+    return projectSocialPermissions(module, level, accountRole);
   const reads = [
     grant('agency.projects.project.view.assigned', read),
     grant('agency.tasks.task.update.assigned', read),

@@ -407,7 +407,10 @@ run('PD3 agency self-context security matrix (PostgreSQL, real guards)', () => {
     ).body as { context: Record<string, unknown> };
 
     expect(body.context.kind).toBe('agency_self');
-    expect(body.context.role).toBe('client_admin');
+    // Superseded by F2 (2026-11-24, D-02): Owner/Admin are the Owner of the
+    // own area, whatever role the access row stores.
+    expect(body.context.role).toBe('client_owner');
+    expect(body.context.accountRole).toBe('client_owner');
     expect(body.context.agencyDisplayName).toBe('Agência Lyra');
     // §15 — no module is available in the self-context V1.
     expect(body.context.modules).toEqual({

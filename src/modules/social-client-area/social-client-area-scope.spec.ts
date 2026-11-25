@@ -218,7 +218,9 @@ describe('CA10 Social Client Area scope adapter', () => {
         'social_planner',
         ctx,
         'k',
-        req('DELETE', '/social/planner/content/:contentId', {
+        // Superseded by F2 (2026-11-24): `DELETE content/:contentId` is now
+        // an exposed template; a still-unknown one keeps this check.
+        req('DELETE', '/social/planner/content/:contentId/archive', {
           params: { contentId: ownContent },
         }),
       ),

@@ -289,12 +289,19 @@ export class CreativeStudioController {
       file,
     );
   }
-  @Post('assets/:id/archive') @RequirePermission(DELETE) archive(
+  // F2 (2026-11-24): archive/delete/restore reach the Client Area for the
+  // company's Owner only (dangerous key, granted by the projection to
+  // `client_owner`); the Social adapter proves the asset's company.
+  @ClientAreaExposed('social_creative_studio')
+  @Post('assets/:id/archive')
+  @RequirePermission(DELETE)
+  archive(
     @RequestContextData() ctx: RequestContext,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.assets.archive(creativeStudioScope(ctx), id);
   }
+  @ClientAreaExposed('social_creative_studio')
   @Delete('assets/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequirePermission(DELETE)
@@ -309,6 +316,7 @@ export class CreativeStudioController {
       permanent === 'true',
     );
   }
+  @ClientAreaExposed('social_creative_studio')
   @Post('assets/:id/restore')
   @RequirePermission(DELETE)
   restore(

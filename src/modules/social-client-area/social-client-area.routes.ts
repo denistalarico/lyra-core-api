@@ -23,8 +23,9 @@ import type { ClientAreaModuleKey } from '../client-area/client-area.types';
  * - `operatorOwn`: an Operator may act on an existing row only if they
  *   created it, on routes whose Agency key is a create key.
  *
- * Deliberately absent (fail-closed): Planner/Studio deletes and archive of
- * assets (`@DangerousAction` / dangerous keys, D-CA10-BE-1), send-for-approval
+ * Deliberately absent (fail-closed): folder deletes/archive, emptying the
+ * Studio trash (Planner deletes and Studio asset archive/delete/restore are
+ * exposed since F2, 2026-11-24, superseding D-CA10-BE-1), send-for-approval
  * (the client reviews, it does not submit), Production mutations and costs
  * (they call Agency `can()`, RK-3), ad deletion/boost, ad action and monitor
  * policies, boost templates writes, publication external deletion and every
@@ -176,6 +177,21 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
   }),
   [`POST ${P}/content/batch/restore`]: planner({
     batch: { field: 'contentIds', ref: 'content' },
+  }),
+  // F2 (2026-11-24): deletes are `@DangerousAction`, so the guard lets them
+  // through only for the company's Owner (who is `manager` everywhere).
+  [`DELETE ${P}/plans/:planId`]: planner({ subject: plan, manager: true }),
+  [`DELETE ${P}/content/:contentId`]: planner({
+    subject: content,
+    manager: true,
+  }),
+  [`DELETE ${P}/content/:contentId/discard`]: planner({
+    subject: content,
+    manager: true,
+  }),
+  [`POST ${P}/content/batch/delete`]: planner({
+    batch: { field: 'contentIds', ref: 'content' },
+    manager: true,
   }),
   [`GET ${P}/content/:contentId/revisions`]: planner({ subject: content }),
   [`POST ${P}/content/:contentId/revisions`]: planner({
@@ -360,6 +376,12 @@ export const SOCIAL_CLIENT_AREA_ROUTES: Readonly<
   }),
   [`GET ${C}/assets/:id/versions`]: studio({ subject: asset }),
   [`POST ${C}/assets/:id/versions`]: studio({ subject: asset }),
+  // F2 (2026-11-24): archive, trash/permanent delete and restore, Owner only
+  // by the projection (the asset scope has no `deleted_at` filter, so a
+  // trashed asset still resolves).
+  [`POST ${C}/assets/:id/archive`]: studio({ subject: asset, manager: true }),
+  [`DELETE ${C}/assets/:id`]: studio({ subject: asset, manager: true }),
+  [`POST ${C}/assets/:id/restore`]: studio({ subject: asset, manager: true }),
   [`GET ${C}/folders`]: studio(),
   [`POST ${C}/folders`]: studio({ body: { parentId: 'folder' } }),
   [`PATCH ${C}/folders/:id`]: studio({

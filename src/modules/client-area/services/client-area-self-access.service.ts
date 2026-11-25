@@ -30,6 +30,7 @@ import {
   isClientAreaRole,
   isUuid,
   type ClientAreaIdentity,
+  type ClientAreaPermissionKey,
   type ClientAreaRole,
   type ClientAreaSelfAccessEventAction,
   type ClientAreaSelfContext,
@@ -66,6 +67,10 @@ export const SELF_ACCESS_ELIGIBLE_AGENCY_ROLES: readonly AgencyWorkspaceRole[] =
  * over-exposed by the more capable preset, and an Owner/Admin already sees
  * everything in the Agency surface. The caller may still override with any
  * valid Client Area role (the UI offers all three).
+ *
+ * Superseded by F2 (2026-11-24, D-02) for access decisions: the stored role
+ * is kept as history, but `resolveSelfContext` always answers with
+ * `SELF_EFFECTIVE_ROLE` for an eligible Owner/Admin.
  */
 export const SELF_ACCESS_DEFAULT_ROLE_BY_AGENCY_ROLE: Readonly<
   Partial<Record<AgencyWorkspaceRole, ClientAreaRole>>
@@ -73,6 +78,24 @@ export const SELF_ACCESS_DEFAULT_ROLE_BY_AGENCY_ROLE: Readonly<
   owner: 'client_admin',
   admin: 'client_admin',
 };
+
+/**
+ * F2 (D-02, 2026-11-24) — the effective role of every self-context: Owner and
+ * Admin of the agency are both the Owner of their own Client Area.
+ */
+export const SELF_EFFECTIVE_ROLE = 'client_owner' as const;
+
+/**
+ * The Owner preset without billing: the agency does not bill itself
+ * (invariant 7), so `agency_billing.view` never reaches the self-context.
+ */
+function selfPermissions(): ReadonlySet<ClientAreaPermissionKey> {
+  return new Set(
+    [...permissionsForClientAreaRole(SELF_EFFECTIVE_ROLE)].filter(
+      (key) => key !== 'client_area.agency_billing.view',
+    ),
+  );
+}
 
 export type SelfAccessWorkspaceScope = {
   tenantId: string;
@@ -240,9 +263,12 @@ export class ClientAreaSelfAccessService {
         access.tenantId,
         access.workspaceId,
       ),
-      role: access.role,
+      // F2 (D-02): the effective role is the Owner's, from the Agency role
+      // re-validated above; the stored `access.role` no longer decides it.
+      role: SELF_EFFECTIVE_ROLE,
       agencyRole,
-      permissions: permissionsForClientAreaRole(access.role),
+      accountRole: SELF_EFFECTIVE_ROLE,
+      permissions: selfPermissions(),
       memberAccess,
       // D-24: approvals run over the own scope. Conversations stay off until
       // they have real self semantics; there is no fake company scope (§15).

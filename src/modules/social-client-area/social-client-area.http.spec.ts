@@ -352,7 +352,8 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
   it('checks company, live session and Viewer mutation level on every Social opt-in', async () => {
     // +2 (2026-11-17): calendar/content list + create (view.client / create.manager, like plans/:id/content).
     // +1 (2026-11-20, GA-DET): Google campaign details (view.client, read-only).
-    expect(exposed).toHaveLength(131);
+    // +7 (2026-11-24, F2): Planner deletes (Owner only) and Studio archive/delete/restore.
+    expect(exposed).toHaveLength(138);
     levels('viewer');
     for (const route of exposed) {
       const at = `${route.verb} ${route.path}`;
@@ -367,6 +368,9 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
 
   it('lets a Manager with both D-13 toggles through the guards on every opt-in', async () => {
     levels('manager', { ai: true, media: true });
+    // Superseded by F2 (2026-11-24): the Planner deletes are Danger Zone
+    // routes, so the Manager here is the company's Owner (`manager` everywhere).
+    context.accountRole = 'client_owner';
     for (const route of exposed) {
       const at = `${route.verb} ${route.path}`;
       const { status } = await call(verb(route), url(route), batchBody);
@@ -374,10 +378,35 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
     }
   });
 
+  it('F2: Planner and Studio deletes refuse a non-Owner Manager (403) and let the Owner through', async () => {
+    const deletes = [
+      ['delete', `/social/planner/content/${own}`],
+      ['delete', `/social/planner/content/${own}/discard`],
+      ['delete', `/social/planner/plans/${own}`],
+      ['post', '/social/planner/content/batch/delete'],
+      ['post', `/social/creative-studio/assets/${own}/archive`],
+      ['delete', `/social/creative-studio/assets/${own}`],
+      ['post', `/social/creative-studio/assets/${own}/restore`],
+    ] as const;
+    levels('manager', { ai: true, media: true });
+    for (const [verbName, path] of deletes)
+      expect([path, (await call(verbName, path, batchBody)).status]).toEqual([
+        path,
+        403,
+      ]);
+    context.accountRole = 'client_owner';
+    for (const [verbName, path] of deletes) {
+      const { status } = await call(verbName, path, batchBody);
+      expect([path, [401, 403, 404].includes(status)]).toEqual([path, false]);
+    }
+  });
+
   it('keeps unexposed routes and a disabled bridge at 401', async () => {
     levels('manager', { ai: true, media: true });
+    // Superseded by F2 (2026-11-24): Planner content delete and Studio asset
+    // archive are exposed now; folder delete and empty trash stay out.
     expect(
-      (await call('delete', `/social/planner/content/${own}`)).status,
+      (await call('delete', `/social/creative-studio/folders/${own}`)).status,
     ).toBe(401);
     expect(
       (
@@ -392,8 +421,7 @@ describe('CA10 Social controllers through the real HTTP bridge', () => {
         .status,
     ).toBe(401);
     expect(
-      (await call('post', `/social/creative-studio/assets/${own}/archive`))
-        .status,
+      (await call('post', '/social/creative-studio/trash/empty')).status,
     ).toBe(401);
     process.env.CLIENT_AREA_BRIDGE_ENABLED = 'false';
     expect((await call('get', '/social/planner/plans')).status).toBe(401);

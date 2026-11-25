@@ -19,8 +19,10 @@ describe('R2 Client Area self unified overview', () => {
       selfAccessId: randomUUID(),
       workspaceId: randomUUID(),
       agencyDisplayName: 'Lyra',
-      role: 'client_admin',
+      // F2 (2026-11-24, D-02): the self-context is always the Owner.
+      role: 'client_owner',
       agencyRole: 'admin',
+      accountRole: 'client_owner',
       permissions: new Set(),
       modules: { approvals: false, conversations: false },
     };

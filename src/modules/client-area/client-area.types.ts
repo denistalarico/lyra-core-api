@@ -262,6 +262,14 @@ export interface ClientAreaSelfContext {
    * not reachable from this surface.
    */
   agencyRole: 'owner' | 'admin';
+  /**
+   * F2 (D-02, 2026-11-24) — Owner and Admin of the agency are the Owner of
+   * their own Client Area (in the Agency, Admin = Owner minus deleting the
+   * account, which does not exist in the self-context). Derived at runtime
+   * from `agencyRole`; the role stored on `client_area_self_access` no longer
+   * decides anything for Owner/Admin.
+   */
+  accountRole: 'client_owner';
   permissions: ReadonlySet<ClientAreaPermissionKey>;
   /**
    * CA15 — modules over the agency's own data (Agency operating mode), gated

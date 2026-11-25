@@ -336,8 +336,10 @@ describe('CA7 real HTTP bridge authentication and scopes', () => {
     selfAccessId: randomUUID(),
     workspaceId: workspace,
     agencyDisplayName: 'Agency',
-    role: 'client_admin',
+    // F2 (2026-11-24, D-02): the self-context is always the Owner.
+    role: 'client_owner',
     agencyRole: 'admin',
+    accountRole: 'client_owner',
     permissions: new Set(),
     memberAccess,
     modules: { approvals: false, conversations: false },
