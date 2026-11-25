@@ -19,9 +19,14 @@ import { CreateClientAreaCrmIdentityRelationships1797300000000 } from '../../dat
 import { assertSafePostgresTarget } from '../../testing/postgres-integration-guard';
 import { describePostgresIntegration } from '../../testing/postgres-integration';
 import { AgencyAuthModule } from '../agency/agency-auth.module';
+import {
+  AgencyWorkspaceUserEntity,
+  AgencyWorkspaceUserPermissionEntity,
+} from '../agency/entities/agency-settings.entities';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { EmailModule } from '../email/email.module';
 import { EmailService } from '../email/email.service';
+import { FilesService } from '../../common/files/files.service';
 import {
   AgencyClientAccessEntity,
   AgencyClientProductAccessEntity,
@@ -303,6 +308,9 @@ run(
               AgencyClientAccessEntity,
               AgencyClientProductAccessEntity,
               PlatformPermissionAuditEventEntity,
+              // PlatformPermissionService also reads seats and module access.
+              AgencyWorkspaceUserEntity,
+              AgencyWorkspaceUserPermissionEntity,
             ],
             'agency',
           ),
@@ -334,6 +342,9 @@ run(
       })
         .overrideModule(EmailModule)
         .useModule(FakeEmailModule)
+        // No object storage in this suite (logos/files are not exercised).
+        .overrideProvider(FilesService)
+        .useValue({})
         .compile();
 
       app = moduleRef.createNestApplication();
@@ -1373,6 +1384,242 @@ run(
           [email('smtp')],
         );
         expect(rows).toHaveLength(1);
+      });
+    });
+
+    describe('Client Owner direct invitation (F4 2026-11-24)', () => {
+      const D = randomUUID(),
+        orgD = randomUUID();
+      const path = `/client-area/companies/${D}/settings/members/invitations`;
+      const as = (token: string) => ({
+        get: (url: string) => clientGet(url, token),
+        post: (url: string, body: object = {}) =>
+          http().post(url).set('Authorization', `Bearer ${token}`).send(body),
+      });
+      let ownerToken = '';
+      let ownerUserId = '';
+      let memberToken = '';
+
+      beforeAll(async () => {
+        await db.query(
+          `INSERT INTO contacts (id,tenant_id,workspace_id,type,display_name) VALUES ($1,$2,$3,'organization','Empresa D')`,
+          [orgD, T, W],
+        );
+        await db.query(
+          `INSERT INTO agency_client_company_contexts (id,tenant_id,workspace_id,agency_client_id,company_contact_id,status,is_primary) VALUES ($1,$2,$3,$4,$5,'active',false)`,
+          [D, T, W, X, orgD],
+        );
+        await db.query(
+          `INSERT INTO client_area_company_settings (tenant_id,workspace_id,agency_client_id,company_context_id,enabled,approvals_enabled,module_settings)
+           VALUES ($1,$2,$3,$4,true,true,'{"overview":{"enabled":true,"defaultLevel":"viewer"},"conversations":{"enabled":true,"defaultLevel":"viewer"}}'::jsonb)`,
+          [T, W, X, D],
+        );
+        companyOrg[D] = {
+          organizationContactId: orgD,
+          tenantId: T,
+          workspaceId: W,
+        };
+        // The Agency's first invitation of D reserves ownership (CA7).
+        const first = await invite(email('f4-owner'), 'client_viewer', D);
+        const joined = await signup(first.token).expect(200);
+        ownerToken = bodyOf(joined).accessToken!;
+        ownerUserId = bodyOf(joined).user!.id;
+      });
+
+      it('#F4-1 the Owner invites; the guest accepts with the chosen levels; one flow, audited as client_area', async () => {
+        const address = email('f4-direct');
+        await ensureCrmPerson(address, D);
+        const created = await as(ownerToken)
+          .post(path, {
+            email: address,
+            moduleLevels: { overview: 'viewer', conversations: 'operator' },
+          })
+          .expect(201);
+        expect(bodyOf(created).delivery).toBe('sent');
+        expect(bodyOf(created).invitation).toMatchObject({
+          role: 'client_member',
+          status: 'pending',
+        });
+        const invitationId = bodyOf(created).invitation!.invitationId!;
+        const [row] = await db.query<
+          Array<{
+            invited_by_user_id: string;
+            role: string;
+            module_levels: Record<string, string>;
+          }>
+        >(
+          'SELECT invited_by_user_id, role, module_levels FROM client_area_invitations WHERE id = $1',
+          [invitationId],
+        );
+        expect(row).toEqual({
+          invited_by_user_id: ownerUserId,
+          role: 'client_member',
+          module_levels: { overview: 'viewer', conversations: 'operator' },
+        });
+        const listed = await as(ownerToken).get(path).expect(200);
+        expect(
+          bodyOf(listed).invitations!.map((entry) => entry.invitationId),
+        ).toEqual([invitationId]);
+
+        const joined = await signup(lastTokenFor(address, 'invitation')).expect(
+          200,
+        );
+        const userId = bodyOf(joined).user!.id;
+        memberToken = bodyOf(joined).accessToken!;
+        const [membership] = await db.query<
+          Array<{ role: string; granted_by_user_id: string }>
+        >(
+          'SELECT role, granted_by_user_id FROM client_area_memberships WHERE user_id = $1 AND company_context_id = $2',
+          [userId, D],
+        );
+        expect(membership).toEqual({
+          role: 'client_member',
+          granted_by_user_id: ownerUserId,
+        });
+        const levels = await db.query<
+          Array<{ module_key: string; level: string }>
+        >(
+          `SELECT a.module_key,a.level FROM client_area_member_module_access a JOIN client_area_memberships m ON m.id=a.membership_id WHERE m.user_id=$1 ORDER BY a.module_key`,
+          [userId],
+        );
+        expect(levels).toEqual([
+          { module_key: 'conversations', level: 'operator' },
+          { module_key: 'overview', level: 'viewer' },
+        ]);
+        const trail = await events('invitation_id = $1', [invitationId]);
+        expect(
+          trail.map((event) => [
+            event.action,
+            event.actor_user_id,
+            event.actor_surface,
+          ]),
+        ).toEqual([
+          ['invited', ownerUserId, 'client_area'],
+          ['invitation_accepted', userId, 'client_area'],
+        ]);
+        await as(ownerToken)
+          .get(path)
+          .expect(200)
+          .then((response) => expect(bodyOf(response).invitations).toEqual([]));
+      });
+
+      it('#F4-2 a Member forcing the routes gets 409 owner_required, never 401/403', async () => {
+        const id = randomUUID();
+        for (const response of [
+          await as(memberToken).get(path),
+          await as(memberToken).post(path, {
+            email: email('f4-forced'),
+            moduleLevels: {},
+          }),
+          await as(memberToken).post(`${path}/${id}/resend`),
+          await as(memberToken).post(`${path}/${id}/revoke`),
+        ]) {
+          expect(response.status).toBe(409);
+          expect(bodyOf(response).code).toBe('client_area_owner_required');
+        }
+      });
+
+      it('#F4-3 input errors are 400/409 with stable codes: no Owner role, no disabled or billing module, no person outside the CRM', async () => {
+        const address = email('f4-input');
+        await ensureCrmPerson(address, D);
+        await as(ownerToken)
+          .post(path, {
+            email: address,
+            accountRole: 'client_owner',
+            moduleLevels: {},
+          })
+          .expect(400);
+        for (const moduleLevels of [
+          { social_planner: 'viewer' },
+          { agency_billing: 'viewer' },
+        ]) {
+          const refused = await as(ownerToken)
+            .post(path, { email: address, moduleLevels })
+            .expect(400);
+          expect(bodyOf(refused).code).toBe('client_area_module_unavailable');
+        }
+        await as(ownerToken)
+          .post(path, { email: address, moduleLevels: { overview: 'boss' } })
+          .expect(400);
+        const outside = await as(ownerToken)
+          .post(path, {
+            email: email('f4-not-in-crm'),
+            moduleLevels: { overview: 'viewer' },
+          })
+          .expect(409);
+        expect(bodyOf(outside).code).toBe('client_area_contact_ineligible');
+        const rows = await db.query<Array<unknown>>(
+          `SELECT 1 FROM client_area_invitations WHERE company_context_id = $1 AND email_normalized = ANY($2::text[])`,
+          [D, [address, email('f4-not-in-crm')]],
+        );
+        expect(rows).toHaveLength(0);
+      });
+
+      it('#F4-4 resend and cancel; another company’s invitation is 404; another company’s path is 404', async () => {
+        const address = email('f4-resend');
+        await ensureCrmPerson(address, D);
+        const created = await as(ownerToken)
+          .post(path, { email: address, moduleLevels: { overview: 'viewer' } })
+          .expect(201);
+        const firstToken = lastTokenFor(address, 'invitation');
+        const resent = await as(ownerToken)
+          .post(`${path}/${bodyOf(created).invitation!.invitationId}/resend`)
+          .expect(200);
+        const newId = bodyOf(resent).invitation!.invitationId!;
+        const newToken = lastTokenFor(address, 'invitation');
+        expect(newToken).not.toBe(firstToken);
+        await preview(firstToken).expect(404);
+        await preview(newToken).expect(200);
+        const [resentEvent] = await events(
+          `invitation_id = $1 AND action = 'invitation_resent'`,
+          [newId],
+        );
+        expect(resentEvent).toMatchObject({
+          actor_user_id: ownerUserId,
+          actor_surface: 'client_area',
+        });
+
+        await as(ownerToken).post(`${path}/${newId}/revoke`).expect(200);
+        await preview(newToken).expect(404);
+        expect(
+          bodyOf(await as(ownerToken).get(path).expect(200)).invitations,
+        ).toEqual([]);
+
+        const foreign = await invite(email('f4-foreign'), 'client_viewer', A);
+        const notHere = await as(ownerToken)
+          .post(`${path}/${foreign.invitationId}/revoke`)
+          .expect(404);
+        expect(bodyOf(notHere).code).toBe('client_area_invitation_not_found');
+        await preview(foreign.token).expect(200);
+        await as(ownerToken)
+          .post(`/client-area/companies/${A}/settings/members/invitations`, {
+            email: email('f4-cross'),
+            moduleLevels: {},
+          })
+          .expect(404);
+      });
+
+      it('#F4-5 an Owner who loses ownership takes the pending invitation along', async () => {
+        const address = email('f4-orphan');
+        await ensureCrmPerson(address, D);
+        await as(ownerToken)
+          .post(path, { email: address, moduleLevels: { overview: 'viewer' } })
+          .expect(201);
+        const token = lastTokenFor(address, 'invitation');
+        await db.query(
+          `UPDATE client_area_memberships SET role = 'client_member' WHERE user_id = $1 AND company_context_id = $2`,
+          [ownerUserId, D],
+        );
+        try {
+          const invalid = await preview(token).expect(404);
+          expect(bodyOf(invalid).code).toBe('client_area_invitation_invalid');
+          await signup(token).expect(404);
+        } finally {
+          await db.query(
+            `UPDATE client_area_memberships SET role = 'client_owner' WHERE user_id = $1 AND company_context_id = $2`,
+            [ownerUserId, D],
+          );
+        }
       });
     });
 

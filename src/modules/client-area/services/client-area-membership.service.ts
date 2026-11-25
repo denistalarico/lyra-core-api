@@ -47,6 +47,12 @@ export type GrantClientAreaMembershipInput = {
    * the company's workspace. For an accepted invitation it is the inviter.
    */
   grantedByUserId: string | null;
+  /**
+   * F4 (2026-11-24) — surface of the grantor. `client_area` = the company's
+   * active Client Owner (direct invitation from the Client Area); default
+   * `agency` keeps the Agency operator rule.
+   */
+  grantorSurface?: 'agency' | 'client_area';
   moduleLevels?: ClientAreaModuleLevels;
 };
 
@@ -193,7 +199,15 @@ export class ClientAreaMembershipService {
       );
     }
 
-    if (input.grantedByUserId) {
+    const grantorSurface = input.grantorSurface ?? 'agency';
+    if (input.grantedByUserId && grantorSurface === 'client_area') {
+      await this.assertClientOwner(
+        manager,
+        input.tenantId,
+        company.id,
+        input.grantedByUserId,
+      );
+    } else if (input.grantedByUserId) {
       await this.assertAgencyActor(
         manager,
         input.tenantId,
@@ -233,7 +247,7 @@ export class ClientAreaMembershipService {
     if (input.moduleLevels)
       await replaceModuleLevels(manager, member, input.moduleLevels, {
         userId: input.grantedByUserId,
-        surface: 'agency',
+        surface: grantorSurface,
       });
     if (!input.moduleLevels) {
       const settings = await manager
@@ -255,7 +269,7 @@ export class ClientAreaMembershipService {
       }
       await replaceModuleLevels(manager, member, levels, {
         userId: input.grantedByUserId,
-        surface: 'agency',
+        surface: grantorSurface,
       });
     }
 
@@ -598,6 +612,40 @@ export class ClientAreaMembershipService {
         403,
         CLIENT_AREA_ERROR_CODES.grantorInvalid,
         'Only an active Agency user of this workspace can manage memberships.',
+      );
+    }
+  }
+
+  /**
+   * F4 (2026-11-24) — the user holds the active Client Owner membership of
+   * this company. 409 (never 403): the Client Area facade answers input and
+   * role errors with a stable code.
+   */
+  async assertClientOwner(
+    manager: EntityManager,
+    tenantId: string,
+    companyContextId: string,
+    userId: string,
+    membershipId?: string,
+  ) {
+    const owner = await manager
+      .getRepository(ClientAreaMembershipEntity)
+      .exists({
+        where: {
+          ...(membershipId ? { id: membershipId } : {}),
+          tenantId,
+          companyContextId,
+          userId,
+          status: 'active',
+          role: 'client_owner',
+        },
+      });
+    if (!owner) {
+      throw codedError(
+        ConflictException,
+        409,
+        CLIENT_AREA_ERROR_CODES.ownerRequired,
+        'Only the company Owner can manage invitations.',
       );
     }
   }

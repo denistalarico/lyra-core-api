@@ -6,6 +6,7 @@ import {
 import {
   CLIENT_AREA_ACCOUNT_ROLES,
   CLIENT_AREA_MODULE_KEYS,
+  type ClientAreaContext,
   type ClientAreaModuleLevels,
   type ClientAreaAccountRole,
 } from '../client-area.types';
@@ -87,6 +88,25 @@ export type ClientAreaAgencyActor = {
   userId: string;
 };
 
+/**
+ * F4 (2026-11-24) — the Client Owner inviting directly from the Client Area
+ * goes through the same flow; the verified membership context replaces the
+ * Agency JWT and the company is forced by it.
+ */
+export type ClientAreaInvitationActor =
+  | ClientAreaAgencyActor
+  | ClientAreaContext;
+
+function isClientActor(
+  actor: ClientAreaInvitationActor,
+): actor is ClientAreaContext {
+  return 'surface' in actor && actor.surface === 'client_area';
+}
+
+function surfaceOf(actor: ClientAreaInvitationActor) {
+  return isClientActor(actor) ? ('client_area' as const) : ('agency' as const);
+}
+
 export type AcceptClientAreaInvitationInput = {
   token: string;
   mode: 'signup' | 'login';
@@ -109,6 +129,10 @@ export type ClientAreaInvitationAcceptedResponse =
 type CompanyRef = {
   company: AgencyClientCompanyContext;
   displayName: string;
+};
+
+type InvitationCompanyRef = CompanyRef & {
+  inviterSurface: 'agency' | 'client_area';
 };
 
 function invitationInvalid() {
@@ -319,6 +343,39 @@ export class ClientAreaInvitationService {
     };
   }
 
+  /**
+   * F4 (2026-11-24) — pending invitations of the Client Owner's own company,
+   * whoever sent them (Agency or Owner). Owner invitations stay with the
+   * Agency and are not listed.
+   */
+  async listPendingForClient(actor: ClientAreaContext) {
+    const manager = this.dataSource.manager;
+    const { company } = await this.resolveAgencyCompany(
+      manager,
+      actor,
+      actor.agencyClientId,
+      actor.companyContextId,
+    );
+    await this.assertInviter(manager, actor, company);
+    const rows = await manager.getRepository(ClientAreaInvitationEntity).find({
+      where: {
+        tenantId: company.tenantId,
+        companyContextId: company.id,
+        status: 'pending',
+        role: 'client_member',
+      },
+      order: { createdAt: 'DESC' },
+    });
+    const now = Date.now();
+    return {
+      invitations: rows.map((invitation) => ({
+        ...this.projectInvitation(invitation),
+        moduleLevels: invitation.moduleLevels ?? {},
+        expired: invitation.expiresAt.getTime() <= now,
+      })),
+    };
+  }
+
   /** Agency-only, company-scoped projection for the person-first CA4 invite UI. */
   async listEligibleContacts(
     actor: ClientAreaAgencyActor,
@@ -384,7 +441,7 @@ export class ClientAreaInvitationService {
   }
 
   async invite(
-    actor: ClientAreaAgencyActor,
+    actor: ClientAreaInvitationActor,
     clientId: string,
     companyContextId: string,
     input: {
@@ -404,7 +461,12 @@ export class ClientAreaInvitationService {
       (input.accountRole !== undefined &&
         !(CLIENT_AREA_ACCOUNT_ROLES as readonly unknown[]).includes(
           input.accountRole,
-        ))
+        )) ||
+      // F4: the Client Owner invites Members only; ownership moves by
+      // transfer, and legacy role names are Agency compatibility input.
+      (isClientActor(actor) &&
+        (input.role !== undefined ||
+          (input.accountRole ?? 'client_member') !== 'client_member'))
     ) {
       throw clientAreaCodedError(
         BadRequestException,
@@ -429,6 +491,7 @@ export class ClientAreaInvitationService {
         companyContextId,
         { requireUsable: true },
       );
+      await this.assertInviter(manager, actor, ref.company);
       // CA7: the first invitation reserves ownership; company locking serializes invitations.
       const hasMember = await manager
         .getRepository(ClientAreaMembershipEntity)
@@ -445,7 +508,8 @@ export class ClientAreaInvitationService {
           },
         });
       const effectiveRole: ClientAreaAccountRole =
-        (!hasMember && !hasInvitation) || role === 'client_owner'
+        !isClientActor(actor) &&
+        ((!hasMember && !hasInvitation) || role === 'client_owner')
           ? 'client_owner'
           : 'client_member';
       if (
@@ -495,15 +559,12 @@ export class ClientAreaInvitationService {
           key === 'agency_billing' ||
           !settings?.moduleSettings?.[key]?.enabled
         )
-          throw new BadRequestException(
+          throw clientAreaCodedError(
+            BadRequestException,
+            400,
+            CLIENT_AREA_ERROR_CODES.moduleUnavailable,
             'Invitation cannot grant a disabled or Owner-only module.',
           );
-      await this.memberships.assertAgencyActor(
-        manager,
-        actor.tenantId,
-        ref.company.workspaceId,
-        actor.userId,
-      );
       const contact = await this.resolveInvitationContact(
         manager,
         ref.company,
@@ -547,7 +608,7 @@ export class ClientAreaInvitationService {
         await this.audit.record(manager, {
           company: tupleOf(ref.company),
           action: 'invitation_revoked',
-          actorSurface: 'agency',
+          actorSurface: surfaceOf(actor),
           actorUserId: actor.userId,
           invitationId: pending.id,
           targetEmail: pending.email,
@@ -568,7 +629,7 @@ export class ClientAreaInvitationService {
       await this.audit.record(manager, {
         company: tupleOf(ref.company),
         action: 'invited',
-        actorSurface: 'agency',
+        actorSurface: surfaceOf(actor),
         actorUserId: actor.userId,
         invitationId: invitation.id,
         targetEmail: invitation.email,
@@ -594,7 +655,7 @@ export class ClientAreaInvitationService {
    * ever sent stays traceable and no token is ever reused.
    */
   async resend(
-    actor: ClientAreaAgencyActor,
+    actor: ClientAreaInvitationActor,
     clientId: string,
     companyContextId: string,
     invitationId: string,
@@ -614,12 +675,7 @@ export class ClientAreaInvitationService {
         companyContextId,
         { requireUsable: true },
       );
-      await this.memberships.assertAgencyActor(
-        manager,
-        actor.tenantId,
-        ref.company.workspaceId,
-        actor.userId,
-      );
+      await this.assertInviter(manager, actor, ref.company);
 
       const invitations = manager.getRepository(ClientAreaInvitationEntity);
       const previous = await invitations.findOne({
@@ -633,6 +689,10 @@ export class ClientAreaInvitationService {
       });
 
       if (!previous) {
+        throw invitationNotFound();
+      }
+      // F4: an Owner invitation stays with the Agency (ownership transfer).
+      if (isClientActor(actor) && previous.role === 'client_owner') {
         throw invitationNotFound();
       }
 
@@ -671,7 +731,7 @@ export class ClientAreaInvitationService {
       await this.audit.record(manager, {
         company: tupleOf(ref.company),
         action: 'invitation_resent',
-        actorSurface: 'agency',
+        actorSurface: surfaceOf(actor),
         actorUserId: actor.userId,
         invitationId: invitation.id,
         targetEmail: invitation.email,
@@ -728,7 +788,7 @@ export class ClientAreaInvitationService {
   }
 
   async revokeInvitation(
-    actor: ClientAreaAgencyActor,
+    actor: ClientAreaInvitationActor,
     clientId: string,
     companyContextId: string,
     invitationId: string,
@@ -744,12 +804,7 @@ export class ClientAreaInvitationService {
         clientId,
         companyContextId,
       );
-      await this.memberships.assertAgencyActor(
-        manager,
-        actor.tenantId,
-        company.workspaceId,
-        actor.userId,
-      );
+      await this.assertInviter(manager, actor, company);
 
       const invitations = manager.getRepository(ClientAreaInvitationEntity);
       const invitation = await invitations.findOne({
@@ -762,7 +817,10 @@ export class ClientAreaInvitationService {
         lock: { mode: 'pessimistic_write' },
       });
 
-      if (!invitation) {
+      if (
+        !invitation ||
+        (isClientActor(actor) && invitation.role === 'client_owner')
+      ) {
         throw invitationNotFound();
       }
 
@@ -774,7 +832,7 @@ export class ClientAreaInvitationService {
       await this.audit.record(manager, {
         company: tupleOf(company),
         action: 'invitation_revoked',
-        actorSurface: 'agency',
+        actorSurface: surfaceOf(actor),
         actorUserId: actor.userId,
         invitationId: invitation.id,
         targetEmail: invitation.email,
@@ -1091,7 +1149,10 @@ export class ClientAreaInvitationService {
           `client_area_identity:${invitation.tenantId}:${invitation.emailNormalized}`,
         ]);
 
-        await this.resolveInvitationCompany(manager, invitation);
+        const { inviterSurface } = await this.resolveInvitationCompany(
+          manager,
+          invitation,
+        );
         if (!invitation.contactId) throw invitationInvalid();
         await this.eligibility.assertContactEligibleForCompany(manager, {
           tenantId: invitation.tenantId,
@@ -1154,6 +1215,7 @@ export class ClientAreaInvitationService {
             // The inviter must still be an active operator of the workspace:
             // an invitation of someone who left the agency dies with them.
             grantedByUserId: invitation.invitedByUserId,
+            grantorSurface: inviterSurface,
           });
         } catch (error) {
           if (
@@ -1521,7 +1583,7 @@ export class ClientAreaInvitationService {
   private async resolveInvitationCompany(
     manager: EntityManager,
     invitation: ClientAreaInvitationEntity,
-  ): Promise<CompanyRef> {
+  ): Promise<InvitationCompanyRef> {
     try {
       const { company, organization } =
         await this.memberships.findUsableCompany(
@@ -1537,14 +1599,37 @@ export class ClientAreaInvitationService {
         throw invitationInvalid();
       }
 
-      await this.memberships.assertAgencyActor(
+      // F4: identities are Agency operator XOR Client Area member, so the
+      // inviter is one or the other; a Client Owner who lost ownership (or
+      // left) takes the invitation along, like an operator who left.
+      const inviterSurface = (await this.memberships.isAgencyOperator(
         manager,
         invitation.tenantId,
-        invitation.workspaceId,
         invitation.invitedByUserId,
-      );
+      ))
+        ? 'agency'
+        : 'client_area';
+      if (inviterSurface === 'agency') {
+        await this.memberships.assertAgencyActor(
+          manager,
+          invitation.tenantId,
+          invitation.workspaceId,
+          invitation.invitedByUserId,
+        );
+      } else {
+        await this.memberships.assertClientOwner(
+          manager,
+          invitation.tenantId,
+          invitation.companyContextId,
+          invitation.invitedByUserId,
+        );
+      }
 
-      return { company, displayName: companyDisplayName(organization) };
+      return {
+        company,
+        displayName: companyDisplayName(organization),
+        inviterSurface,
+      };
     } catch (error) {
       if (error instanceof HttpException) throw invitationInvalid();
       throw error;
@@ -1558,7 +1643,7 @@ export class ClientAreaInvitationService {
    */
   private async resolveAgencyCompany(
     manager: EntityManager,
-    actor: ClientAreaAgencyActor,
+    actor: ClientAreaInvitationActor,
     clientId: string,
     companyContextId: string,
     options: { requireUsable?: boolean } = {},
@@ -1567,7 +1652,11 @@ export class ClientAreaInvitationService {
       !isUuid(clientId) ||
       !isUuid(companyContextId) ||
       !isUuid(actor.tenantId) ||
-      !isUuid(actor.workspaceId)
+      !isUuid(actor.workspaceId) ||
+      // F4: a Client Owner reaches only the company of its membership.
+      (isClientActor(actor) &&
+        (actor.companyContextId !== companyContextId ||
+          actor.agencyClientId !== clientId))
     ) {
       throw companyUnavailable();
     }
@@ -1612,6 +1701,33 @@ export class ClientAreaInvitationService {
       company,
       displayName: organization ? companyDisplayName(organization) : 'Empresa',
     };
+  }
+
+  /**
+   * Agency operator of the company's workspace, or (F4) the active Client
+   * Owner of this company, bound to the membership of the session.
+   */
+  private async assertInviter(
+    manager: EntityManager,
+    actor: ClientAreaInvitationActor,
+    company: AgencyClientCompanyContext,
+  ) {
+    if (isClientActor(actor)) {
+      await this.memberships.assertClientOwner(
+        manager,
+        actor.tenantId,
+        company.id,
+        actor.userId,
+        actor.membershipId,
+      );
+      return;
+    }
+    await this.memberships.assertAgencyActor(
+      manager,
+      actor.tenantId,
+      company.workspaceId,
+      actor.userId,
+    );
   }
 
   private async runInvitationTransaction<T>(

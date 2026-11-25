@@ -327,6 +327,8 @@ export const CLIENT_AREA_ERROR_CODES = {
   passwordPolicy: 'client_area_password_policy',
   invalidProfile: 'client_area_invalid_profile',
   resetTokenInvalid: 'client_area_reset_token_invalid',
+  // F4 (2026-11-24) — direct invitation by the Client Owner.
+  ownerRequired: 'client_area_owner_required',
   // PD3 — self-context. `selfContextNotFound` mirrors `companyNotFound`: one
   // generic answer for "not enabled", "no access", "revoked", "wrong tenant"
   // and "not an Agency operator", so nothing is enumerable.

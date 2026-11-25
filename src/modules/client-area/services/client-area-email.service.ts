@@ -14,6 +14,8 @@ import type { AgencyUserSecuritySettingsEntity } from '../../agency/entities/age
 import { ClientAreaManagementService } from './client-area-management.service';
 import type { ClientAreaRole } from '../client-area.types';
 
+const EMAIL_ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export const CLIENT_AREA_ROLE_LABELS: Readonly<Record<ClientAreaRole, string>> =
   Object.freeze({
     client_owner: 'Responsável',
@@ -165,10 +167,7 @@ export class ClientAreaEmailService {
     await this.emailService.sendEmail({
       to: input.to,
       ...email,
-      override: await this.credentials.getEmailTransportOverride(
-        input.tenantId,
-        input.workspaceId,
-      ),
+      override: await this.transport(input.tenantId, input.workspaceId),
     });
   }
 
@@ -196,10 +195,25 @@ export class ClientAreaEmailService {
     await this.emailService.sendEmail({
       to: input.to,
       ...email,
-      override: await this.credentials.getEmailTransportOverride(
-        input.tenantId,
-      ),
+      override: await this.transport(input.tenantId),
     });
+  }
+
+  /**
+   * F4 (2026-11-24) — agency SMTP override with the sender rule: providers
+   * refuse a From that the authenticated SMTP user does not own (553), so
+   * when the SMTP user is an address it is the From.
+   */
+  private async transport(tenantId: string, workspaceId?: string) {
+    const override = await this.credentials.getEmailTransportOverride(
+      tenantId,
+      workspaceId,
+    );
+    if (!override) return override;
+    const user = override.smtpUser.trim();
+    return EMAIL_ADDRESS.test(user)
+      ? { ...override, fromEmail: user }
+      : override;
   }
 
   private frontendUrl() {

@@ -5,7 +5,10 @@ import {
   ClientAreaSettingsRegistryModule,
 } from '../../common/client-area-bridge/client-area-settings.registry';
 import { ClientAreaSettingsRequestsRegistry } from './client-area-settings-requests.registry';
-import { ClientAreaSettingsRequestsController } from './controllers/client-area-settings-requests.controller';
+import {
+  ClientAreaSettingsInvitationsController,
+  ClientAreaSettingsRequestsController,
+} from './controllers/client-area-settings-requests.controller';
 import { ClientAreaSecurityController } from './controllers/client-area-security.controller';
 import { ClientAreaSecurityService } from './services/client-area-security.service';
 import { ClientAreaCompanyHooksRegistry } from './client-area-company-hooks.registry';
@@ -158,6 +161,7 @@ const AGENCY_CONNECTION = 'agency';
   controllers: [
     ClientAreaProductSettingsController,
     ClientAreaSettingsRequestsController,
+    ClientAreaSettingsInvitationsController,
     ClientAreaSecurityController,
     ClientAreaPublicController,
     ClientAreaPreferencesController,
