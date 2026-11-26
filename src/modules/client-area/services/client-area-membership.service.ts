@@ -22,7 +22,7 @@ import { AgencyUserSecuritySettingsEntity } from '../../agency/entities/agency-a
 import { AgencyWorkspaceUserEntity } from '../../agency/entities/agency-settings.entities';
 import { AgencyClient } from '../../clients/entities/agency-client.entity';
 import { AgencyClientCompanyContext } from '../../clients/entities/agency-client-company-context.entity';
-import { AgencyClientStatus } from '../../clients/enums';
+import { isOperableClientStatus } from '../../clients/enums';
 import { ContactEntity } from '../../contacts/entities/contact.entity';
 import { ClientAreaIdentityContactEntity } from '../entities/client-area-identity-contact.entity';
 import {
@@ -579,7 +579,7 @@ export class ClientAreaMembershipService {
       organization.type !== 'organization' ||
       organization.status === 'archived' ||
       !client ||
-      client.status !== AgencyClientStatus.Active ||
+      !isOperableClientStatus(client.status) ||
       client.archivedAt
     ) {
       throw unavailable();

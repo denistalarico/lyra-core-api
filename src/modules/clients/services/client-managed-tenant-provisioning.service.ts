@@ -1,4 +1,4 @@
-import { AgencyClientStatus } from '../enums';
+import { isOperableClientStatus } from '../enums';
 import {
   Injectable,
   NotFoundException,
@@ -59,7 +59,7 @@ export class ClientManagedTenantProvisioningService {
     });
     if (
       !client ||
-      client.status !== AgencyClientStatus.Active ||
+      !isOperableClientStatus(client.status) ||
       client.archivedAt
     )
       throw new NotFoundException('Client not found.');

@@ -971,11 +971,15 @@ export class AgencyContactsService {
       this.tagAssignmentsRepo.find({
         where: { tenantId: ctx.tenantId, workspaceId, contactId },
       }),
+      // Unlinking is a soft state change (status inactive), so the drawer must
+      // only see active links — otherwise an unlinked company keeps showing
+      // and every retry of the removal answers 404.
       this.companyLinksRepo.find({
         where: {
           tenantId: ctx.tenantId,
           workspaceId,
           companyContactId: contactId,
+          status: 'active',
         },
         order: { createdAt: 'ASC' },
       }),
@@ -984,6 +988,7 @@ export class AgencyContactsService {
           tenantId: ctx.tenantId,
           workspaceId,
           personContactId: contactId,
+          status: 'active',
         },
         order: { createdAt: 'ASC' },
       }),

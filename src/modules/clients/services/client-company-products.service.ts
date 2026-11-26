@@ -1,4 +1,4 @@
-import { AgencyClientStatus } from '../enums';
+import { isOperableClientStatus } from '../enums';
 import {
   BadRequestException,
   ConflictException,
@@ -200,7 +200,7 @@ export class ClientCompanyProductsService {
         !contact ||
         company.status !== 'active' ||
         company.archivedAt ||
-        client.status !== AgencyClientStatus.Active ||
+        !isOperableClientStatus(client.status) ||
         client.archivedAt
       )
         throw new NotFoundException('Active company not found.');
