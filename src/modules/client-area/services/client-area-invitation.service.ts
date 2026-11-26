@@ -427,15 +427,18 @@ export class ClientAreaInvitationService {
         })
       : [];
     return rows.map((contact) => {
-      const email = methods.find(
-        (method) =>
-          method.contactId === contact.id &&
-          EMAIL_PATTERN.test(method.value.trim()),
+      const own = methods.filter((method) => method.contactId === contact.id);
+      const email = own.find((method) =>
+        EMAIL_PATTERN.test(method.value.trim()),
       );
+      // Lets the UI say "e-mail inválido" (fix it in Contatos) instead of
+      // "sem e-mail" when the person has an address that can't receive mail.
+      const invalidEmail = email ? null : (own[0]?.value.trim() ?? null);
       return {
         contactId: contact.id,
         contactDisplayName: contact.displayName,
         email: email?.value.trim() ?? null,
+        invalidEmail: invalidEmail || null,
       };
     });
   }
